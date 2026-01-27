@@ -12,6 +12,7 @@ import (
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
+	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -194,14 +195,15 @@ func TestGetChangedTargets_Success(t *testing.T) {
 	storagemock := storagemock.NewMockStorage(ctrl)
 	// Prepare graph bytes to be returned for graph fetches
 	graph := pb.GetTargetGraphResponse{Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}}}
-	graphBytes, err := graph.Marshal()
+	var buf bytes.Buffer
+	err := gogio.NewDelimitedWriter(&buf).WriteMsg(&graph)
 	require.NoError(t, err)
 	// Controller.getGraph performs two storage lookups per revision:
 	// 1) treehash cache -> returns bytes (content not important)
 	// 2) graph by treehash -> returns marshaled graph
 	// We set four Get calls total; concurrency means order may vary, but returning either is acceptable.
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("th")))}, nil).Times(2)
-	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graphBytes))}, nil).Times(2)
+	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil).Times(2)
 	orchestrator := orchestratormock.NewMockOrchestrator(ctrl)
 	c := NewController(Params{
 		Logger:       zaptest.NewLogger(t),
