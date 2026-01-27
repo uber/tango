@@ -75,6 +75,28 @@ message OptimizedTargets {
     repeated OptimizedTarget targets = 1;
 }
 
+// Enum for ChangeType
+enum ChangeType {
+    CHANGE_TYPE_INVALID = 0;
+    CHANGE_TYPE_NEW = 1;
+    CHANGE_TYPE_DIRECT = 2;
+    CHANGE_TYPE_INDIRECT = 3;
+    CHANGE_TYPE_UNSPECIFIED = 4;
+}
+
+// ChangedTargets represents a set of changed targets.
+message ChangedTargets {
+    // List of changed targets
+    repeated ChangedTarget changed_targets = 1;
+}
+
+// ChangedTarget represents a changed target and its associated optimized targets.
+message ChangedTarget {
+    ChangeType change_type = 1;      // Type of the change
+    OptimizedTarget old_target = 2; // The old target before the change (first revision)
+    OptimizedTarget new_target = 3; // The new target after the change (second revision)
+}
+
 // Metadata emitted as the last stream item to provide id->name mappings, etc.
 message Metadata {
     // Map of target IDs to names
@@ -87,28 +109,6 @@ message Metadata {
     map<int32, string> attribute_name_mapping = 4;
     // Map of attribute string value IDs to names
     map<int32, string> attribute_string_value_mapping = 5;
-}
-
-// ChangeType indicates how a target changed across two revisions.
-enum ChangeType {
-    // A special defaul marker for invalid state
-    CHANGE_TYPE_INVALID = 0;
-    // A new target was added to the target graph
-    CHANGE_TYPE_NEW = 1;
-    // A target was deleted from the target graph
-    CHANGE_TYPE_DELETED = 2;
-    // A target existed before but was changed
-    CHANGE_TYPE_CHANGED = 3;
-    // A target existed before and was not changed
-    CHANGE_TYPE_UNCHANGED = 4;
-}
-
-// TargetWithChange wraps an optimized target with its change type.
-message TargetWithChange {
-    // The optimized target
-    OptimizedTarget target = 1;
-    // The change type
-    ChangeType change_type = 2;
 }
 
 // GetTargetGraphRequest is the request for the GetTargetGraph method, contaions the state of the Storage to analyze.
@@ -146,7 +146,7 @@ message GetChangedTargetsRequest {
 message GetChangedTargetsResponse {
     oneof item {
         // A packet with optimized targets representing a portion of the target graph; all such packets represent the full target graph
-        OptimizedTargets targets = 1;
+        ChangedTargets changed_targets = 1;
         // Metadata is the last item in the payload and contains id->name mappings, etc. and used to reconstruct the full target graph with literal target names
         Metadata metadata = 2;
     }
@@ -187,7 +187,7 @@ message GetChangedTargetGraphRequest {
 message GetChangedTargetGraphResponse {
     oneof item {
         // A packet with optimized targets representing a portion of the target graph; all such packets represent the full target graph
-        OptimizedTargets targets = 1;
+        ChangedTargets changed_targets = 1;
         // Metadata is the last item in the payload and contains id->name mappings, etc. and used to reconstruct the full target graph with literal target names
         Metadata metadata = 2;
     }
