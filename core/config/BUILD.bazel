@@ -5,5 +5,5 @@ go_library(
     srcs = ["config.go"],
     importpath = "github.com/uber/tango/core/config",
     visibility = ["//visibility:public"],
-    deps = ["@com_github_goccy_go_yaml//:go_default_library"],
+    deps = ["@com_github_goccy_go_yaml//:go-yaml"],
 )

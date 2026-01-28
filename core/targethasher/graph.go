@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/tangopb"
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 )
@@ -515,62 +516,24 @@ func ResultToGetTargetGraphResponse(result Result) ([]*tangopb.GetTargetGraphRes
 		targetNamesMapping[name] = int32(i)
 	}
 
-	ruleTypeMapping := make(map[string]int32)
-	var ruleTypeCurr int32
-	getRuleTypeID := func(key string) int32 {
-		if id, ok := ruleTypeMapping[key]; ok {
-			return id
-		}
-		id := ruleTypeCurr
-		ruleTypeCurr++
-		ruleTypeMapping[key] = id
-		return id
-	}
+	ruleTypeMapper := common.NewNameIDMapper()
+	getRuleTypeID := func(key string) int32 { return ruleTypeMapper.ID(key) }
 
-	tagMapping := make(map[string]int32)
-	var tagCurr int32
-	getTagID := func(key string) int32 {
-		if id, ok := tagMapping[key]; ok {
-			return id
-		}
-		id := tagCurr
-		tagCurr++
-		tagMapping[key] = id
-		return id
-	}
+	tagMapper := common.NewNameIDMapper()
+	getTagID := func(key string) int32 { return tagMapper.ID(key) }
 
-	attrNameMapping := make(map[string]int32)
-	var attrNameCurr int32
-	getAttrNameID := func(key string) int32 {
-		if id, ok := attrNameMapping[key]; ok {
-			return id
-		}
-		id := attrNameCurr
-		attrNameCurr++
-		attrNameMapping[key] = id
-		return id
-	}
+	attrNameMapper := common.NewNameIDMapper()
+	getAttrNameID := func(key string) int32 { return attrNameMapper.ID(key) }
 
-	attrStrValMapping := make(map[string]int32)
-	var attrStrValCurr int32
-	getAttrStrValID := func(key string) int32 {
-		if id, ok := attrStrValMapping[key]; ok {
-			return id
-		}
-		id := attrStrValCurr
-		attrStrValCurr++
-		attrStrValMapping[key] = id
-		return id
-	}
+	attrStrValMapper := common.NewNameIDMapper()
+	getAttrStrValID := func(key string) int32 { return attrStrValMapper.ID(key) }
 
 	// Build the optimized targets slice
 	optimizedTargets := make([]*tangopb.OptimizedTarget, 0, len(result.Targets))
 
 	for _, t := range result.Targets {
-		// Intern name
 		nameID := targetNamesMapping[t.Name]
 
-		// Intern dependencies that are also in targetNames
 		depIDs := make([]int32, 0, len(t.Deps))
 		for _, depName := range t.Deps {
 			if _, ok := targetNamesMapping[depName]; !ok {
@@ -623,25 +586,10 @@ func ResultToGetTargetGraphResponse(result Result) ([]*tangopb.GetTargetGraphRes
 		targetIDToName[id] = s
 	}
 
-	ruleTypeIDToName := make(map[int32]string, len(ruleTypeMapping))
-	for s, id := range ruleTypeMapping {
-		ruleTypeIDToName[id] = s
-	}
-
-	tagIDToName := make(map[int32]string, len(tagMapping))
-	for s, id := range tagMapping {
-		tagIDToName[id] = s
-	}
-
-	attrNameIDToName := make(map[int32]string, len(attrNameMapping))
-	for s, id := range attrNameMapping {
-		attrNameIDToName[id] = s
-	}
-
-	attrStrValIDToVal := make(map[int32]string, len(attrStrValMapping))
-	for s, id := range attrStrValMapping {
-		attrStrValIDToVal[id] = s
-	}
+	ruleTypeIDToName := ruleTypeMapper.Invert()
+	tagIDToName := tagMapper.Invert()
+	attrNameIDToName := attrNameMapper.Invert()
+	attrStrValIDToVal := attrStrValMapper.Invert()
 
 	// Assemble final OptimizedTargets
 	return []*tangopb.GetTargetGraphResponse{
