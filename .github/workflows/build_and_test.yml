@@ -1,0 +1,31 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Build all targets
+      run: make build
+
+    - name: Run all tests
+      run: make test
+
+    - name: Display test logs on failure
+      if: failure()
+      run: |
+        echo "=== Test logs ==="
+        find . -name "test.log" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No test logs found"

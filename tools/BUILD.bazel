@@ -1,0 +1,2 @@
+# Export the Bazel wrapper script
+exports_files(["bazel"])

@@ -1,0 +1,18 @@
+directories:
+  .
+
+targets:
+  //...
+
+derive_targets_from_directories: false
+
+# Use the local Bazel wrapper (relative path)
+bazel_binary: ./tools/bazel
+
+# Additional build flags (optional)
+build_flags:
+  --tool_tag=ijwb:GoLand
+
+# Import all Go packages
+additional_languages:
+  go
