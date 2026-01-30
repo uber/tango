@@ -424,25 +424,6 @@ func transposeOptimizedTarget(
 	return dst
 }
 
-// ruleTypeEqualByName compares rule type IDs by resolving to names using provided maps.
-func ruleTypeEqualByName(a int32, aMap map[int32]string, b int32, bMap map[int32]string) bool {
-	an := ""
-	if aMap != nil {
-		an = aMap[a]
-	}
-	if an == "" {
-		an = fmt.Sprintf("rule_type:%d", a)
-	}
-	bn := ""
-	if bMap != nil {
-		bn = bMap[b]
-	}
-	if bn == "" {
-		bn = fmt.Sprintf("rule_type:%d", b)
-	}
-	return an == bn
-}
-
 func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) error {
 	if request == nil {
 		return errors.New("request cannot be nil")
