@@ -12,7 +12,6 @@ import (
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
-	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/core/workspace"
 	"go.uber.org/zap"
 	"time"
@@ -136,7 +135,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 				b.logger.Error("getGraph: Error computing target graph", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 				return nil, err
 			}
-			graphs, err := targethasher.ResultToGetTargetGraphResponse(result)
+			graphs, err := common.ResultToGetTargetGraphResponse(result)
 			if err != nil {
 				b.logger.Error("getGraph: Error converting target graph to GetTargetGraphResponse", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 				return nil, err

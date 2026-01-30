@@ -16,7 +16,6 @@ go_library(
         "//core/git",
         "//core/repomanager",
         "//core/storage",
-        "//core/targethasher",
         "//core/workspace",
         "//tangopb",
         "@org_uber_go_zap//:zap",

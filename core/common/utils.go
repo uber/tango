@@ -1,10 +1,13 @@
 package common
 
 import (
-	"github.com/uber/tango/tangopb"
 	"encoding/base64"
 	"path/filepath"
 	"strings"
+
+	buildpb "github.com/bazelbuild/buildtools/build_proto"
+	"github.com/uber/tango/core/targethasher"
+	"github.com/uber/tango/tangopb"
 )
 
 // ToShortRemote returns the short remote name given a git ssh remote string.
@@ -37,7 +40,7 @@ func getReqsBase64(requestURLs []string) string {
 
 
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse
-func ResultToGetTargetGraphResponse(result Result) ([]*tangopb.GetTargetGraphResponse, error) {
+func ResultToGetTargetGraphResponse(result targethasher.Result) ([]*tangopb.GetTargetGraphResponse, error) {
 	// Map target names to ids. This list is topologically sorted, so the ids are stable.
 	targetNamesMapping := make(map[string]int32, len(result.TargetNames))
 	for i, name := range result.TargetNames {

@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/uber/tango/core/common"
-	"github.com/uber/tango/tangopb"
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 )
 
