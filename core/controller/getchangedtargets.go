@@ -221,6 +221,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 				initial = pb.CHANGE_TYPE_INDIRECT
 			}
 		}
+		// Transpose the target into ID, using the existing metadata mappings from the second revision.
 		newTarget := transposeOptimizedTarget(
 			newT,
 			secondMetadata.GetTargetIdMapping(),
@@ -230,6 +231,8 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			secondMetadata.GetAttributeStringValueMapping(),
 			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
 		)
+		// Transpose the target into ID. The target will be mapped to the IDs in the second revision,
+		//  so the resulting IDs will be consistent with the second revision.
 		oldTarget := transposeOptimizedTarget(
 			oldT,
 			firstMetadata.GetTargetIdMapping(),
@@ -257,7 +260,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			}
 			newT := secondByName[name]
 			// Ifdependency of the target is a changed source file
-			if hasDepInSetByName(newT.GetDirectDependencies(), secondMetadata, changedSourceFileTargets) {
+			if hasDepInChangedSourceFileTargets(newT.GetDirectDependencies(), secondMetadata, changedSourceFileTargets) {
 				ct.ChangeType = pb.CHANGE_TYPE_DIRECT
 			}
 		}
@@ -351,7 +354,7 @@ func canonicalTargetName(id int32, meta *pb.Metadata) (string, error) {
 }
 
 // hasDepInChangedSourceFileTargets returns true if any dependency (resolved via metadata) is a changed source file target.
-func hasDepInChangedSourceFileTargets(depIds []int32, changedSourceFileTargets map[string]struct{}) bool {
+func hasDepInChangedSourceFileTargets(depIds []int32, meta *pb.Metadata, changedSourceFileTargets map[string]struct{}) bool {
 	if meta == nil {
 		return false
 	}
