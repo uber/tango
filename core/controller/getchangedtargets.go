@@ -206,7 +206,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			// same hash -> unchanged
 			continue
 		}
-		var initial pb.ChangeType = pb.CHANGE_TYPE_UNSPECIFIED
+		initial := pb.CHANGE_TYPE_INDIRECT
 		// If we know the source file rule type, classify changes accordingly.
 		// Otherwise, leave as UNSPECIFIED.
 			// check if the target is a source file, if so, it is a direct change
@@ -216,8 +216,6 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			// Save the target name to the set of changed source file targets.
 			// This is used to check if the source file is a direct dependencies of other targets.
 			changedSourceFileTargets[name] = struct{}{}
-		} else {
-			initial = pb.CHANGE_TYPE_INDIRECT
 		}
 		// Transpose the target into ID, using the existing metadata mappings from the second revision.
 		newTarget := transposeOptimizedTarget(
