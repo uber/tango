@@ -9,7 +9,6 @@ go_library(
     importpath = "github.com/uber/tango/core/targethasher",
     visibility = ["//visibility:public"],
     deps = [
-        "//core/common",
         "//tangopb",
         "@com_github_bazelbuild_buildtools//build_proto",
         "@com_github_bazelbuild_buildtools//labels",

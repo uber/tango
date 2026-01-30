@@ -256,7 +256,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 				continue
 			}
 			newT := secondByName[name]
-			// Any dependency is a changed source file
+			// Ifdependency of the target is a changed source file
 			if hasDepInSetByName(newT.GetDirectDependencies(), secondMetadata, changedSourceFileTargets) {
 				ct.ChangeType = pb.CHANGE_TYPE_DIRECT
 			}
@@ -312,7 +312,7 @@ func getTargetsAndMetadata(graph []*pb.GetTargetGraphResponse) (map[int32]*pb.Op
 	return targets, meta
 }
 
-// buildNameIndex creates name->target maps using metadata for stable naming.
+// buildNameIndex creates name->target maps using the provided metadata information.
 func buildNameIndex(targetsByID map[int32]*pb.OptimizedTarget, meta *pb.Metadata) map[string]*pb.OptimizedTarget {
 	byName := make(map[string]*pb.OptimizedTarget, len(targetsByID))
 	for id, t := range targetsByID {
@@ -326,7 +326,7 @@ func buildNameIndex(targetsByID map[int32]*pb.OptimizedTarget, meta *pb.Metadata
 	return byName
 }
 
-// detectSourceFileID returns the literal rule type name for source files if present.
+// detectSourceFileID returns the literal rule type name for source file if present.
 func detectSourceFileID(meta *pb.Metadata) int32 {
 	if meta == nil || len(meta.GetRuleTypeMapping()) == 0 {
 		return -1
@@ -350,8 +350,8 @@ func canonicalTargetName(id int32, meta *pb.Metadata) (string, error) {
 	return "", fmt.Errorf("target id %d not found in metadata", id)
 }
 
-// hasDepInSetByName returns true if any dependency (resolved via metadata) is present in the provided name set.
-func hasDepInSetByName(depIds []int32, meta *pb.Metadata, nameSet map[string]struct{}) bool {
+// hasDepInChangedSourceFileTargets returns true if any dependency (resolved via metadata) is a changed source file target.
+func hasDepInChangedSourceFileTargets(depIds []int32, changedSourceFileTargets map[string]struct{}) bool {
 	if meta == nil {
 		return false
 	}
@@ -360,7 +360,7 @@ func hasDepInSetByName(depIds []int32, meta *pb.Metadata, nameSet map[string]str
 		if name == "" {
 			continue
 		}
-		if _, ok := nameSet[name]; ok {
+		if _, ok := changedSourceFileTargets[name]; ok {
 			return true
 		}
 	}
