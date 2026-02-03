@@ -47,11 +47,13 @@ func run() error {
 		Logger:        logger,
 		RootWorkspace: rootWS,
 	})
+	configFilePath := filepath.Join("example", "tango-config.yaml")
 	orch := orchestrator.NewNativeOrchestrator(orchestrator.Params{
 		Storage:     mem,
 		RepoManager: rm,
 		Logger:      logger,
 		GitFactory:  git.New,
+		ConfigFilePath: configFilePath,
 	})
 
 	// Controller (YARPC server implementation)

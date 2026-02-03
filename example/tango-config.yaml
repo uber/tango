@@ -1,0 +1,8 @@
+remote: "devexp/tango"
+default_branch: "main"
+full_hash_repos:
+  - ""
+exclude_external_targets: true
+bzlmod_enabled: true
+query_timeout: 300
+git_timeout: 300
