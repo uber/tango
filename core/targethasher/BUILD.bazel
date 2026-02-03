@@ -9,7 +9,7 @@ go_library(
     importpath = "github.com/uber/tango/core/targethasher",
     visibility = ["//visibility:public"],
     deps = [
-        "//tangopb",
+        "//core/common/set",
         "@com_github_bazelbuild_buildtools//build_proto",
         "@com_github_bazelbuild_buildtools//labels",
     ],
@@ -17,10 +17,16 @@ go_library(
 
 go_test(
     name = "targethasher_test",
-    srcs = ["sourcehasher_test.go"],
+    srcs = [
+        "graph_test.go",
+        "sourcehasher_test.go",
+    ],
     embed = [":targethasher"],
     deps = [
+        "//core/common/set",
         "@com_github_bazelbuild_buildtools//build_proto",
+        "@com_github_google_go_cmp//cmp",
+        "@com_github_google_go_cmp//cmp/cmpopts",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
     ],

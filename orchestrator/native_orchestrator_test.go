@@ -99,8 +99,8 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 	graphRunner := graphmock.NewMockGraphRunner(ctrl)
-	graphRunner.EXPECT().Compute(gomock.Any(), gomock.Any()).Return(targethasher.Result{Targets: map[string]targethasher.Target{
-		"//:a": {
+	graphRunner.EXPECT().Compute(gomock.Any(), gomock.Any()).Return(targethasher.Result{Targets: map[string]*targethasher.Target{
+		"//:a": &targethasher.Target{
 			Name:     "//:a",
 			RuleType: "go_library",
 		},
