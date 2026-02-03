@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/bazelbuild/buildtools/labels"
@@ -318,23 +317,18 @@ func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]*Target) []
 func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], excludedRegex set.Set[string]) (Result, error) {
 	warns := make(map[string]error)
 	// Build target graph with dependencies, but without hash and root information.
-	start := time.Now()
 	targets, err := GetInternalTargetsWithoutHashAndRootInfo(ctx, r)
 	if err != nil {
 		return EmptyResult(), err
 	}
-	fmt.Printf("GetInternalTargetsWithoutHashAndRootInfo took %s\n", time.Since(start))
-	start = time.Now()
+
 	// add external rule targets (//external:*) to the same map and hash them
 	if err := HashExternalTargets(ctx, r, targets, hasher, workspaceroot, fullHashRepos, warns); err != nil {
 		return EmptyResult(), err
 	}
-	fmt.Printf("HashExternalTargets took %s\n", time.Since(start))
-	start = time.Now()
 	// get topological roots and update buildable roots info
 	roots := GetTopologicalRootsAndIdentifyBuildableRoots(targets)
-	fmt.Printf("GetTopologicalRootsAndIdentifyBuildableRoots took %s\n", time.Since(start))
-	start = time.Now()
+
 	// Target graph is constructed with all the dependencies. Traverse it now and build Merkle DAG by hashing file
 	// contents and rule's metainfo and hashes of dependencies.
 	// This is potentially parallelizable, see https://t3.uberinternal.com/browse/GM-1523
@@ -352,8 +346,7 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 			return Result{}, err
 		}
 	}
-	fmt.Printf("HashRecursively took %s\n", time.Since(start))
-	start = time.Now()
+
 	// Build topologically sorted list of targets. This is to comply with the Result{} interface. The list is required
 	// to be topologically sorted for the diffing algorithm to work properly which compares two target graphs. It is
 	// possible in the future to change diffing algorithm to work on unsorted graphs with the same theoretical
@@ -366,8 +359,7 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 			return EmptyResult(), err
 		}
 	}
-	fmt.Printf("ToposortRecursively took %s\n", time.Since(start))
-	start = time.Now()
+
 	// This shouldn't happen on a correct build graph, but if a change introduces
 	// cycles with no roots pointing into them, they won't appear in the list of
 	// targets.
@@ -396,7 +388,6 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 		}
 	}
 
-	fmt.Printf("rest took %s\n", time.Since(start))
 	return Result{
 		TargetNames: targetNames,
 		Targets:     targets,

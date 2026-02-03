@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 	"testing"
+
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -74,7 +75,6 @@ func TestFromProtoWithCyclicDependenciesNoRoot(t *testing.T) {
 		assert.True(t, target.Root)
 	}
 }
-
 
 func TestContextCancellation(t *testing.T) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
