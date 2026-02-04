@@ -14,7 +14,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber/tango/core/common/set"
+	set "github.com/deckarep/golang-set/v2"
 )
 
 func StringPtr(s string) *string {
@@ -84,7 +84,7 @@ func TestContextCancellation(t *testing.T) {
 	qr := &buildpb.QueryResult{
 		Target: []*buildpb.Target{&buildpb.Target{}},
 	}
-	result, err := fromProto(ctx, qr, nil, "", set.New[string](), set.New[string]())
+	result, err := fromProto(ctx, qr, nil, "", set.NewSet[string](), set.NewSet[string]())
 	assert.Equal(t, EmptyResult(), result)
 	assert.ErrorIs(t, err, context.Canceled)
 

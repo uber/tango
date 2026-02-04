@@ -10,7 +10,7 @@ import (
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/bazelbuild/buildtools/labels"
-	set "github.com/uber/tango/core/common/set"
+	set "github.com/deckarep/golang-set/v2"
 )
 
 const (
@@ -104,11 +104,8 @@ func EmptyResult() Result {
 // required computations in this function, so Bazel can be executed with `--order_output=no`.
 func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string, hashConfig HashConfig) (Result, error) {
 	// always calculate hash for individual files in the main repo.
-	fullHashRepos := map[string]struct{}{"": struct{}{}}
-	for _, repo := range hashConfig.FullHashRepos {
-		fullHashRepos[repo] = struct{}{}
-	}
-	excludedRegex := set.New[string](hashConfig.ExcludedFiles...)
+	fullHashRepos := set.NewSet(append([]string{""}, hashConfig.FullHashRepos...)...)
+	excludedRegex := set.NewSet(hashConfig.ExcludedFiles...)
 
 	return fromProto(ctx, r, &diskHashHelper{
 		workspaceroot:   workspaceroot,
@@ -118,14 +115,14 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 
 // FromProtoNoHash calculates a DAG graph based on a query result. It does not calculate hashes for targets.
 func FromProtoNoHash(ctx context.Context, r *buildpb.QueryResult) (Result, error) {
-	return fromProto(ctx, r, &noOpHasher{}, "", set.New[string](), set.New[string]())
+	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string]())
 }
 
 // for external targets, url and urls attributes could cause non-deterministic hash values,
 // depending on if port number is present or not
 // as a short term solution, remove these two attributes only if attribute sha256 exists on the external target
 var (
-	urlAttrs      = set.New[string]("url", "urls")
+	urlAttrs      = set.NewSet("url", "urls")
 	sha256Attr    = "sha256"
 	integrityAttr = "integrity"
 )
@@ -267,7 +264,7 @@ func HashExternalTargets(ctx context.Context, r *buildpb.QueryResult, targets ma
 		WorkspaceRoot: workspaceroot,
 		FullHashRepos: fullHashRepos,
 		// we should not exclude anything for external repository rules
-		ExcludedRegex: set.New[string](),
+		ExcludedRegex: set.NewSet[string](),
 	}
 	for name, target := range targets {
 		if target.RuleType == ExternalRuleType {
@@ -664,7 +661,7 @@ func hasAnyPrefix(t *buildpb.Target, rootRulePrefixes []string) bool {
 }
 
 func isExcluded(targetName string, excludedRegex set.Set[string]) (bool, error) {
-	for expr := range excludedRegex {
+	for expr := range excludedRegex.Iter() {
 		match, err := regexp.MatchString(expr, targetName)
 		if err != nil {
 			return false, fmt.Errorf("failed to check if excluded: %q", targetName)
