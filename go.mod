@@ -4,6 +4,7 @@ go 1.24.5
 
 require (
 	github.com/bazelbuild/buildtools v0.0.0-20250930140053-2eb4fccefb52
+	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/goccy/go-yaml v1.19.1
 	github.com/gofrs/flock v0.12.1
 	github.com/gogo/protobuf v1.3.2

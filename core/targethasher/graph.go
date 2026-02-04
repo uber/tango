@@ -3,13 +3,21 @@ package targethasher
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
+	"github.com/bazelbuild/buildtools/labels"
+	set "github.com/deckarep/golang-set/v2"
 )
 
 const (
+	// With bazel query, repository rules defined in the WORKSPACE file
+	// are queryable with this prefix. See:
+	// https://docs.bazel.build/versions/master/query.html#external-repos
+	externalWorkspaceRulePrefix = "//external:"
 
 	// SourceFileType is a bazel query pattern for referring to source files in
 	// queries. See: https://docs.bazel.build/versions/master/query.html#kind
@@ -25,31 +33,20 @@ const (
 	// GeneratedFileType is a bazel query pattern for referring to generated files
 	// in queries. See: https://docs.bazel.build/versions/master/query.html#kind
 	GeneratedFileType = "generated file"
+
+	UnknownRuleType = "unknown rule"
 )
 
-// Result contains a graph of targethashes calculated based on a bazel query.
-type Result struct {
-
-	// TargetNames is a topoplogically ordered list of target names.
-	TargetNames []string
-
-	// Targets contains a map of target names to Target for each target
-	Targets map[string]Target
-
-	// ExternalTargets contains a map of external target names to Target
-	ExternalTargets map[string]Target
-
-	// Warnings contains lists of possible issues encountered while trying to
-	// calculate target hashes. These can happen in a few cases:
-	//
-	//  - Bazel targets specify a dependency on a directory, rather than source
-	//    files. In this case the build system can only track changes in the
-	//    directory itself, not its contents. This could impact the accuracy of
-	//    the targethash but is not considered fatal as the build system cannot
-	//    track this correctly either.
-	//
-	//		For more info see https://docs.bazel.build/versions/master/build-ref.html#label_directory.
-	Warnings map[string]error
+// HashConfig fine tunes behaviors during target hashing.
+type HashConfig struct {
+	// KnownSourceHashes can be used in-place of generating a hash from disk for a given source file. The values typically
+	// can be produced by a VCS (e.g. `git ls-tree`).
+	KnownSourceHashes map[string][]byte
+	// FullHashRepos is the list of repositories that requires hashing each individual files. By default, the hash
+	// for a repository rule is used as the hash for all files in the repository. Hashing individual files is more
+	// accurate, but slower.
+	FullHashRepos []string
+	ExcludedFiles []string // TODO: rename to ExcludedRegex
 }
 
 // Target contains information about the hash for a single target
@@ -72,47 +69,60 @@ type Target struct {
 	Attributes      []*buildpb.Attribute
 }
 
+// Result contains a graph of targethashes calculated based on a bazel query.
+type Result struct {
+
+	// TargetNames is a topoplogically ordered list of target names.
+	TargetNames []string
+
+	// Targets contains a map of target names to Target for each target.
+	// This includes both internal targets and external rule targets (//external:*).
+	Targets map[string]*Target
+
+	// Warnings contains lists of possible issues encountered while trying to
+	// calculate target hashes. These can happen in a few cases:
+	//
+	//  - Bazel targets specify a dependency on a directory, rather than source
+	//    files. In this case the build system can only track changes in the
+	//    directory itself, not its contents. This could impact the accuracy of
+	//    the targethash but is not considered fatal as the build system cannot
+	//    track this correctly either.
+	//
+	//		For more info see https://docs.bazel.build/versions/master/build-ref.html#label_directory.
+	Warnings map[string]error
+}
+
 // EmptyResult returns a result for no targets.
 func EmptyResult() Result {
 	return Result{
-		Targets: make(map[string]Target),
+		Targets: make(map[string]*Target),
 	}
 }
 
 // FromProto calculates a target hash graph based on a query result and workspace root
 // Because `bazel query --output=proto --order_output=full` is very expensive, we make all the
 // required computations in this function, so Bazel can be executed with `--order_output=no`.
-func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string, hashConfig HashConfig, bzlmodEnabled bool) (Result, error) {
+func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string, hashConfig HashConfig) (Result, error) {
 	// always calculate hash for individual files in the main repo.
-	fullHashRepos := map[string]struct{}{"": struct{}{}}
-	for _, repo := range hashConfig.FullHashRepos {
-		fullHashRepos[repo] = struct{}{}
-	}
-	excludedFiles := map[string]struct{}{}
-	for _, repo := range hashConfig.ExcludedFiles {
-		excludedFiles[repo] = struct{}{}
-	}
-	// Create a m
+	fullHashRepos := set.NewSet(append([]string{""}, hashConfig.FullHashRepos...)...)
+	excludedRegex := set.NewSet(hashConfig.ExcludedFiles...)
 
 	return fromProto(ctx, r, &diskHashHelper{
 		workspaceroot:   workspaceroot,
 		knownFileHashes: hashConfig.KnownSourceHashes,
-		fullHashRepos:   fullHashRepos,
-		excludedFiles:   excludedFiles,
-		bzlmodEnabled:   bzlmodEnabled,
-	})
+	}, workspaceroot, fullHashRepos, excludedRegex)
 }
 
 // FromProtoNoHash calculates a DAG graph based on a query result. It does not calculate hashes for targets.
 func FromProtoNoHash(ctx context.Context, r *buildpb.QueryResult) (Result, error) {
-	return fromProto(ctx, r, &noOpHasher{})
+	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string]())
 }
 
 // for external targets, url and urls attributes could cause non-deterministic hash values,
 // depending on if port number is present or not
 // as a short term solution, remove these two attributes only if attribute sha256 exists on the external target
 var (
-	urlAttrs      = map[string]struct{}{"url": struct{}{}, "urls": struct{}{}}
+	urlAttrs      = set.NewSet("url", "urls")
 	sha256Attr    = "sha256"
 	integrityAttr = "integrity"
 )
@@ -137,14 +147,14 @@ func removeURLAttrs(t *buildpb.Target) {
 
 	newAttrs := make([]*buildpb.Attribute, 0, len(oldAttrs))
 	for _, attr := range oldAttrs {
-		if _, ok := urlAttrs[attr.GetName()]; !ok {
+		if !urlAttrs.Contains(attr.GetName()) {
 			newAttrs = append(newAttrs, attr)
 		}
 	}
 	t.Rule.Attribute = newAttrs
 }
 
-func toTarget(t *buildpb.Target) (Target, bool, error) {
+func toTarget(t *buildpb.Target) (*Target, error) {
 	switch *t.Type {
 	case buildpb.Target_RULE:
 		targetName := t.Rule.GetName()
@@ -152,22 +162,25 @@ func toTarget(t *buildpb.Target) (Target, bool, error) {
 		// sorting dependencies of rules, just like we do when calculating hashes for these rules.
 		sort.Strings(deps)
 		h := newHash()
+		// TODO: remove this and handle external targets in the same way as internal targets
 		if strings.HasPrefix(targetName, externalWorkspaceRulePrefix) {
 			// if this is an external target, remove unwanted attributes from the rule, e.g. url and urls
 			removeURLAttrs(t)
 			// Workspace rule usually representing external repository or an HTTP file.
 			// It is only used to hash external source files, so store it in a separate map.
 			HashRuleCommon(t.Rule, h)
-			return Target{
-				Name:     targetName,
-				Hash:     h.Sum(nil),
-				RuleType: ExternalRuleType,
-				Deps:     deps,
-				Rule:     t.Rule,
-			}, true, nil
+
+			return &Target{
+				Name:            targetName,
+				RuleType:        ExternalRuleType,
+				Deps:            deps,
+				Rule:            t.Rule,
+				HashWithoutDeps: h.Sum(nil),
+				External:        true,
+			}, nil
 		}
 		HashRuleCommon(t.Rule, h)
-		return Target{
+		return &Target{
 			Name:            targetName,
 			HashWithoutDeps: h.Sum(nil),
 			RuleType:        t.Rule.GetRuleClass(),
@@ -176,59 +189,97 @@ func toTarget(t *buildpb.Target) (Target, bool, error) {
 			External:        isExternalTarget(targetName),
 			Rule:            t.Rule,
 			Attributes:      t.Rule.GetAttribute(),
-		}, false, nil
+		}, nil
 	case buildpb.Target_SOURCE_FILE:
 		targetName := t.SourceFile.GetName()
-		return Target{
+		return &Target{
 			Name:       targetName,
 			RuleType:   SourceFileType,
 			External:   isExternalTarget(targetName),
 			SourceFile: t.GetSourceFile(),
-		}, false, nil
+		}, nil
 	case buildpb.Target_GENERATED_FILE:
 		targetName := t.GeneratedFile.GetName()
-		return Target{
+		return &Target{
 			Name:     targetName,
 			RuleType: GeneratedFileType,
 			Deps:     []string{t.GeneratedFile.GetGeneratingRule()},
 			External: isExternalTarget(targetName),
-		}, false, nil
+		}, nil
 	case buildpb.Target_PACKAGE_GROUP:
 		targetName := t.PackageGroup.GetName()
-		return Target{
+		return &Target{
 			Name:     targetName,
 			RuleType: PackageGroup,
 			External: isExternalTarget(targetName),
-		}, false, nil
+		}, nil
 	default:
-		return Target{}, false, fmt.Errorf("cannot handle target type %q", buildpb.Target_Discriminator_name[int32(*t.Type)])
+		return nil, fmt.Errorf("cannot handle target type %q", buildpb.Target_Discriminator_name[int32(*t.Type)])
 	}
 }
 
-// GetTargetsWithoutHashAndRootInfo translate raw query result to a map of targets and a map of external targets without hash and root information
-func GetTargetsWithoutHashAndRootInfo(ctx context.Context, r *buildpb.QueryResult) (targets map[string]Target, externalTargets map[string]Target, err error) {
-	targets = make(map[string]Target)
-	externalTargets = make(map[string]Target)
+// GetInternalTargetsWithoutHashAndRootInfo this goes through *buildpb.QueryResult and return a list of internal targets without hash and root info. Repository rule targets (//external:*) are ignored in this function
+func GetInternalTargetsWithoutHashAndRootInfo(ctx context.Context, r *buildpb.QueryResult) (map[string]*Target, error) {
+	targets := make(map[string]*Target)
 	for _, t := range r.Target {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
-		target, isExternalWorkspace, err := toTarget(t)
-		if err != nil {
-			return nil, nil, err
+		if t.GetRule() != nil && strings.HasPrefix(t.GetRule().GetName(), externalWorkspaceRulePrefix) {
+			continue
 		}
-		if isExternalWorkspace {
-			externalTargets[target.Name] = target
-		} else {
+
+		target, err := toTarget(t)
+		if err != nil {
+			return nil, err
+		}
+		targets[target.Name] = target
+	}
+
+	return targets, nil
+}
+
+// HashExternalTargets this goes through *buildpb.QueryResult again and hash repository rules recursively.
+// It adds external rule targets (//external:*) directly into the provided targets map and hashes them.
+func HashExternalTargets(ctx context.Context, r *buildpb.QueryResult, targets map[string]*Target, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], warns map[string]error) error {
+	for _, t := range r.Target {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		if t.GetRule() != nil && strings.HasPrefix(t.GetRule().GetName(), externalWorkspaceRulePrefix) {
+			target, err := toTarget(t)
+			if err != nil {
+				return err
+			}
 			targets[target.Name] = target
 		}
 	}
-	return targets, externalTargets, nil
+
+	hashParam := HashParam{
+		Targets:       targets,
+		Hasher:        hasher,
+		Warns:         warns,
+		WorkspaceRoot: workspaceroot,
+		FullHashRepos: fullHashRepos,
+		// we should not exclude anything for external repository rules
+		ExcludedRegex: set.NewSet[string](),
+	}
+	for name, target := range targets {
+		if target.RuleType == ExternalRuleType {
+			hashParam.TargetName = name
+			if _, err := HashRecursively(ctx, hashParam); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // GetTopologicalRootsAndIdentifyBuildableRoots returns a list of topological roots and marks buildable roots in the target graph
-func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]Target) []string {
+func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]*Target) []string {
 	// get targets that cannot be root, i.e. dependencies of some other targets
 	notRoots := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
@@ -249,7 +300,6 @@ func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]Target) []s
 				// a separate `roots` variable for the purpose of this algorithm which will have all nodes not
 				// referenced by other nodes.
 				target.Root = true
-				targets[name] = target
 			}
 		}
 	}
@@ -261,10 +311,16 @@ func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]Target) []s
 	return roots
 }
 
-func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher) (Result, error) {
+func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], excludedRegex set.Set[string]) (Result, error) {
+	warns := make(map[string]error)
 	// Build target graph with dependencies, but without hash and root information.
-	targets, externalTargets, err := GetTargetsWithoutHashAndRootInfo(ctx, r)
+	targets, err := GetInternalTargetsWithoutHashAndRootInfo(ctx, r)
 	if err != nil {
+		return EmptyResult(), err
+	}
+
+	// add external rule targets (//external:*) to the same map and hash them
+	if err := HashExternalTargets(ctx, r, targets, hasher, workspaceroot, fullHashRepos, warns); err != nil {
 		return EmptyResult(), err
 	}
 	// get topological roots and update buildable roots info
@@ -273,9 +329,17 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher)
 	// Target graph is constructed with all the dependencies. Traverse it now and build Merkle DAG by hashing file
 	// contents and rule's metainfo and hashes of dependencies.
 	// This is potentially parallelizable, see https://t3.uberinternal.com/browse/GM-1523
-	warns := make(map[string]error)
+	hashParam := HashParam{
+		Targets:       targets,
+		Hasher:        hasher,
+		Warns:         warns,
+		WorkspaceRoot: workspaceroot,
+		FullHashRepos: fullHashRepos,
+		ExcludedRegex: excludedRegex,
+	}
 	for _, name := range roots {
-		if _, err := HashRecursively(ctx, targets, externalTargets, name, hasher, warns); err != nil {
+		hashParam.TargetName = name
+		if _, err := HashRecursively(ctx, hashParam); err != nil {
 			return Result{}, err
 		}
 	}
@@ -312,21 +376,19 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher)
 			// Consider all root-uncreachable cyclic targets to be pseudo-roots.
 			// An alternative would be to designate a deterministic cycle-breaker as
 			// the root, but this is likely not worh the extra complexity.
-			target := targets[name]
-			target.Root = true
-			targets[name] = target
+			targets[name].Root = true
 
-			if _, err := HashRecursively(ctx, targets, externalTargets, name, hasher, warns); err != nil {
+			hashParam.TargetName = name
+			if _, err := HashRecursively(ctx, hashParam); err != nil {
 				return Result{}, err
 			}
 		}
 	}
 
 	return Result{
-		TargetNames:     targetNames,
-		Targets:         targets,
-		ExternalTargets: externalTargets,
-		Warnings:        warns,
+		TargetNames: targetNames,
+		Targets:     targets,
+		Warnings:    warns,
 	}, nil
 }
 
@@ -336,7 +398,7 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher)
 // it as well, conforming to Golang slice modification pattern.
 //
 // Additionally, this function needs to honor context cancellation
-func ToposortRecursively(ctx context.Context, targetHashes map[string]Target, name string, targets []string, visited map[string]struct{}) ([]string, error) {
+func ToposortRecursively(ctx context.Context, targetHashes map[string]*Target, name string, targets []string, visited map[string]struct{}) ([]string, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -369,6 +431,17 @@ func ToposortRecursively(ctx context.Context, targetHashes map[string]Target, na
 	return append(targets, name), nil
 }
 
+// HashParam contains the parameters for HashRecursively.
+type HashParam struct {
+	Targets       map[string]*Target
+	TargetName    string
+	Hasher        SourceHasher
+	Warns         map[string]error
+	WorkspaceRoot string
+	FullHashRepos set.Set[string]
+	ExcludedRegex set.Set[string]
+}
+
 // HashRecursively calculates hash for all of the target nodes in the target graph and updates Hash property for each
 // entry in `targetHashes` map.
 // It populates `warns` map with warnings when hash cannot be calculated but does not stop the calculation. An example
@@ -377,36 +450,102 @@ func ToposortRecursively(ctx context.Context, targetHashes map[string]Target, na
 // point we should modify the code to only allow well-known files or errors to exhibit this behavior.
 //
 // Additionally, this function needs to honor context cancellation
-func HashRecursively(ctx context.Context, targets, externalTargets map[string]Target, targetName string, hasher SourceHasher, warns map[string]error) ([]byte, error) {
+func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 
-	if external, ok := externalTargets[targetName]; ok {
-		return []byte(external.Hash), nil
-	}
-	target, ok := targets[targetName]
-	if !ok {
-		return nil, fmt.Errorf("Unable to find target %s in the target graph", targetName)
+	if t, ok := p.Targets[p.TargetName]; ok && t.Hash != nil {
+		return t.Hash, nil
 	}
 
+	var target *Target
+	l := labels.Parse(p.TargetName)
+	// For external targets like @bazel_tools//tools/genrule:genrule-setup.sh,
+	// map the hash to //external:bazel_tools's hash (unless it's in FullHashRepos)
+	if isExternalTarget(p.TargetName) && l.Repository != "" && !p.FullHashRepos.Contains(l.Repository) {
+		translatedExternalTargetName := externalTargetForRule(p.TargetName)
+		if t, hasExternalRule := p.Targets[translatedExternalTargetName]; hasExternalRule {
+			target = t
+		} else {
+			// allows @... targets to be excluded even if //external:... doesn't exist.
+			if excluded, err := isExcluded(p.TargetName, p.ExcludedRegex); err != nil {
+				return nil, err
+			} else if excluded {
+				p.Targets[p.TargetName] = &Target{
+					Name:            p.TargetName,
+					RuleType:        ExternalRuleType,
+					Hash:            []byte{},
+					HashWithoutDeps: []byte{},
+				}
+				return []byte{}, nil
+			}
+			return nil, fmt.Errorf("cannot find external repository %s from external target %s", translatedExternalTargetName, p.TargetName)
+		}
+	} else if existingTarget, ok := p.Targets[p.TargetName]; ok {
+		target = existingTarget
+	} else {
+		// everything else
+		// such as unexported files
+		// //third_party/github.com/docker/docker:com_github_docker_docker_invalid_host_fix.patch
+
+		if l.Repository != "" {
+			return nil, fmt.Errorf("unexpected repository from target %s", p.TargetName)
+		}
+
+		path := filepath.Join(p.WorkspaceRoot, l.Package, l.Target)
+		sf := &buildpb.SourceFile{
+			Name:     &p.TargetName,
+			Location: &path,
+		}
+		target = &Target{
+			Name:       p.TargetName,
+			RuleType:   SourceFileType,
+			External:   false,
+			SourceFile: sf,
+		}
+		p.Targets[p.TargetName] = target
+	}
+
+	// this node was already visited
 	if target.Hash != nil {
-		// this node was already visited
-		return []byte(target.Hash), nil
+		if t, ok := p.Targets[p.TargetName]; ok {
+			t.Hash = target.Hash
+			t.HashWithoutDeps = target.HashWithoutDeps
+		} else {
+			// when @ target is translated to external rule, @ target may not exist,
+			// we should update hash for original target as well.
+			p.Targets[p.TargetName] = &Target{
+				Name:            p.TargetName,
+				RuleType:        UnknownRuleType,
+				Hash:            target.Hash,
+				HashWithoutDeps: target.HashWithoutDeps,
+				External:        target.External,
+			}
+		}
+		return target.Hash, nil
+	}
+
+	// excluded, return empty hash.
+	if excluded, err := isExcluded(p.TargetName, p.ExcludedRegex); err != nil {
+		return nil, err
+	} else if excluded {
+		p.Targets[p.TargetName].Hash = []byte{}
+		p.Targets[p.TargetName].HashWithoutDeps = []byte{}
+		return []byte{}, nil
 	}
 
 	// Mark node as visited by setting it to an empty slice instead of nil slice which it got by default - to avoid
 	// cycles. It would be reset to a real hash value once dependencies are traversed.
 	target.Hash = []byte{}
 	target.HashWithoutDeps = []byte{}
-	targets[targetName] = target
 
 	var hash []byte
 	var hashWithoutDeps []byte
 
 	switch target.RuleType {
 	case SourceFileType:
-		h, err := hasher.HashSourceFile(target.SourceFile, externalTargets)
+		h, err := p.Hasher.HashSourceFile(target.SourceFile)
 		if err != nil {
 			return nil, err
 		}
@@ -415,7 +554,9 @@ func HashRecursively(ctx context.Context, targets, externalTargets map[string]Ta
 		// In case of a generated file, it is sufficient to use the hash of the generating rule.
 		// Note that generated file targets aren't explicitly defined targets,
 		// but `out`'s of other rules: they have no attributes to hash.
-		if dephash, err := HashRecursively(ctx, targets, externalTargets, target.Deps[0], hasher, warns); err == nil {
+		depParam := p
+		depParam.TargetName = target.Deps[0]
+		if dephash, err := HashRecursively(ctx, depParam); err == nil {
 			hash = dephash
 		} else {
 			return nil, err
@@ -424,7 +565,7 @@ func HashRecursively(ctx context.Context, targets, externalTargets map[string]Ta
 		// Package groups do not execute any action nor can be used as inputs of any action
 		// There is no need to actually compute the hash, we include only the name for consistency
 		h := newHash()
-		h.Write([]byte(targetName))
+		h.Write([]byte(p.TargetName))
 		hash = h.Sum(nil)
 	default:
 		// Regular rule
@@ -434,7 +575,9 @@ func HashRecursively(ctx context.Context, targets, externalTargets map[string]Ta
 		hashWithoutDeps = noDepsHasher.Sum(nil)
 		h.Write(hashWithoutDeps)
 		for _, dep := range target.Deps {
-			if dephash, err := HashRecursively(ctx, targets, externalTargets, dep, hasher, warns); err == nil {
+			depParam := p
+			depParam.TargetName = dep
+			if dephash, err := HashRecursively(ctx, depParam); err == nil {
 				h.Write(dephash)
 			} else {
 				return nil, err
@@ -444,7 +587,7 @@ func HashRecursively(ctx context.Context, targets, externalTargets map[string]Ta
 	}
 
 	if hash != nil {
-		_, isNoOpHasher := hasher.(*noOpHasher)
+		_, isNoOpHasher := p.Hasher.(*noOpHasher)
 		if isNoOpHasher {
 			target.Hash = []byte{}
 			target.HashWithoutDeps = []byte{}
@@ -452,7 +595,18 @@ func HashRecursively(ctx context.Context, targets, externalTargets map[string]Ta
 			target.Hash = hash
 			target.HashWithoutDeps = hashWithoutDeps
 		}
-		targets[targetName] = target
+
+		// same as before. For translated external targets, ensure the original target is also added to
+		// the targets map
+		if _, ok := p.Targets[p.TargetName]; !ok && p.TargetName != target.Name {
+			p.Targets[p.TargetName] = &Target{
+				Name:            p.TargetName,
+				RuleType:        UnknownRuleType,
+				Hash:            target.Hash,
+				HashWithoutDeps: target.HashWithoutDeps,
+				External:        target.External,
+			}
+		}
 	}
 
 	return hash, nil
@@ -504,4 +658,17 @@ func hasAnyPrefix(t *buildpb.Target, rootRulePrefixes []string) bool {
 		}
 	}
 	return false
+}
+
+func isExcluded(targetName string, excludedRegex set.Set[string]) (bool, error) {
+	for expr := range excludedRegex.Iter() {
+		match, err := regexp.MatchString(expr, targetName)
+		if err != nil {
+			return false, fmt.Errorf("failed to check if excluded: %q", targetName)
+		}
+		if match {
+			return true, nil
+		}
+	}
+	return false, nil
 }

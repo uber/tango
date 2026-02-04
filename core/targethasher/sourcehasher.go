@@ -8,23 +8,16 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
-	tangopb "github.com/uber/tango/tangopb"
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
-	"github.com/bazelbuild/buildtools/labels"
 )
 
 var newHash = sha1.New
 
 const (
-	// With bazel query, repository rules defined in the WORKSPACE file
-	// are queryable with this prefix. See:
-	// https://docs.bazel.build/versions/master/query.html#external-repos
-	externalWorkspaceRulePrefix  = "//external:"
 	externalWorkspaceFilePrefix  = "@"
 	_defaultSourceFileVisibility = "//visibility:private"
 )
@@ -33,7 +26,7 @@ const (
 // can be calculated based on disk contents or form other sources such as a
 // vcs system.
 type SourceHasher interface {
-	HashSourceFile(s *buildpb.SourceFile, externalHashes map[string]Target) ([]byte, error)
+	HashSourceFile(s *buildpb.SourceFile) ([]byte, error)
 }
 
 // diskHashHelper is a SourceHasher that provides hashes based on disk
@@ -44,9 +37,6 @@ type SourceHasher interface {
 type diskHashHelper struct {
 	workspaceroot   string
 	knownFileHashes map[string][]byte
-	fullHashRepos   map[string]struct{}
-	excludedFiles   map[string]struct{}
-	bzlmodEnabled   bool
 }
 
 // noOpHasher
@@ -57,69 +47,22 @@ type noOpHasher struct {
 type Params struct {
 	WorkspaceRoot string
 	HashConfig    HashConfig
-	BzlmodEnabled bool
-}
-
-// HashConfig fine tunes behaviors during target hashing.
-type HashConfig struct {
-	// KnownSourceHashes can be used in-place of generating a hash from disk for a given source file. The values typically
-	// can be produced by a VCS (e.g. `git ls-tree`).
-	KnownSourceHashes map[string][]byte
-	// FullHashRepos is the list of repositories that requires hashing each individual files. By default, the hash
-	// for a repository rule is used as the hash for all files in the repository. Hashing individual files is more
-	// accurate, but slower.
-	FullHashRepos []string
-	ExcludedFiles []string
 }
 
 // NewSourceHasher creates a new SourceHasher.
 func NewSourceHasher(p Params) SourceHasher {
-	fullHashRepos := make(map[string]struct{})
-	for _, repo := range p.HashConfig.FullHashRepos {
-		fullHashRepos[repo] = struct{}{}
-	}
-	excludedFiles := make(map[string]struct{})
-	for _, file := range p.HashConfig.ExcludedFiles {
-		excludedFiles[file] = struct{}{}
-	}
 	return &diskHashHelper{
 		workspaceroot:   p.WorkspaceRoot,
 		knownFileHashes: p.HashConfig.KnownSourceHashes,
-		fullHashRepos:   fullHashRepos,
-		excludedFiles:   excludedFiles,
-		bzlmodEnabled:   p.BzlmodEnabled,
 	}
 }
 
 // HashSourceFile does a no-op hash for the noOpHasher.
-func (hh *noOpHasher) HashSourceFile(sourceFile *buildpb.SourceFile, externalHashes map[string]Target) ([]byte, error) {
+func (hh *noOpHasher) HashSourceFile(sourceFile *buildpb.SourceFile) ([]byte, error) {
 	return nil, nil
 }
 
-func (hh *diskHashHelper) HashSourceFile(sourceFile *buildpb.SourceFile, externalHashes map[string]Target) ([]byte, error) {
-	targetName := sourceFile.GetName()
-
-	// If file is excluded, return empty hash
-	for expr := range hh.excludedFiles {
-		match, err := regexp.MatchString(expr, targetName)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to check if excluded: %q", targetName)
-		}
-		if match {
-			return []byte{}, nil
-		}
-	}
-
-	label := labels.Parse(targetName)
-	if _, ok := hh.fullHashRepos[label.Repository]; !ok {
-		// Use the hash for repository rules instead of hashing files one by one.
-		if h, ok := externalHashes[externalTargetForRule(targetName)]; ok {
-			return []byte(h.Hash), nil
-		}
-		if !hh.bzlmodEnabled {
-			return nil, fmt.Errorf("expected '//external:...' rule for: %q", targetName)
-		}
-	}
+func (hh *diskHashHelper) HashSourceFile(sourceFile *buildpb.SourceFile) ([]byte, error) {
 	nonDefaultVisibilities := filterVisibilityLabels(sourceFile.GetVisibilityLabel())
 	// The location may look like /foo/decl.go:1:1
 	location, _, _ := strings.Cut(sourceFile.GetLocation(), ":")
@@ -130,12 +73,7 @@ func (hh *diskHashHelper) HashSourceFile(sourceFile *buildpb.SourceFile, externa
 	}
 
 	fi, err := os.Stat(location)
-	if os.IsNotExist(err) {
-		// Not considered a fatal error, e.g. a file is added to a dependency graph which is not
-		// present on the file system in certain scenarios, like flaky test filter. This is
-		// potentially dangerous as it can silently render an empty hash target graph.
-		return []byte{}, nil
-	} else if err != nil {
+	if err != nil {
 		return nil, err
 	}
 
@@ -219,12 +157,12 @@ func pathForTarget(root, target string) string {
 	return filepath.Join(root, parts[0], parts[1])
 }
 
-func hashRule(f *buildpb.Rule, targetHashes map[string]tangopb.OptimizedTarget) ([]byte, error) {
+func hashRule(f *buildpb.Rule, targetHashes map[string]*Target) ([]byte, error) {
 	h := newHash()
 	HashRuleCommon(f, h)
 	for _, dep := range f.GetRuleInput() {
 		if dephash, ok := targetHashes[dep]; ok {
-			h.Write([]byte(dephash.Hash))
+			h.Write(dephash.Hash)
 		} else {
 			return nil, fmt.Errorf("%q missing hash for dependency %q", f.GetName(), dep)
 		}

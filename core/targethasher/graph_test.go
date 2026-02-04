@@ -1,4 +1,4 @@
-package targethash
+package targethasher
 
 import (
 	"context"
@@ -6,18 +6,20 @@ import (
 	"io"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/uber/tango/core/bazel"
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
-	"github.com/bazelbuild/buildtools/labels"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	set "github.com/deckarep/golang-set/v2"
 )
+
+func StringPtr(s string) *string {
+	return &s
+}
 
 type testHasher struct {
 	known map[string][]byte
@@ -50,14 +52,14 @@ func TestFromProtoWithCyclicDependenciesNoRoot(t *testing.T) {
 		{
 			Type: buildpb.Target_RULE.Enum(),
 			Rule: &buildpb.Rule{
-				Name:      ptr.String("//:a"),
+				Name:      StringPtr("//:a"),
 				RuleInput: []string{"//:b"},
 			},
 		},
 		{
 			Type: buildpb.Target_RULE.Enum(),
 			Rule: &buildpb.Rule{
-				Name:      ptr.String("//:b"),
+				Name:      StringPtr("//:b"),
 				RuleInput: []string{"//:a"},
 			},
 		},
@@ -82,12 +84,12 @@ func TestContextCancellation(t *testing.T) {
 	qr := &buildpb.QueryResult{
 		Target: []*buildpb.Target{&buildpb.Target{}},
 	}
-	result, err := fromProto(ctx, qr, nil)
+	result, err := fromProto(ctx, qr, nil, "", set.NewSet[string](), set.NewSet[string]())
 	assert.Equal(t, EmptyResult(), result)
 	assert.ErrorIs(t, err, context.Canceled)
 
 	// verify fromProto honors context cancellation
-	bytes, err := HashRecursively(ctx, nil, nil, "", nil, nil)
+	bytes, err := HashRecursively(ctx, HashParam{})
 	assert.Empty(t, bytes)
 	assert.ErrorIs(t, err, context.Canceled)
 
@@ -101,63 +103,63 @@ func Test_RemoveAttrs(t *testing.T) {
 	regularTarget := &buildpb.Target{
 		Type: buildpb.Target_RULE.Enum(),
 		Rule: &buildpb.Rule{
-			Name: ptr.String("//pkg:go_default_library"),
+			Name: StringPtr("//pkg:go_default_library"),
 			Attribute: []*buildpb.Attribute{
 				&buildpb.Attribute{
-					Name:        ptr.String("url"),
-					StringValue: ptr.String("some_url"),
+					Name:        StringPtr("url"),
+					StringValue: StringPtr("some_url"),
 				},
 				&buildpb.Attribute{
-					Name:            ptr.String("urls"),
+					Name:            StringPtr("urls"),
 					StringListValue: []string{"url1", "url2"},
 				},
 				&buildpb.Attribute{
-					Name:        ptr.String("to_keep"),
-					StringValue: ptr.String("target1"),
+					Name:        StringPtr("to_keep"),
+					StringValue: StringPtr("target1"),
 				},
 			},
 		},
 	}
-	target, isExternal, err := toTarget(regularTarget)
+	target, err := toTarget(regularTarget)
 	assert.NoError(t, err)
-	assert.False(t, isExternal)
+	assert.False(t, target.External)
 	assert.Equal(t, regularTarget.GetRule().GetAttribute(), target.Attributes)
 	assert.Equal(t, []byte{0x69, 0x8b, 0x5, 0x75, 0x55, 0x80, 0x66, 0x5d, 0x7e, 0xbc, 0x75, 0x4, 0x8e, 0x62, 0x48, 0xb0, 0x82, 0x9c, 0x87, 0x82}, target.HashWithoutDeps)
 
 	externalTarget := &buildpb.Target{
 		Type: buildpb.Target_RULE.Enum(),
 		Rule: &buildpb.Rule{
-			Name: ptr.String("//external:some_rule"),
+			Name: StringPtr("//external:some_rule"),
 			Attribute: []*buildpb.Attribute{
 				&buildpb.Attribute{
-					Name:        ptr.String("url"),
-					StringValue: ptr.String("some_url"),
+					Name:        StringPtr("url"),
+					StringValue: StringPtr("some_url"),
 				},
 				&buildpb.Attribute{
-					Name:            ptr.String("urls"),
+					Name:            StringPtr("urls"),
 					StringListValue: []string{"url1", "url2"},
 				},
 				&buildpb.Attribute{
-					Name:        ptr.String("to_keep"),
-					StringValue: ptr.String("external"),
+					Name:        StringPtr("to_keep"),
+					StringValue: StringPtr("external"),
 				},
 			},
 		},
 	}
-	external, isExternal, err := toTarget(externalTarget)
+	external, err := toTarget(externalTarget)
 	assert.NoError(t, err)
-	assert.True(t, isExternal)
-	assert.Equal(t, []byte{0xbb, 0xee, 0x72, 0xbb, 0xda, 0x44, 0xa0, 0xb5, 0x27, 0x9f, 0x9c, 0xde, 0xda, 0xb3, 0xc9, 0x46, 0xbe, 0x7e, 0x14, 0x92}, external.Hash)
+	assert.True(t, external.External)
+	assert.Equal(t, []byte{0xbb, 0xee, 0x72, 0xbb, 0xda, 0x44, 0xa0, 0xb5, 0x27, 0x9f, 0x9c, 0xde, 0xda, 0xb3, 0xc9, 0x46, 0xbe, 0x7e, 0x14, 0x92}, external.HashWithoutDeps)
 
 	// add sha256 attribute, hash should change
 	externalTarget.Rule.Attribute = append(externalTarget.Rule.Attribute, &buildpb.Attribute{
-		Name:        ptr.String("sha256"),
-		StringValue: ptr.String("some_hash"),
+		Name:        StringPtr("sha256"),
+		StringValue: StringPtr("some_hash"),
 	})
-	external, isExternal, err = toTarget(externalTarget)
+	external, err = toTarget(externalTarget)
 	assert.NoError(t, err)
-	assert.True(t, isExternal)
-	assert.Equal(t, []byte{0x7c, 0xde, 0x91, 0xc2, 0x94, 0x1a, 0x22, 0xf3, 0xb2, 0x18, 0x7c, 0x21, 0xbf, 0x32, 0x17, 0xc0, 0xa3, 0xf0, 0xc, 0x77}, external.Hash)
+	assert.True(t, external.External)
+	assert.Equal(t, []byte{0x7c, 0xde, 0x91, 0xc2, 0x94, 0x1a, 0x22, 0xf3, 0xb2, 0x18, 0x7c, 0x21, 0xbf, 0x32, 0x17, 0xc0, 0xa3, 0xf0, 0xc, 0x77}, external.HashWithoutDeps)
 }
 
 func validateResultIsStable(t *testing.T, baseResult, result Result) {
@@ -191,17 +193,4 @@ func assertEqualTargetHash(t *testing.T, expected, actual Target) {
 	// too many nested attributes to compare
 	ignore := cmpopts.IgnoreFields(Target{}, "Attributes", "SourceFile", "Rule")
 	assert.True(t, cmp.Equal(expected, actual, opt, ignore), cmp.Diff(expected, actual, opt))
-}
-
-func parseQueryResult(t *testing.T, protoFile, workspace string) *buildpb.QueryResult {
-	qr, err := query.FromFile(protoFile)
-	require.NoError(t, err)
-	for _, target := range qr.Target {
-		sourceFile := target.GetSourceFile()
-		if sourceFile != nil {
-			label := labels.Parse(sourceFile.GetName())
-			*sourceFile.Location = filepath.Join(workspace, label.Package, label.Target)
-		}
-	}
-	return qr
 }
