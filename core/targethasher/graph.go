@@ -105,7 +105,15 @@ func EmptyResult() Result {
 func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string, hashConfig HashConfig) (Result, error) {
 	// always calculate hash for individual files in the main repo.
 	fullHashRepos := set.NewSet(append([]string{""}, hashConfig.FullHashRepos...)...)
-	excludedRegex := set.NewSet(hashConfig.ExcludedFiles...)
+
+	excludedRegex := make([]*regexp.Regexp, 0, len(hashConfig.ExcludedFiles))
+	for _, pattern := range hashConfig.ExcludedFiles {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return EmptyResult(), fmt.Errorf("invalid excluded regex pattern %q: %w", pattern, err)
+		}
+		excludedRegex = append(excludedRegex, re)
+	}
 
 	return fromProto(ctx, r, &diskHashHelper{
 		workspaceroot:   workspaceroot,
@@ -115,7 +123,7 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 
 // FromProtoNoHash calculates a DAG graph based on a query result. It does not calculate hashes for targets.
 func FromProtoNoHash(ctx context.Context, r *buildpb.QueryResult) (Result, error) {
-	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string]())
+	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), nil)
 }
 
 // for external targets, url and urls attributes could cause non-deterministic hash values,
@@ -264,7 +272,7 @@ func HashExternalTargets(ctx context.Context, r *buildpb.QueryResult, targets ma
 		WorkspaceRoot: workspaceroot,
 		FullHashRepos: fullHashRepos,
 		// we should not exclude anything for external repository rules
-		ExcludedRegex: set.NewSet[string](),
+		ExcludedRegex: nil,
 	}
 	for name, target := range targets {
 		if target.RuleType == ExternalRuleType {
@@ -311,7 +319,7 @@ func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]*Target) []
 	return roots
 }
 
-func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], excludedRegex set.Set[string]) (Result, error) {
+func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) (Result, error) {
 	warns := make(map[string]error)
 	// Build target graph with dependencies, but without hash and root information.
 	targets, err := GetInternalTargetsWithoutHashAndRootInfo(ctx, r)
@@ -439,7 +447,7 @@ type HashParam struct {
 	Warns         map[string]error
 	WorkspaceRoot string
 	FullHashRepos set.Set[string]
-	ExcludedRegex set.Set[string]
+	ExcludedRegex []*regexp.Regexp
 }
 
 // HashRecursively calculates hash for all of the target nodes in the target graph and updates Hash property for each
@@ -469,9 +477,7 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 			target = t
 		} else {
 			// allows @... targets to be excluded even if //external:... doesn't exist.
-			if excluded, err := isExcluded(p.TargetName, p.ExcludedRegex); err != nil {
-				return nil, err
-			} else if excluded {
+			if isExcluded(p.TargetName, p.ExcludedRegex) {
 				p.Targets[p.TargetName] = &Target{
 					Name:            p.TargetName,
 					RuleType:        ExternalRuleType,
@@ -527,9 +533,7 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 	}
 
 	// excluded, return empty hash.
-	if excluded, err := isExcluded(p.TargetName, p.ExcludedRegex); err != nil {
-		return nil, err
-	} else if excluded {
+	if isExcluded(p.TargetName, p.ExcludedRegex) {
 		p.Targets[p.TargetName].Hash = []byte{}
 		p.Targets[p.TargetName].HashWithoutDeps = []byte{}
 		return []byte{}, nil
@@ -660,15 +664,11 @@ func hasAnyPrefix(t *buildpb.Target, rootRulePrefixes []string) bool {
 	return false
 }
 
-func isExcluded(targetName string, excludedRegex set.Set[string]) (bool, error) {
-	for expr := range excludedRegex.Iter() {
-		match, err := regexp.MatchString(expr, targetName)
-		if err != nil {
-			return false, fmt.Errorf("failed to check if excluded: %q", targetName)
-		}
-		if match {
-			return true, nil
+func isExcluded(targetName string, excludedRegex []*regexp.Regexp) bool {
+	for _, re := range excludedRegex {
+		if re.MatchString(targetName) {
+			return true
 		}
 	}
-	return false, nil
+	return false
 }

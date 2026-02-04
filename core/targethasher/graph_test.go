@@ -6,15 +6,16 @@ import (
 	"io"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"testing"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
+	set "github.com/deckarep/golang-set/v2"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	set "github.com/deckarep/golang-set/v2"
 )
 
 func StringPtr(s string) *string {
@@ -84,7 +85,7 @@ func TestContextCancellation(t *testing.T) {
 	qr := &buildpb.QueryResult{
 		Target: []*buildpb.Target{&buildpb.Target{}},
 	}
-	result, err := fromProto(ctx, qr, nil, "", set.NewSet[string](), set.NewSet[string]())
+	result, err := fromProto(ctx, qr, nil, "", set.NewSet[string](), nil)
 	assert.Equal(t, EmptyResult(), result)
 	assert.ErrorIs(t, err, context.Canceled)
 
@@ -97,6 +98,125 @@ func TestContextCancellation(t *testing.T) {
 	strs, err := ToposortRecursively(ctx, nil, "", nil, nil)
 	assert.Empty(t, strs)
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestFromProtoSimpleRule(t *testing.T) {
+	qr := &buildpb.QueryResult{
+		Target: []*buildpb.Target{
+			{
+				Type: buildpb.Target_RULE.Enum(),
+				Rule: &buildpb.Rule{
+					Name:      StringPtr("//pkg:lib"),
+					RuleClass: StringPtr("go_library"),
+				},
+			},
+		},
+	}
+
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), nil)
+	require.NoError(t, err)
+
+	assert.Len(t, result.Targets, 1)
+	assert.Len(t, result.TargetNames, 1)
+	assert.Contains(t, result.Targets, "//pkg:lib")
+	assert.True(t, result.Targets["//pkg:lib"].Root)
+	assert.Equal(t, "go_library", result.Targets["//pkg:lib"].RuleType)
+}
+
+func TestFromProtoWithDependencies(t *testing.T) {
+	qr := &buildpb.QueryResult{
+		Target: []*buildpb.Target{
+			{
+				Type: buildpb.Target_RULE.Enum(),
+				Rule: &buildpb.Rule{
+					Name:      StringPtr("//pkg:app"),
+					RuleClass: StringPtr("go_binary"),
+					RuleInput: []string{"//pkg:lib"},
+				},
+			},
+			{
+				Type: buildpb.Target_RULE.Enum(),
+				Rule: &buildpb.Rule{
+					Name:      StringPtr("//pkg:lib"),
+					RuleClass: StringPtr("go_library"),
+				},
+			},
+		},
+	}
+
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), nil)
+	require.NoError(t, err)
+
+	assert.Len(t, result.Targets, 2)
+	assert.Len(t, result.TargetNames, 2)
+
+	// app depends on lib, so lib should come first in topological order
+	assert.Equal(t, "//pkg:lib", result.TargetNames[0])
+	assert.Equal(t, "//pkg:app", result.TargetNames[1])
+
+	// only app should be a root (lib is a dependency)
+	assert.True(t, result.Targets["//pkg:app"].Root)
+	assert.False(t, result.Targets["//pkg:lib"].Root)
+}
+
+func TestFromProtoWithExcludedRegex(t *testing.T) {
+	qr := &buildpb.QueryResult{
+		Target: []*buildpb.Target{
+			{
+				Type: buildpb.Target_RULE.Enum(),
+				Rule: &buildpb.Rule{
+					Name:      StringPtr("//pkg:app"),
+					RuleClass: StringPtr("go_binary"),
+				},
+			},
+			{
+				Type: buildpb.Target_RULE.Enum(),
+				Rule: &buildpb.Rule{
+					Name:      StringPtr("//vendor:lib"),
+					RuleClass: StringPtr("go_library"),
+				},
+			},
+		},
+	}
+
+	// Exclude targets matching "//vendor:.*"
+	excludedRegex := []*regexp.Regexp{regexp.MustCompile("//vendor:.*")}
+
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), excludedRegex)
+	require.NoError(t, err)
+
+	assert.Len(t, result.Targets, 2)
+	// Excluded target should have empty hash
+	assert.Empty(t, result.Targets["//vendor:lib"].Hash)
+}
+
+func TestFromProtoWithGeneratedFile(t *testing.T) {
+	qr := &buildpb.QueryResult{
+		Target: []*buildpb.Target{
+			{
+				Type: buildpb.Target_RULE.Enum(),
+				Rule: &buildpb.Rule{
+					Name:      StringPtr("//pkg:generator"),
+					RuleClass: StringPtr("genrule"),
+				},
+			},
+			{
+				Type: buildpb.Target_GENERATED_FILE.Enum(),
+				GeneratedFile: &buildpb.GeneratedFile{
+					Name:           StringPtr("//pkg:generated.go"),
+					GeneratingRule: StringPtr("//pkg:generator"),
+				},
+			},
+		},
+	}
+
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), nil)
+	require.NoError(t, err)
+
+	assert.Len(t, result.Targets, 2)
+	assert.Contains(t, result.Targets, "//pkg:generator")
+	assert.Contains(t, result.Targets, "//pkg:generated.go")
+	assert.Equal(t, GeneratedFileType, result.Targets["//pkg:generated.go"].RuleType)
 }
 
 func Test_RemoveAttrs(t *testing.T) {
