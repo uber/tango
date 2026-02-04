@@ -127,12 +127,12 @@ func callGetTargetGraph(ctx context.Context, client pb.TangoYARPCClient, logger 
 
 	for {
 		msg, err := stream.Recv()
-		if msg == nil {
-			logger.Info("Received empty message")
-			return nil
-		}
 		if err == io.EOF {
 			break
+		}
+		if msg == nil {
+			fmt.Println("Received empty message")
+			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("recv: %w", err)
