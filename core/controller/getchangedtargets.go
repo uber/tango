@@ -276,7 +276,6 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 		}
 		if attrsChanged {
 			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
-			continue
 		}
 	}
 
