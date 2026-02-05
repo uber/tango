@@ -245,20 +245,37 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 		}
 	}
 
-	if sourceFileRuleTypeID != -1 {
-		// Iterate over the changed targets and check if any of them are source files.
-		// If so, check if any of their dependencies are changed source files.
-		// If so, mark the target as a direct change.
-		for name, ct := range changedByName {
-			if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT {
-				// Already marked as direct, skip
-				continue
-			}
-			newT := secondByName[name]
-			// Ifdependency of the target is a changed source file
-			if hasDepInChangedSourceFileTargets(newT.GetDirectDependencies(), secondMetadata, changedSourceFileTargets) {
-				ct.ChangeType = pb.CHANGE_TYPE_DIRECT
-			}
+	// Iterate over the changed targets and check if any of them are DIRECT changes.
+	for name, ct := range changedByName {
+		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
+			// Already marked as direct or new
+			continue
+		}
+		newT := secondByName[name]
+		oldT := firstByName[name]
+
+		// Check if any dependency is a changed source file
+		if hasDepInChangedSourceFileTargets(newT.GetDirectDependencies(), secondMetadata, changedSourceFileTargets) {
+			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
+			continue
+		}
+
+		// Check if direct dependencies changed
+		depsChanged, err := dependenciesChanged(oldT, firstMetadata, newT, secondMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check dependencies changed: %w", err)
+		}
+		if depsChanged {
+			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
+			continue
+		}
+		// Check if attributes changed
+		attrsChanged, err := attributesChanged(oldT, firstMetadata, newT, secondMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check attributes changed: %w", err)
+		}
+		if attrsChanged {
+			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
 		}
 	}
 
@@ -364,6 +381,118 @@ func hasDepInChangedSourceFileTargets(depIds []int32, meta *pb.Metadata, changed
 		}
 	}
 	return false
+}
+
+// dependenciesChanged checks if the set of direct dependencies changed between old and new targets.
+func dependenciesChanged(oldTarget *pb.OptimizedTarget, oldMeta *pb.Metadata, newTarget *pb.OptimizedTarget, newMeta *pb.Metadata) (bool, error) {
+	if oldMeta == nil || newMeta == nil {
+		return false, nil
+	}
+
+	oldDepIDs := oldTarget.GetDirectDependencies()
+	newDepIDs := newTarget.GetDirectDependencies()
+
+	// Early exit: if lengths differ, dependencies changed
+	if len(oldDepIDs) != len(newDepIDs) {
+		return true, nil
+	}
+	// Early exit: if both are empty, no change
+	if len(oldDepIDs) == 0 {
+		return false, nil
+	}
+
+	// validate target names are equivalent.
+	if err := validateTargetNames(oldTarget, newTarget, oldMeta, newMeta); err != nil {
+		return false, fmt.Errorf("target names are different")
+	}
+
+	// Cache metadata mappings to avoid repeated map lookups
+	oldTargetIDMapping := oldMeta.GetTargetIdMapping()
+	newTargetIDMapping := newMeta.GetTargetIdMapping()
+	// Build set of new dependency names (only one set needed)
+	newDepSet := make(map[string]struct{}, len(newDepIDs))
+	for _, depID := range newDepIDs {
+		if name := newTargetIDMapping[depID]; name != "" {
+			newDepSet[name] = struct{}{}
+		}
+	}
+
+	// Check if all old deps exist in new deps
+	for _, depID := range oldDepIDs {
+		if name := oldTargetIDMapping[depID]; name != "" {
+			if _, exists := newDepSet[name]; !exists {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
+
+// attributesChanged checks if the attributes changed between old and new targets.
+func attributesChanged(oldTarget *pb.OptimizedTarget, oldMeta *pb.Metadata, newTarget *pb.OptimizedTarget, newMeta *pb.Metadata) (bool, error) {
+	if oldMeta == nil || newMeta == nil {
+		return false, nil
+	}
+	// validate target names are equivalent.
+	if err := validateTargetNames(oldTarget, newTarget, oldMeta, newMeta); err != nil {
+		return false, err
+	}
+
+	oldAttrIDs := oldTarget.GetAttributes()
+	newAttrIDs := newTarget.GetAttributes()
+
+	// Early exit: if lengths differ, attributes changed
+	if len(oldAttrIDs) != len(newAttrIDs) {
+		return true, nil
+	}
+
+	// Early exit: if both are empty, no change
+	if len(oldAttrIDs) == 0 {
+		return false, nil
+	}
+
+	// Cache metadata mappings to avoid repeated map lookups
+	oldAttrNameMapping := oldMeta.GetAttributeNameMapping()
+	oldAttrValMapping := oldMeta.GetAttributeStringValueMapping()
+	newAttrNameMapping := newMeta.GetAttributeNameMapping()
+	newAttrValMapping := newMeta.GetAttributeStringValueMapping()
+
+	// Build map of new attributes (only one map needed)
+	newAttrMap := make(map[string]string, len(newAttrIDs))
+	for attrNameID, attrValID := range newAttrIDs {
+		if attrName := newAttrNameMapping[attrNameID]; attrName != "" {
+			newAttrMap[attrName] = newAttrValMapping[attrValID]
+		}
+	}
+
+	// Check if all old attributes match
+	for attrNameID, attrValID := range oldAttrIDs {
+		if attrName := oldAttrNameMapping[attrNameID]; attrName != "" {
+			oldVal := oldAttrValMapping[attrValID]
+			newVal, exists := newAttrMap[attrName]
+			if !exists || newVal != oldVal {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// validateTargetNames checks if the target names are the same between old and new targets, and exists in both metadata maps.
+func validateTargetNames(oldTarget, newTarget *pb.OptimizedTarget, oldMeta, newMeta *pb.Metadata) error {
+	oldTargetName, ok := oldMeta.GetTargetIdMapping()[oldTarget.GetId()]
+	if !ok {
+		return fmt.Errorf("old target id %d not found in metadata", oldTarget.GetId())
+	}
+	newTargetName, ok := newMeta.GetTargetIdMapping()[newTarget.GetId()]
+	if !ok {
+		return fmt.Errorf("new target id %d not found in metadata", newTarget.GetId())
+	}
+	if oldTargetName != newTargetName {
+		return fmt.Errorf("target names are different %s != %s", oldTargetName, newTargetName)
+	}
+	return nil
 }
 
 // transposeOptimizedTarget remaps a target into the canonical ID space using name-based mappers.

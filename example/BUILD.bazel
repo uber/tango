@@ -22,5 +22,12 @@ go_library(
 go_binary(
     name = "example",
     embed = [":example_lib"],
+    data = [":config"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "config",
+    srcs = glob(["*.yaml"]),
     visibility = ["//visibility:public"],
 )

@@ -398,3 +398,320 @@ func TestCompareTargetGraphs_IndirectWhenNoSourceDep(t *testing.T) {
 	require.Len(t, cs.GetChangedTargets(), 1)
 	require.Equal(t, pb.CHANGE_TYPE_INDIRECT, cs.GetChangedTargets()[0].GetChangeType())
 }
+
+func TestCompareTargetGraphs_DirectWhenDependenciesChanged(t *testing.T) {
+	c := &controller{logger: zaptest.NewLogger(t)}
+
+	// Old: T (id 1, rule) with deps on A
+	first := []*pb.GetTargetGraphResponse{
+		{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{
+					Targets: []*pb.OptimizedTarget{
+						{Id: 1, Hash: "h1", RuleType: 200, DirectDependencies: []int32{10}},
+						{Id: 10, Hash: "h1", RuleType: 200}, // Dependency A
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetTargetGraphResponse_Metadata{
+				Metadata: &pb.Metadata{
+					TargetIdMapping: map[int32]string{
+						1:  "//app:T",
+						10: "//app:A",
+					},
+					RuleTypeMapping: map[int32]string{
+						100: "source file",
+						200: "rule",
+					},
+				},
+			},
+		},
+	}
+	// New: T now depends on B instead of A (hash changed due to dep change)
+	second := []*pb.GetTargetGraphResponse{
+		{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{
+					Targets: []*pb.OptimizedTarget{
+						{Id: 2, Hash: "h2", RuleType: 201, DirectDependencies: []int32{20}},
+						{Id: 20, Hash: "h1", RuleType: 201}, // Dependency B
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetTargetGraphResponse_Metadata{
+				Metadata: &pb.Metadata{
+					TargetIdMapping: map[int32]string{
+						2:  "//app:T",
+						20: "//app:B",
+					},
+					RuleTypeMapping: map[int32]string{
+						101: "source file",
+						201: "rule",
+					},
+				},
+			},
+		},
+	}
+	res, err := c.compareTargetGraphs(context.Background(), first, second, nil)
+	require.NoError(t, err)
+	cs := res[0].GetChangedTargets()
+	require.NotNil(t, cs)
+
+	// Find target T in the changed targets
+	var targetT *pb.ChangedTarget
+	for _, ct := range cs.GetChangedTargets() {
+		name := res[1].GetMetadata().GetTargetIdMapping()[ct.GetNewTarget().GetId()]
+		if name == "//app:T" {
+			targetT = ct
+			break
+		}
+	}
+	require.NotNil(t, targetT)
+	require.Equal(t, pb.CHANGE_TYPE_DIRECT, targetT.GetChangeType(), "Target with changed dependencies should be marked as DIRECT")
+}
+
+func TestCompareTargetGraphs_DirectWhenAttributesChanged(t *testing.T) {
+	c := &controller{logger: zaptest.NewLogger(t)}
+
+	// Old: T with attribute "key1" -> "value1"
+	first := []*pb.GetTargetGraphResponse{
+		{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{
+					Targets: []*pb.OptimizedTarget{
+						{
+							Id:         1,
+							Hash:       "h1",
+							RuleType:   200,
+							Attributes: map[int32]int32{1: 10}, // attr name 1 -> attr value 10
+						},
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetTargetGraphResponse_Metadata{
+				Metadata: &pb.Metadata{
+					TargetIdMapping: map[int32]string{1: "//app:T"},
+					RuleTypeMapping: map[int32]string{
+						100: "source file",
+						200: "rule",
+					},
+					AttributeNameMapping:        map[int32]string{1: "key1"},
+					AttributeStringValueMapping: map[int32]string{10: "value1"},
+				},
+			},
+		},
+	}
+	// New: T with attribute "key1" -> "value2" (changed value)
+	second := []*pb.GetTargetGraphResponse{
+		{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{
+					Targets: []*pb.OptimizedTarget{
+						{
+							Id:         2,
+							Hash:       "h2",
+							RuleType:   201,
+							Attributes: map[int32]int32{2: 20}, // attr name 2 -> attr value 20
+						},
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetTargetGraphResponse_Metadata{
+				Metadata: &pb.Metadata{
+					TargetIdMapping: map[int32]string{2: "//app:T"},
+					RuleTypeMapping: map[int32]string{
+						101: "source file",
+						201: "rule",
+					},
+					AttributeNameMapping:        map[int32]string{2: "key1"},
+					AttributeStringValueMapping: map[int32]string{20: "value2"},
+				},
+			},
+		},
+	}
+	res, err := c.compareTargetGraphs(context.Background(), first, second, nil)
+	require.NoError(t, err)
+	cs := res[0].GetChangedTargets()
+	require.NotNil(t, cs)
+	require.Len(t, cs.GetChangedTargets(), 1)
+	require.Equal(t, pb.CHANGE_TYPE_DIRECT, cs.GetChangedTargets()[0].GetChangeType(), "Target with changed attributes should be marked as DIRECT")
+}
+
+func TestCompareTargetGraphs_DirectWhenNewAttributeAdded(t *testing.T) {
+	c := &controller{logger: zaptest.NewLogger(t)}
+
+	// Old: T with one attribute
+	first := []*pb.GetTargetGraphResponse{
+		{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{
+					Targets: []*pb.OptimizedTarget{
+						{
+							Id:         1,
+							Hash:       "h1",
+							RuleType:   200,
+							Attributes: map[int32]int32{1: 10},
+						},
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetTargetGraphResponse_Metadata{
+				Metadata: &pb.Metadata{
+					TargetIdMapping: map[int32]string{1: "//app:T"},
+					RuleTypeMapping: map[int32]string{
+						100: "source file",
+						200: "rule",
+					},
+					AttributeNameMapping:        map[int32]string{1: "key1"},
+					AttributeStringValueMapping: map[int32]string{10: "value1"},
+				},
+			},
+		},
+	}
+	// New: T with two attributes (added key2)
+	second := []*pb.GetTargetGraphResponse{
+		{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{
+					Targets: []*pb.OptimizedTarget{
+						{
+							Id:       2,
+							Hash:     "h2",
+							RuleType: 201,
+							Attributes: map[int32]int32{
+								2: 20, // key1 -> value1
+								3: 30, // key2 -> value2 (NEW)
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetTargetGraphResponse_Metadata{
+				Metadata: &pb.Metadata{
+					TargetIdMapping: map[int32]string{2: "//app:T"},
+					RuleTypeMapping: map[int32]string{
+						101: "source file",
+						201: "rule",
+					},
+					AttributeNameMapping: map[int32]string{
+						2: "key1",
+						3: "key2",
+					},
+					AttributeStringValueMapping: map[int32]string{
+						20: "value1",
+						30: "value2",
+					},
+				},
+			},
+		},
+	}
+	res, err := c.compareTargetGraphs(context.Background(), first, second, nil)
+	require.NoError(t, err)
+	cs := res[0].GetChangedTargets()
+	require.NotNil(t, cs)
+	require.Len(t, cs.GetChangedTargets(), 1)
+	require.Equal(t, pb.CHANGE_TYPE_DIRECT, cs.GetChangedTargets()[0].GetChangeType(), "Target with new attribute added should be marked as DIRECT")
+}
+
+func TestCompareTargetGraphs_IndirectWhenOnlyHashChanged(t *testing.T) {
+	c := &controller{logger: zaptest.NewLogger(t)}
+
+	// Old: T with deps and attributes
+	first := []*pb.GetTargetGraphResponse{
+		{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{
+					Targets: []*pb.OptimizedTarget{
+						{
+							Id:                 1,
+							Hash:               "h1",
+							RuleType:           200,
+							DirectDependencies: []int32{10},
+							Attributes:         map[int32]int32{1: 10},
+						},
+						{Id: 10, Hash: "h1", RuleType: 200},
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetTargetGraphResponse_Metadata{
+				Metadata: &pb.Metadata{
+					TargetIdMapping: map[int32]string{
+						1:  "//app:T",
+						10: "//app:A",
+					},
+					RuleTypeMapping: map[int32]string{
+						100: "source file",
+						200: "rule",
+					},
+					AttributeNameMapping:        map[int32]string{1: "key1"},
+					AttributeStringValueMapping: map[int32]string{10: "value1"},
+				},
+			},
+		},
+	}
+	// New: T with same deps and attributes, but hash changed (e.g., due to transitive dep change)
+	second := []*pb.GetTargetGraphResponse{
+		{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{
+					Targets: []*pb.OptimizedTarget{
+						{
+							Id:                 2,
+							Hash:               "h2", // Changed
+							RuleType:           201,
+							DirectDependencies: []int32{20}, // Same dep (//app:A)
+							Attributes:         map[int32]int32{2: 20}, // Same attribute
+						},
+						{Id: 20, Hash: "h2", RuleType: 201}, // Dep A hash changed
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetTargetGraphResponse_Metadata{
+				Metadata: &pb.Metadata{
+					TargetIdMapping: map[int32]string{
+						2:  "//app:T",
+						20: "//app:A",
+					},
+					RuleTypeMapping: map[int32]string{
+						101: "source file",
+						201: "rule",
+					},
+					AttributeNameMapping:        map[int32]string{2: "key1"},
+					AttributeStringValueMapping: map[int32]string{20: "value1"},
+				},
+			},
+		},
+	}
+	res, err := c.compareTargetGraphs(context.Background(), first, second, nil)
+	require.NoError(t, err)
+	cs := res[0].GetChangedTargets()
+	require.NotNil(t, cs)
+
+	// Find target T
+	var targetT *pb.ChangedTarget
+	for _, ct := range cs.GetChangedTargets() {
+		name := res[1].GetMetadata().GetTargetIdMapping()[ct.GetNewTarget().GetId()]
+		if name == "//app:T" {
+			targetT = ct
+			break
+		}
+	}
+	require.NotNil(t, targetT)
+	require.Equal(t, pb.CHANGE_TYPE_INDIRECT, targetT.GetChangeType(), "Target with only hash change (not deps/attrs) should be marked as INDIRECT")
+}
