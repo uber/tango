@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "storage",
     srcs = [
+        "diskstorage.go",
         "graphreader.go",
         "graphwriter.go",
         "memstorage.go",
@@ -18,7 +19,13 @@ go_library(
 
 go_test(
     name = "storage_test",
-    srcs = ["storage_test.go"],
+    srcs = [
+        "diskstorage_test.go",
+        "storage_test.go",
+    ],
     embed = [":storage"],
-    deps = ["@com_github_stretchr_testify//assert"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
 )
