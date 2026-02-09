@@ -143,7 +143,6 @@ func ResultToGetTargetGraphResponse(result targethasher.Result) ([]*tangopb.GetT
 }
 
 func chunkTargets(targets []*tangopb.OptimizedTarget, chunkSize int) []*tangopb.GetTargetGraphResponse {
-
 	if chunkSize <= 0 {
 		chunkSize = DefaultTargetChunkSize
 	}
