@@ -8,7 +8,7 @@ storage:
 
 # Repository configuration
 repository:
-  remote: "devexp/tango"
+  remote: "https://github.com/uber/tango.git"
   default_branch: "main"
   full_hash_repos:
     - ""

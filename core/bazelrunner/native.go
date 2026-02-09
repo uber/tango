@@ -1,8 +1,8 @@
 package bazelrunner
 
 import (
-	"github.com/uber/tango/core/config"
 	"context"
+	"github.com/uber/tango/core/config"
 
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/git"
@@ -42,6 +42,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		// --proto:locations: we need to get external file location to make CTC more accurate
 		// --noproto: parameters exclude fields from the output that are not used for hashing anyways, making
 		// proto blob smaller and serialization/deserialization faster
+		// TODO: pass in --enable_workspace or --enable_bzlmod based on the config
 		AdditionalArgs: []string{"--order_output=no", "--proto:locations", "--noproto:default_values"},
 	})
 	if err != nil {
