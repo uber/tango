@@ -28,17 +28,3 @@ func Parse(configFilePath string) (*Config, error) {
 	}
 	return &config, nil
 }
-
-// ParseConfig parses the repository configuration from the given file path.
-// Deprecated: Use Parse() instead for full configuration.
-func ParseConfig(configFilePath string) (*RepositoryConfig, error) {
-	yamlBytes, err := os.ReadFile(configFilePath)
-	if err != nil {
-		return nil, err
-	}
-	var config RepositoryConfig
-	if err := yaml.Unmarshal(yamlBytes, &config); err != nil {
-		return nil, err
-	}
-	return &config, nil
-}

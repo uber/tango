@@ -13,6 +13,7 @@ import (
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/core/storage/disk"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/yarpc"
@@ -33,15 +34,13 @@ func run() error {
 	defer zl.Sync()
 	logger := zl.Sugar()
 
-	// Parse configuration
 	configFilePath := filepath.Join("example", "tango-config.yaml")
 	cfg, err := config.Parse(configFilePath)
 	if err != nil {
 		return fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	// Create storage based on configuration
-	store, err := storage.NewStorage(cfg.Storage)
+	store, err := newStorage(cfg.Storage)
 	if err != nil {
 		return fmt.Errorf("failed to create storage: %w", err)
 	}
@@ -104,4 +103,22 @@ func run() error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 	return nil
+}
+
+// newStorage creates a Storage implementation based on the provided configuration.
+func newStorage(cfg config.StorageConfig) (storage.Storage, error) {
+	switch cfg.Type {
+	case config.StorageTypeMemory, "":
+		return storage.NewMemoryStorage(), nil
+	case config.StorageTypeDisk:
+		if cfg.Disk == nil {
+			return nil, fmt.Errorf("disk storage requires 'disk' configuration")
+		}
+		if cfg.Disk.RootPath == "" {
+			return nil, fmt.Errorf("disk storage requires 'root_path' to be set")
+		}
+		return disk.New(cfg.Disk.RootPath)
+	default:
+		return nil, fmt.Errorf("unsupported storage type: %q", cfg.Type)
+	}
 }

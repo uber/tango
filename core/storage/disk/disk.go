@@ -7,60 +7,52 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/uber/tango/core/storage"
 )
 
-// NotFoundError is returned when a blob is not found.
-type NotFoundError struct {
-	Path string
-}
-
-func (e *NotFoundError) Error() string {
-	return "blob not found at path: " + e.Path
-}
-
-// Storage is a disk-based blob storage.
-type Storage struct {
+type diskStorage struct {
 	rootDir string
 }
 
-// New creates a new disk-based storage.
+// New creates a new disk-based storage that implements storage.Storage.
 // The rootDir is the base directory where all blobs will be stored.
-func New(rootDir string) (*Storage, error) {
+func New(rootDir string) (*diskStorage, error) {
 	if rootDir == "" {
 		return nil, errors.New("root directory cannot be empty")
 	}
 	if err := os.MkdirAll(rootDir, 0o755); err != nil {
 		return nil, err
 	}
-	return &Storage{rootDir: rootDir}, nil
+	return &diskStorage{rootDir: rootDir}, nil
 }
 
-// Get retrieves a blob by key. Returns NotFoundError if not found.
-func (d *Storage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+// Get retrieves a blob by key. Returns storage.NotFoundError if not found.
+func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	path := filepath.Join(d.rootDir, key)
+	path := filepath.Join(d.rootDir, req.Key)
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, &NotFoundError{Path: key}
+			return nil, &storage.NotFoundError{Path: req.Key}
 		}
 		return nil, err
 	}
-	return file, nil
+	return &storage.DownloadResponse{ReadCloser: file}, nil
 }
 
 // Put stores a blob with the given key.
-func (d *Storage) Put(ctx context.Context, key string, reader io.Reader) error {
+func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if reader == nil {
+	if req.Reader == nil {
 		return errors.New("nil reader")
 	}
 
-	path := filepath.Join(d.rootDir, key)
+	path := filepath.Join(d.rootDir, req.Key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -73,7 +65,7 @@ func (d *Storage) Put(ctx context.Context, key string, reader io.Reader) error {
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmp, reader); err != nil {
+	if _, err := io.Copy(tmp, req.Reader); err != nil {
 		tmp.Close()
 		return err
 	}

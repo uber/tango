@@ -53,7 +53,7 @@ func NewNativeOrchestrator(p Params) Orchestrator {
 // It leases a workspace, checks out the base revision, applies the change requests, and computes the target graph.
 func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTargetGraphParam) (storage.GraphReader, error) {
 	// parse the config file
-	config, err := config.ParseConfig(b.configFilePath)
+	cfg, err := config.Parse(b.configFilePath)
 	if err != nil {
 		b.logger.Error("getGraph: Error parsing config file", zap.String("configFilePath", b.configFilePath), zap.Error(err))
 		return nil, err
@@ -116,8 +116,8 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 				client, err := bazel.NewBazelClient(bazel.Params{
 					WorkspacePath: ws.Path(),
 					Logger:        b.logger,
-					BazelCommand:  config.BazelCommand,
-					QueryTimeout:  time.Duration(config.QueryTimeout) * time.Second,
+					BazelCommand:  cfg.Repository.BazelCommand,
+					QueryTimeout:  time.Duration(cfg.Repository.QueryTimeout) * time.Second,
 				})
 				if err != nil {
 					b.logger.Error("getGraph: Error creating bazel client", zap.Error(err))
@@ -127,7 +127,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 				runner = bazelrunner.NewNativeGraphRunner(bazelrunner.NativeGraphRunnerParams{
 					BazelClient: client,
 					GitClient:   gitModule,
-					Config:      *config,
+					Config:      cfg.Repository,
 				})
 			}
 			result, err := runner.Compute(ctx, ws)

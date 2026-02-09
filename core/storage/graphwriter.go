@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	pb "github.com/uber/tango/tangopb"
 	gogio "github.com/gogo/protobuf/io"
+	pb "github.com/uber/tango/tangopb"
 )
 
 // WriteGraphStream writes a list of GetTargetGraphResponse messages to the storage.

@@ -11,8 +11,6 @@ go_library(
     importpath = "github.com/uber/tango/core/storage",
     visibility = ["//visibility:public"],
     deps = [
-        "//core/config",
-        "//core/storage/disk",
         "//tangopb",
         "@com_github_gogo_protobuf//io",
     ],

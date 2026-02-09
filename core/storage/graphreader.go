@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	pb "github.com/uber/tango/tangopb"
 	gogio "github.com/gogo/protobuf/io"
+	pb "github.com/uber/tango/tangopb"
 )
 
 type GraphReader interface {
@@ -49,7 +49,7 @@ func NewGraphReader(ctx context.Context, st Storage, key string) (GraphReader, e
 	if err != nil {
 		return nil, err
 	}
-	if resp.ReadCloser == nil {
+	if resp == nil || resp.ReadCloser == nil {
 		return nil, nil
 	}
 	return &graphReaderCloser{

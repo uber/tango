@@ -7,14 +7,14 @@ import (
 	"io"
 	"testing"
 
+	gogio "github.com/gogo/protobuf/io"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
-	gogio "github.com/gogo/protobuf/io"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 )
@@ -283,19 +283,11 @@ func TestGetTargetGraph_StreamSendError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-type mockReadCloser struct {
-	*bytes.Reader
-}
-
-func (m *mockReadCloser) Close() error {
-	return nil
-}
-
 func newMockReadCloser(data []byte) io.ReadCloser {
 	if data == nil {
 		return nil
 	}
-	return &mockReadCloser{Reader: bytes.NewReader(data)}
+	return io.NopCloser(bytes.NewReader(data))
 }
 
 type errReadCloser struct{ err error }

@@ -6,16 +6,13 @@ type StorageType string
 const (
 	StorageTypeMemory StorageType = "memory"
 	StorageTypeDisk   StorageType = "disk"
-	// Future storage types can be added here:
-	// StorageTypeS3     StorageType = "s3"
-	// StorageTypeGCS    StorageType = "gcs"
 )
 
 // StorageConfig holds configuration for storage backends.
 // Similar to Athens' storage configuration pattern.
 type StorageConfig struct {
 	// Type specifies which storage backend to use.
-	// Supported values: "memory", "disk"
+	// Supported values: "memory", "disk" etc.
 	// Defaults to "memory" if not specified.
 	Type StorageType `yaml:"type"`
 
