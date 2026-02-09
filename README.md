@@ -149,7 +149,7 @@ You can customize the client behavior with these environment variables:
 
 Example:
 ```bash
-make run-client REMOTE=mobile/android BASE_SHA=abc123 REQUEST_URLS=https://github.com/uber/repo/pull/123
+make run-client REMOTE=https://github.com/uber/tango.git  METHOD=get-target-graph BASE_SHA=HEAD
 ```
 
 ## CI/CD

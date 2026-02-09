@@ -19,7 +19,6 @@ func TestNew(t *testing.T) {
 		s, err := New(tmpDir)
 		require.NoError(t, err)
 		assert.NotNil(t, s)
-		// Verify it implements storage.Storage
 		var _ storage.Storage = s
 	})
 
