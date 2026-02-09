@@ -11,9 +11,7 @@ import (
 )
 
 const (
-	// DefaultTargetChunkSize is the default number of targets per message chunk.
-	// This helps keep individual protobuf messages under size limits and enables
-	// streaming processing of large target graphs.
+	// DefaultTargetChunkSize is the default number of targets per message chunk, used for streaming large target graphs.
 	DefaultTargetChunkSize = 1000
 )
 
@@ -127,10 +125,8 @@ func ResultToGetTargetGraphResponse(result targethasher.Result) ([]*tangopb.GetT
 	attrNameIDToName := attrNameMapper.Invert()
 	attrStrValIDToVal := attrStrValMapper.Invert()
 
-	// Chunk targets into multiple messages for memory efficiency and streaming
+	// chunk targets into multiple messages for streaming
 	responses := chunkTargets(optimizedTargets, DefaultTargetChunkSize)
-
-	// Append metadata as the final message
 	responses = append(responses, &tangopb.GetTargetGraphResponse{
 		Item: &tangopb.GetTargetGraphResponse_Metadata{
 			Metadata: &tangopb.Metadata{
@@ -146,17 +142,14 @@ func ResultToGetTargetGraphResponse(result targethasher.Result) ([]*tangopb.GetT
 	return responses, nil
 }
 
-// chunkTargets splits targets into chunks of the specified size and returns
-// a slice of GetTargetGraphResponse messages, one per chunk.
 func chunkTargets(targets []*tangopb.OptimizedTarget, chunkSize int) []*tangopb.GetTargetGraphResponse {
+
 	if chunkSize <= 0 {
 		chunkSize = DefaultTargetChunkSize
 	}
 
-	numChunks := (len(targets) + chunkSize - 1) / chunkSize
-	if numChunks == 0 {
-		numChunks = 1 // Always return at least one targets message (even if empty)
-	}
+	// at least one chunk
+	numChunks := max(1, (len(targets)+chunkSize-1)/chunkSize)
 
 	responses := make([]*tangopb.GetTargetGraphResponse, 0, numChunks)
 

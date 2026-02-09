@@ -135,12 +135,12 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 				b.logger.Error("getGraph: Error computing target graph", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 				return nil, err
 			}
-			graphs, err := common.ResultToGetTargetGraphResponse(result)
+			responses, err := common.ResultToGetTargetGraphResponse(result)
 			if err != nil {
 				b.logger.Error("getGraph: Error converting target graph to GetTargetGraphResponse", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 				return nil, err
 			}
-			err = storage.WriteGraphStream(ctx, b.storage, treehashPath, graphs)
+			err = storage.WriteGraphStream(ctx, b.storage, treehashPath, responses)
 			if err != nil {
 				b.logger.Error("getGraph: Error writing target graph to storage", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 				return nil, err
