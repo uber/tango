@@ -2,7 +2,11 @@ load("@rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "config",
-    srcs = ["config.go"],
+    srcs = [
+        "config.go",
+        "repository_config.go",
+        "storage_config.go",
+    ],
     importpath = "github.com/uber/tango/core/config",
     visibility = ["//visibility:public"],
     deps = ["@com_github_goccy_go_yaml//:go-yaml"],

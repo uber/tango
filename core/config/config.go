@@ -1,30 +1,43 @@
 package config
 
 import (
-	yaml "github.com/goccy/go-yaml"
 	"os"
+
+	yaml "github.com/goccy/go-yaml"
 )
 
-type RepositoryConfig struct {
-	Remote                 string   `yaml:"remote"`
-	DefaultBranch          string   `yaml:"default_branch"`
-	FullHashRepos          []string `yaml:"full_hash_repos"`
-	ExcludedFiles          []string `yaml:"excluded_files"`
-	ExcludeExternalTargets bool     `yaml:"exclude_external_targets"`
-	BzlmodEnabled          bool     `yaml:"bzlmod_enabled"`
-	BazelCommand           string   `yaml:"bazel_command"`
-	QueryTimeout           int64    `yaml:"query_timeout"` // in seconds
-	GitTimeout             int64    `yaml:"git_timeout"`   // in seconds
+// Config is the root configuration structure.
+type Config struct {
+	Repository RepositoryConfig `yaml:"repository"`
+	Storage    StorageConfig    `yaml:"storage"`
 }
 
+// Parse parses the full configuration from the given file path.
+func Parse(configFilePath string) (*Config, error) {
+	yamlBytes, err := os.ReadFile(configFilePath)
+	if err != nil {
+		return nil, err
+	}
+	var config Config
+	if err := yaml.Unmarshal(yamlBytes, &config); err != nil {
+		return nil, err
+	}
+	// Default to memory storage if not specified
+	if config.Storage.Type == "" {
+		config.Storage.Type = StorageTypeMemory
+	}
+	return &config, nil
+}
+
+// ParseConfig parses the repository configuration from the given file path.
+// Deprecated: Use Parse() instead for full configuration.
 func ParseConfig(configFilePath string) (*RepositoryConfig, error) {
 	yamlBytes, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return nil, err
 	}
 	var config RepositoryConfig
-	err = yaml.Unmarshal(yamlBytes, &config)
-	if err != nil {
+	if err := yaml.Unmarshal(yamlBytes, &config); err != nil {
 		return nil, err
 	}
 	return &config, nil

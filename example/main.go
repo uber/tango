@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 
+	"github.com/uber/tango/core/config"
 	"github.com/uber/tango/core/controller"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
@@ -17,7 +19,6 @@ import (
 	"go.uber.org/yarpc/api/transport"
 	yarpcgrpc "go.uber.org/yarpc/transport/grpc"
 	"go.uber.org/zap"
-	"net"
 )
 
 func main() {
@@ -32,34 +33,44 @@ func run() error {
 	defer zl.Sync()
 	logger := zl.Sugar()
 
-	// In-memory storage
-	mem := storage.NewMemoryStorage()
+	// Parse configuration
+	configFilePath := filepath.Join("example", "tango-config.yaml")
+	cfg, err := config.Parse(configFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse config: %w", err)
+	}
 
-	// Repo manager and orchestrator (for now, these are mostly placeholders for local testing)
+	// Create storage based on configuration
+	store, err := storage.NewStorage(cfg.Storage)
+	if err != nil {
+		return fmt.Errorf("failed to create storage: %w", err)
+	}
+	logger.Infof("Using storage type: %s", cfg.Storage.Type)
+
+	// Repo manager and orchestrator
 	rootWS := filepath.Join(os.TempDir(), "tango-workspaces")
 	if err := os.MkdirAll(rootWS, 0o755); err != nil {
 		return fmt.Errorf("failed to create root workspace: %w", err)
 	}
-	// clean up the workspace on exit
 	defer os.RemoveAll(rootWS)
+
 	rm := repomanager.NewRepoManager(repomanager.Params{
 		Git:           git.New(rootWS),
 		Logger:        logger,
 		RootWorkspace: rootWS,
 	})
-	configFilePath := filepath.Join("example", "tango-config.yaml")
 	orch := orchestrator.NewNativeOrchestrator(orchestrator.Params{
-		Storage:     mem,
-		RepoManager: rm,
-		Logger:      logger,
-		GitFactory:  git.New,
+		Storage:        store,
+		RepoManager:    rm,
+		Logger:         logger,
+		GitFactory:     git.New,
 		ConfigFilePath: configFilePath,
 	})
 
 	// Controller (YARPC server implementation)
 	ctrl := controller.NewController(controller.Params{
 		Logger:       zl,
-		Storage:      mem,
+		Storage:      store,
 		Orchestrator: orch,
 	})
 

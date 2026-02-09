@@ -3,7 +3,6 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "storage",
     srcs = [
-        "diskstorage.go",
         "graphreader.go",
         "graphwriter.go",
         "memstorage.go",
@@ -12,6 +11,8 @@ go_library(
     importpath = "github.com/uber/tango/core/storage",
     visibility = ["//visibility:public"],
     deps = [
+        "//core/config",
+        "//core/storage/disk",
         "//tangopb",
         "@com_github_gogo_protobuf//io",
     ],
@@ -19,13 +20,7 @@ go_library(
 
 go_test(
     name = "storage_test",
-    srcs = [
-        "diskstorage_test.go",
-        "storage_test.go",
-    ],
+    srcs = ["storage_test.go"],
     embed = [":storage"],
-    deps = [
-        "@com_github_stretchr_testify//assert",
-        "@com_github_stretchr_testify//require",
-    ],
+    deps = ["@com_github_stretchr_testify//assert"],
 )

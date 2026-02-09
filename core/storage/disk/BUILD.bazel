@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "disk",
+    srcs = ["disk.go"],
+    importpath = "github.com/uber/tango/core/storage/disk",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "disk_test",
+    srcs = ["disk_test.go"],
+    embed = [":disk"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

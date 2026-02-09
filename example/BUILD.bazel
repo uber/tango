@@ -6,6 +6,7 @@ go_library(
     importpath = "github.com/uber/tango/example",
     visibility = ["//visibility:private"],
     deps = [
+        "//core/config",
         "//core/controller",
         "//core/git",
         "//core/repomanager",
@@ -21,8 +22,8 @@ go_library(
 
 go_binary(
     name = "example",
-    embed = [":example_lib"],
     data = [":config"],
+    embed = [":example_lib"],
     visibility = ["//visibility:public"],
 )
 

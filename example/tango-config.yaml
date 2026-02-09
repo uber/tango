@@ -1,8 +1,18 @@
-remote: "devexp/tango"
-default_branch: "main"
-full_hash_repos:
-  - ""
-exclude_external_targets: true
-bzlmod_enabled: true
-query_timeout: 300
-git_timeout: 300
+# Storage configuration
+# Supported types: "memory", "disk"
+storage:
+  type: "memory"
+  # Disk storage configuration (used when type is "disk")
+  # disk:
+  #   root_path: "/tmp/tango-storage"
+
+# Repository configuration
+repository:
+  remote: "devexp/tango"
+  default_branch: "main"
+  full_hash_repos:
+    - ""
+  exclude_external_targets: true
+  bzlmod_enabled: true
+  query_timeout: 300
+  git_timeout: 300
