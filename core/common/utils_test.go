@@ -2,9 +2,11 @@ package common
 
 import (
 	"encoding/base64"
+	"fmt"
 	"path/filepath"
 	"testing"
 
+	"github.com/uber/tango/core/targethasher"
 	pb "github.com/uber/tango/tangopb"
 )
 
@@ -104,5 +106,67 @@ func TestGetReqsBase64(t *testing.T) {
 				t.Fatalf("getReqsBase64(%v) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestChunkTargets(t *testing.T) {
+	t.Parallel()
+
+	// Create 250 targets, chunk by 100 → expect 3 chunks (100, 100, 50)
+	targets := make([]*pb.OptimizedTarget, 250)
+	for i := range targets {
+		targets[i] = &pb.OptimizedTarget{Id: int32(i)}
+	}
+
+	responses := chunkTargets(targets, 100)
+
+	if len(responses) != 3 {
+		t.Fatalf("got %d chunks, want 3", len(responses))
+	}
+
+	// Verify total count and order preserved
+	var total int
+	for _, resp := range responses {
+		item := resp.Item.(*pb.GetTargetGraphResponse_Targets)
+		for _, target := range item.Targets.Targets {
+			if target.Id != int32(total) {
+				t.Fatalf("target order not preserved at index %d", total)
+			}
+			total++
+		}
+	}
+	if total != 250 {
+		t.Fatalf("total targets = %d, want 250", total)
+	}
+}
+
+func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
+	t.Parallel()
+
+	// Create 1500 targets (DefaultTargetChunkSize=1000) → expect 2 chunks + metadata
+	numTargets := 1500
+	result := targethasher.Result{
+		TargetNames: make([]string, numTargets),
+		Targets:     make(map[string]*targethasher.Target, numTargets),
+	}
+	for i := 0; i < numTargets; i++ {
+		name := fmt.Sprintf("//pkg:target%d", i)
+		result.TargetNames[i] = name
+		result.Targets[name] = &targethasher.Target{Name: name, Hash: []byte{0}, RuleType: "go_library"}
+	}
+
+	responses, err := ResultToGetTargetGraphResponse(result)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	// Expect 2 target chunks + 1 metadata = 3 responses
+	if len(responses) != 3 {
+		t.Fatalf("got %d responses, want 3", len(responses))
+	}
+
+	// Last should be metadata
+	if _, ok := responses[2].Item.(*pb.GetTargetGraphResponse_Metadata); !ok {
+		t.Fatal("last response should be Metadata")
 	}
 }
