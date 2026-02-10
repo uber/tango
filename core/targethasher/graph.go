@@ -233,11 +233,9 @@ func GetInternalTargetsWithoutHashAndRootInfo(ctx context.Context, r *buildpb.Qu
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-
 		if t.GetRule() != nil && strings.HasPrefix(t.GetRule().GetName(), externalWorkspaceRulePrefix) {
 			continue
 		}
-
 		target, err := toTarget(t)
 		if err != nil {
 			return nil, err
@@ -392,7 +390,6 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 			}
 		}
 	}
-
 	return Result{
 		TargetNames: targetNames,
 		Targets:     targets,
@@ -471,7 +468,8 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 	l := labels.Parse(p.TargetName)
 	// For external targets like @bazel_tools//tools/genrule:genrule-setup.sh,
 	// map the hash to //external:bazel_tools's hash (unless it's in FullHashRepos)
-	if isExternalTarget(p.TargetName) && l.Repository != "" && !p.FullHashRepos.Contains(l.Repository) {
+	if false && isExternalTarget(p.TargetName) && l.Repository != "" && !p.FullHashRepos.Contains(l.Repository) {
+
 		translatedExternalTargetName := externalTargetForRule(p.TargetName)
 		if t, hasExternalRule := p.Targets[translatedExternalTargetName]; hasExternalRule {
 			target = t
@@ -549,6 +547,10 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 
 	switch target.RuleType {
 	case SourceFileType:
+		// TODO:
+		if strings.HasSuffix(p.TargetName, ".exe") {
+			return []byte{}, nil
+		}
 		h, err := p.Hasher.HashSourceFile(target.SourceFile)
 		if err != nil {
 			return nil, err

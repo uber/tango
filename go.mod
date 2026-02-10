@@ -8,6 +8,7 @@ require (
 	github.com/goccy/go-yaml v1.19.1
 	github.com/gofrs/flock v0.12.1
 	github.com/gogo/protobuf v1.3.2
+	github.com/golang/mock v1.7.0-rc.1
 	github.com/google/go-cmp v0.6.0
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/fx v1.24.0
@@ -27,7 +28,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/gogo/googleapis v1.4.1 // indirect
 	github.com/gogo/status v1.1.0 // indirect
-	github.com/golang/mock v1.7.0-rc.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect

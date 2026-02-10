@@ -1,11 +1,11 @@
 package controller
 
 import (
-	"github.com/uber/tango/core/common"
-	"github.com/uber/tango/orchestrator"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/uber/tango/core/common"
+	"github.com/uber/tango/orchestrator"
 	"io"
 
 	"github.com/uber/tango/core/storage"

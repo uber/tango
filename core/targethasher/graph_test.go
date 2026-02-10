@@ -2,43 +2,23 @@ package targethasher
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"os"
-	"path"
 	"regexp"
-	"strings"
 	"testing"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	set "github.com/deckarep/golang-set/v2"
+	"github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/uber/tango/core/bazel"
 )
 
 func StringPtr(s string) *string {
 	return &s
-}
-
-type testHasher struct {
-	known map[string][]byte
-}
-
-func (th *testHasher) HashSourceFile(s *buildpb.SourceFile, externalHashes map[string]Target) ([]byte, error) {
-	h := newHash()
-	if strings.HasPrefix(s.GetName(), externalWorkspaceFilePrefix) {
-		if h, ok := externalHashes[externalTargetForRule(s.GetName())]; ok {
-			return h.Hash, nil
-		}
-		return nil, fmt.Errorf("expected '//external:...' rule for: %q", s.GetName())
-	}
-	if b, ok := th.known[s.GetName()]; ok {
-		return b, nil
-	}
-	io.WriteString(h, s.GetName())
-	return h.Sum(nil), nil
 }
 
 func TestEmptyResult(t *testing.T) {
@@ -294,23 +274,34 @@ func validateResultIsStable(t *testing.T, baseResult, result Result) {
 	}
 }
 
-func createFileStructureForTestFiles(folder string, files map[string]string) error {
-	if err := os.MkdirAll(folder, os.ModePerm); err != nil {
-		return err
-	}
-
-	for name, content := range files {
-		if err := os.WriteFile(path.Join(folder, name), []byte(content), os.ModePerm); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func assertEqualTargetHash(t *testing.T, expected, actual Target) {
 	opt := cmpopts.IgnoreUnexported(Target{})
 	// too many nested attributes to compare
 	ignore := cmpopts.IgnoreFields(Target{}, "Attributes", "SourceFile", "Rule")
 	assert.True(t, cmp.Equal(expected, actual, opt, ignore), cmp.Diff(expected, actual, opt))
+}
+
+func Test_fromProto(t *testing.T) {
+	ctrl := gomock.NewController(t)
+
+	mockHasher := NewMockSourceHasher(ctrl)
+	mockHasher.EXPECT().
+		HashSourceFile(gomock.Any()).
+		DoAndReturn(func(s *buildpb.SourceFile) ([]byte, error) {
+			h := newHash()
+			io.WriteString(h, s.GetName())
+			return h.Sum(nil), nil
+		}).AnyTimes()
+
+	// bazel query "deps(//...:all-targets)" --enable_bzlmod --order_output=no --proto:locations --noproto:default_values --output=proto > core/targethasher/testdata/test.proto.bin
+	q, err := bazel.FromFile("testdata/test.proto.bin")
+	require.NoError(t, err)
+
+	a, err := fromProto(context.Background(), q, mockHasher, "", set.NewSet[string](), nil)
+	require.NoError(t, err)
+
+	assert.Empty(t, a.Warnings)
+	assert.Len(t, a.Targets, len(a.TargetNames))
+	t.Log(a.TargetNames)
+	assert.Equal(t, len(a.TargetNames), 3640)
 }

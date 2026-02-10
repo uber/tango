@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/uber/tango/core/config"
 
+	"fmt"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/targethasher"

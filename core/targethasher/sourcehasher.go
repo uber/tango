@@ -148,7 +148,8 @@ func filterVisibilityLabels(labels []string) (res []string) {
 
 func externalTargetForRule(t string) string {
 	// @workspace//path:target -> //external:workspace
-	return externalWorkspaceRulePrefix + strings.TrimPrefix(strings.Split(t, "//")[0], "@")
+	// @@workspace//path:target -> //external:workspace (bzlmod)
+	return externalWorkspaceRulePrefix + strings.TrimLeft(strings.Split(t, "//")[0], "@")
 }
 
 func pathForTarget(root, target string) string {
