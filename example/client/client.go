@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	pb "github.com/uber/tango/tangopb"
 	"encoding/json"
+	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/yarpc"
 	yarpcgrpc "go.uber.org/yarpc/transport/grpc"
 	"go.uber.org/zap"
@@ -96,16 +96,15 @@ func main() {
 		}
 		req := &pb.GetChangedTargetsRequest{
 			FirstRevision: &pb.BuildDescription{
-				Remote: *remote,
-				BaseSha: *baseSHA,
+				Remote:      *remote,
+				BaseSha:     *baseSHA,
 				RequestUrls: requests,
 			},
 			SecondRevision: &pb.BuildDescription{
-				Remote: *remote,
-				BaseSha: *newBaseSHA,
+				Remote:      *remote,
+				BaseSha:     *newBaseSHA,
 				RequestUrls: newRequests,
 			},
-
 		}
 		if err := callGetChangedTargets(ctx, client, logger, req); err != nil {
 			logger.Errorf("Error: %v", err)
@@ -130,12 +129,12 @@ func callGetTargetGraph(ctx context.Context, client pb.TangoYARPCClient, logger 
 		if err == io.EOF {
 			break
 		}
+		if err != nil {
+			return fmt.Errorf("recv: %w", err)
+		}
 		if msg == nil {
 			fmt.Println("Received empty message")
 			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("recv: %w", err)
 		}
 		if msg.Item == nil {
 			fmt.Println("Received empty item")
@@ -164,7 +163,6 @@ func callGetTargetGraph(ctx context.Context, client pb.TangoYARPCClient, logger 
 	return nil
 }
 
-
 func callGetChangedTargets(ctx context.Context, client pb.TangoYARPCClient, logger *zap.SugaredLogger, req *pb.GetChangedTargetsRequest) error {
 	stream, err := client.GetChangedTargets(ctx, req)
 	if err != nil {
@@ -174,15 +172,15 @@ func callGetChangedTargets(ctx context.Context, client pb.TangoYARPCClient, logg
 
 	for {
 		msg, err := stream.Recv()
-		if msg == nil {
-			logger.Info("Received empty message")
-			return nil
-		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return fmt.Errorf("recv: %w", err)
+		}
+		if msg == nil {
+			logger.Info("Received empty message")
+			return nil
 		}
 		if msg.Item == nil {
 			fmt.Println("Received empty item")

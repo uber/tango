@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
-	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 )
 
 func (b *BazelClient) setupCommand(ctx context.Context, query string, startupOptions []string, additionalArgs ...string) commander {
@@ -87,7 +87,7 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	b.logger.Info("\nParsed targets (%d):\n", len(queryResults.Target))
 	b.logger.Info("STDOUT: %s", stdoutBuf.String())
 	if stderrBuf.Len() > 0 {
-		b.logger.Error("STDERR: %s", stderrBuf.String())
+		b.logger.Debugf("STDERR: %s", stderrBuf.String())
 	}
 	return queryResults, nil
 }
