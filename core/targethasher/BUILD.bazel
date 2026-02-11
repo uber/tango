@@ -1,5 +1,5 @@
-load("@rules_go//go:def.bzl", "go_library", "go_test")
 load("@rules_go//extras:gomock.bzl", "gomock")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "targethasher",
@@ -18,7 +18,7 @@ go_library(
 
 gomock(
     name = "mock_sourcehasher",
-    out = "mock_sourcehasher.go",
+    out = "mock_sourcehasher_test.go",
     interfaces = ["SourceHasher"],
     library = ":targethasher",
     package = "targethasher",
@@ -28,7 +28,7 @@ go_test(
     name = "targethasher_test",
     srcs = [
         "graph_test.go",
-        "mock_sourcehasher.go",
+        "mock_sourcehasher_test.go",
         "sourcehasher_test.go",
     ],
     data = glob(["testdata/**"]),

@@ -65,7 +65,7 @@ func TestContextCancellation(t *testing.T) {
 	qr := &buildpb.QueryResult{
 		Target: []*buildpb.Target{&buildpb.Target{}},
 	}
-	result, err := fromProto(ctx, qr, nil, "", set.NewSet[string](), nil)
+	result, err := fromProto(ctx, qr, nil, "", set.NewSet[string](), nil, false)
 	assert.Equal(t, EmptyResult(), result)
 	assert.ErrorIs(t, err, context.Canceled)
 
@@ -93,7 +93,7 @@ func TestFromProtoSimpleRule(t *testing.T) {
 		},
 	}
 
-	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), nil)
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), nil, false)
 	require.NoError(t, err)
 
 	assert.Len(t, result.Targets, 1)
@@ -124,7 +124,7 @@ func TestFromProtoWithDependencies(t *testing.T) {
 		},
 	}
 
-	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), nil)
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), nil, false)
 	require.NoError(t, err)
 
 	assert.Len(t, result.Targets, 2)
@@ -162,7 +162,7 @@ func TestFromProtoWithExcludedRegex(t *testing.T) {
 	// Exclude targets matching "//vendor:.*"
 	excludedRegex := []*regexp.Regexp{regexp.MustCompile("//vendor:.*")}
 
-	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), excludedRegex)
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), excludedRegex, false)
 	require.NoError(t, err)
 
 	assert.Len(t, result.Targets, 2)
@@ -190,7 +190,7 @@ func TestFromProtoWithGeneratedFile(t *testing.T) {
 		},
 	}
 
-	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), nil)
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), nil, false)
 	require.NoError(t, err)
 
 	assert.Len(t, result.Targets, 2)
@@ -297,7 +297,7 @@ func Test_fromProto(t *testing.T) {
 	q, err := bazel.FromFile("testdata/test.proto.bin")
 	require.NoError(t, err)
 
-	a, err := fromProto(context.Background(), q, mockHasher, "", set.NewSet[string](), nil)
+	a, err := fromProto(context.Background(), q, mockHasher, "", set.NewSet[string](), nil, true)
 	require.NoError(t, err)
 
 	assert.Empty(t, a.Warnings)
