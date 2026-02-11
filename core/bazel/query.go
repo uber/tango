@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
-	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
 )
 
 func (b *BazelClient) setupCommand(ctx context.Context, query string, startupOptions []string, additionalArgs ...string) commander {
