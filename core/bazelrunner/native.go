@@ -56,6 +56,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		KnownSourceHashes: knownSourceHashes,
 		FullHashRepos:     g.config.FullHashRepos,
 		ExcludedFiles:     g.config.ExcludedFiles,
+		UseBzlmod:         g.config.BzlmodEnabled,
 	}
 
 	res, err := targethasher.FromProto(ctx, queryResult.Result, ws.Path(), hashConfig)

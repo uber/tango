@@ -87,7 +87,7 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	b.logger.Info("\nParsed targets (%d):\n", len(queryResults.Target))
 	b.logger.Info("STDOUT: %s", stdoutBuf.String())
 	if stderrBuf.Len() > 0 {
-		b.logger.Error("STDERR: %s", stderrBuf.String())
+		b.logger.Debugf("STDERR: %s", stderrBuf.String())
 	}
 	return queryResults, nil
 }

@@ -352,6 +352,7 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 		ExcludedRegex: excludedRegex,
 		UseBzlmod:     useBzlmod,
 	}
+
 	for _, name := range roots {
 		hashParam.TargetName = name
 		if _, err := HashRecursively(ctx, hashParam); err != nil {
