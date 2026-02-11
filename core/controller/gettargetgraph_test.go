@@ -7,7 +7,6 @@ import (
 	"io"
 	"testing"
 
-	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/storage"
@@ -17,6 +16,7 @@ import (
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
+	"google.golang.org/protobuf/encoding/protodelim"
 )
 
 func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
@@ -106,7 +106,7 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).Return(nil)
 	store := storagemock.NewMockStorage(ctrl)
 	var buf bytes.Buffer
-	err := gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
+	_, err := protodelim.MarshalTo(&buf, &pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
 	})
 	require.NoError(t, err)
@@ -263,7 +263,7 @@ func TestGetTargetGraph_StreamSendError(t *testing.T) {
 	storagemock := storagemock.NewMockStorage(ctrl)
 
 	var buf bytes.Buffer
-	err := gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
+	_, err := protodelim.MarshalTo(&buf, &pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
 	})
 	require.NoError(t, err)

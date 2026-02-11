@@ -7,6 +7,8 @@ import (
 	"io"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	graphmock "github.com/uber/tango/core/bazelrunner/mock"
 	"github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
@@ -16,11 +18,9 @@ import (
 	targethasher "github.com/uber/tango/core/targethasher"
 	workspacemock "github.com/uber/tango/core/workspace/workspacemock"
 	pb "github.com/uber/tango/tangopb"
-	gogio "github.com/gogo/protobuf/io"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
+	"google.golang.org/protobuf/encoding/protodelim"
 )
 
 func TestNative_GetTargetGraph_Success(t *testing.T) {
@@ -29,7 +29,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 
 	st := storagemock.NewMockStorage(ctrl)
 	var buf bytes.Buffer
-	err := gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
+	_, err := protodelim.MarshalTo(&buf, &pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
 	})
 	require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	st.EXPECT().Put(gomock.Any(), gomock.Any()).Return(nil).MinTimes(2)
 	// After compute, second read returns a valid delimited stream with one message
 	var buf bytes.Buffer
-	_ = gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
+	_, _ = protodelim.MarshalTo(&buf, &pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
 	})
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{
@@ -156,7 +156,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	defer ctrl.Finish()
 	st := storagemock.NewMockStorage(ctrl)
 	var buf bytes.Buffer
-	err := gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
+	_, err := protodelim.MarshalTo(&buf, &pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
 	})
 	require.NoError(t, err)

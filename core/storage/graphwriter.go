@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	gogio "github.com/gogo/protobuf/io"
 	pb "github.com/uber/tango/tangopb"
+	"google.golang.org/protobuf/encoding/protodelim"
 )
 
 // WriteGraphStream writes a list of GetTargetGraphResponse messages to the storage.
@@ -14,9 +14,8 @@ import (
 // Typically this includes multiple OptimizedTargets chunks followed by Metadata.
 func WriteGraphStream(ctx context.Context, st Storage, key string, responses []*pb.GetTargetGraphResponse) error {
 	buf := &bytes.Buffer{}
-	w := gogio.NewDelimitedWriter(buf) // varint-length-delimited
 	for _, r := range responses {
-		if err := w.WriteMsg(r); err != nil {
+		if _, err := protodelim.MarshalTo(buf, r); err != nil {
 			return fmt.Errorf("write delimited: %w", err)
 		}
 	}
