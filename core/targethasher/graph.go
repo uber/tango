@@ -475,13 +475,6 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 		return t.Hash, nil
 	}
 
-	// bazel_tools is a special case, it comes with bazel installation as a local_repository, it contains platform dependent
-	// files that are not relevant to the build, we don't need to hash it
-	// TODO: use "bazel mod show_repo bazel_tools" to get proper hash
-	if strings.HasPrefix(p.TargetName, "@bazel_tools/") || strings.HasPrefix(p.TargetName, "@@bazel_tools/") {
-		return []byte{}, nil
-	}
-
 	var target *Target
 	l := labels.Parse(p.TargetName)
 	// For external targets like @gazelle//language/proto:fix.go,
