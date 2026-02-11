@@ -663,22 +663,6 @@ func isExternalWorkspaceType(t *buildpb.Target) bool {
 	}
 }
 
-func isWorkspaceRootRule(t *buildpb.Target, rootRulePrefixes []string) bool {
-	if *t.Type == buildpb.Target_RULE {
-		return hasAnyPrefix(t, rootRulePrefixes)
-	}
-	return false
-}
-
-func hasAnyPrefix(t *buildpb.Target, rootRulePrefixes []string) bool {
-	for _, rootPrefix := range rootRulePrefixes {
-		if strings.HasPrefix(t.Rule.GetName(), rootPrefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func isExcluded(targetName string, excludedRegex []*regexp.Regexp) bool {
 	for _, re := range excludedRegex {
 		if re.MatchString(targetName) {
