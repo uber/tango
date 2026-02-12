@@ -7,17 +7,17 @@ import (
 	"io"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
+	gogio "github.com/gogo/protobuf/io"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
-	"google.golang.org/protobuf/encoding/protodelim"
 )
 
 func TestValidateGetChangedTargetsRequest(t *testing.T) {
@@ -189,7 +189,7 @@ func TestGetChangedTargets_Success(t *testing.T) {
 	// Prepare graph bytes to be returned for graph fetches
 	graph := pb.GetTargetGraphResponse{Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}}}
 	var buf bytes.Buffer
-	_, err := protodelim.MarshalTo(&buf, &graph)
+	err := gogio.NewDelimitedWriter(&buf).WriteMsg(&graph)
 	require.NoError(t, err)
 	// Controller.getGraph performs two storage lookups per revision:
 	// 1) treehash cache -> returns bytes (content not important)
@@ -258,7 +258,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 	require.NotNil(t, cs)
 	require.Len(t, cs.GetChangedTargets(), 1)
 	ct := cs.GetChangedTargets()[0]
-	require.Equal(t, pb.ChangeType_CHANGE_TYPE_NEW, ct.GetChangeType())
+	require.Equal(t, pb.CHANGE_TYPE_NEW, ct.GetChangeType())
 	// ID used in target should match canonical metadata mapping
 	meta := res[1].GetMetadata()
 	require.NotNil(t, meta)
@@ -341,8 +341,8 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 	}
 	require.NotNil(t, aCT)
 	require.NotNil(t, lCT)
-	require.Equal(t, pb.ChangeType_CHANGE_TYPE_DIRECT, aCT.GetChangeType())
-	require.Equal(t, pb.ChangeType_CHANGE_TYPE_DIRECT, lCT.GetChangeType())
+	require.Equal(t, pb.CHANGE_TYPE_DIRECT, aCT.GetChangeType())
+	require.Equal(t, pb.CHANGE_TYPE_DIRECT, lCT.GetChangeType())
 	// Old and new IDs must match for each changed target under canonical metadata
 	require.Equal(t, aCT.GetOldTarget().GetId(), aCT.GetNewTarget().GetId())
 	require.Equal(t, lCT.GetOldTarget().GetId(), lCT.GetNewTarget().GetId())
@@ -396,7 +396,7 @@ func TestCompareTargetGraphs_IndirectWhenNoSourceDep(t *testing.T) {
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
 	require.Len(t, cs.GetChangedTargets(), 1)
-	require.Equal(t, pb.ChangeType_CHANGE_TYPE_INDIRECT, cs.GetChangedTargets()[0].GetChangeType())
+	require.Equal(t, pb.CHANGE_TYPE_INDIRECT, cs.GetChangedTargets()[0].GetChangeType())
 }
 
 func TestCompareTargetGraphs_DirectWhenDependenciesChanged(t *testing.T) {
@@ -471,7 +471,7 @@ func TestCompareTargetGraphs_DirectWhenDependenciesChanged(t *testing.T) {
 		}
 	}
 	require.NotNil(t, targetT)
-	require.Equal(t, pb.ChangeType_CHANGE_TYPE_DIRECT, targetT.GetChangeType(), "Target with changed dependencies should be marked as DIRECT")
+	require.Equal(t, pb.CHANGE_TYPE_DIRECT, targetT.GetChangeType(), "Target with changed dependencies should be marked as DIRECT")
 }
 
 func TestCompareTargetGraphs_DirectWhenAttributesChanged(t *testing.T) {
@@ -542,7 +542,7 @@ func TestCompareTargetGraphs_DirectWhenAttributesChanged(t *testing.T) {
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
 	require.Len(t, cs.GetChangedTargets(), 1)
-	require.Equal(t, pb.ChangeType_CHANGE_TYPE_DIRECT, cs.GetChangedTargets()[0].GetChangeType(), "Target with changed attributes should be marked as DIRECT")
+	require.Equal(t, pb.CHANGE_TYPE_DIRECT, cs.GetChangedTargets()[0].GetChangeType(), "Target with changed attributes should be marked as DIRECT")
 }
 
 func TestCompareTargetGraphs_DirectWhenNewAttributeAdded(t *testing.T) {
@@ -622,7 +622,7 @@ func TestCompareTargetGraphs_DirectWhenNewAttributeAdded(t *testing.T) {
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
 	require.Len(t, cs.GetChangedTargets(), 1)
-	require.Equal(t, pb.ChangeType_CHANGE_TYPE_DIRECT, cs.GetChangedTargets()[0].GetChangeType(), "Target with new attribute added should be marked as DIRECT")
+	require.Equal(t, pb.CHANGE_TYPE_DIRECT, cs.GetChangedTargets()[0].GetChangeType(), "Target with new attribute added should be marked as DIRECT")
 }
 
 func TestCompareTargetGraphs_IndirectWhenOnlyHashChanged(t *testing.T) {
@@ -713,5 +713,5 @@ func TestCompareTargetGraphs_IndirectWhenOnlyHashChanged(t *testing.T) {
 		}
 	}
 	require.NotNil(t, targetT)
-	require.Equal(t, pb.ChangeType_CHANGE_TYPE_INDIRECT, targetT.GetChangeType(), "Target with only hash change (not deps/attrs) should be marked as INDIRECT")
+	require.Equal(t, pb.CHANGE_TYPE_INDIRECT, targetT.GetChangeType(), "Target with only hash change (not deps/attrs) should be marked as INDIRECT")
 }

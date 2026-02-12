@@ -77,12 +77,13 @@ Install protoc locally: https://github.com/protocolbuffers/protobuf?tab=readme-o
 
 Install required protoc plugins:
 ```bash
+go install github.com/gogo/protobuf/protoc-gen-gogoslick@latest
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 go install go.uber.org/yarpc/encoding/protobuf/protoc-gen-yarpc-go@latest
 ```
 
-Generate protobuf files:
+Generate protobuf files (generates gogoslick, grpc, and yarpc):
 ```bash
 make proto
 
@@ -91,7 +92,7 @@ make clean-proto && make proto
 ```
 
 This generates:
-- `tangopb/tango.pb.go` - Protocol buffer messages (google.golang.org/protobuf)
+- `tangopb/tango.pb.go` - Protocol buffer messages (gogoslick)
 - `tangopb/tango_grpc.pb.go` - gRPC service definitions
 - `tangopb/tango.pb.yarpc.go` - YARPC service definitions
 
@@ -127,7 +128,7 @@ Run `make help` to see all available commands:
 - `make clean` - Clean generated files and binaries
 
 **Protobuf:**
-- `make proto` - Generate protobuf files (go, grpc, yarpc)
+- `make proto` - Generate protobuf files (gogoslick, grpc, yarpc)
 - `make clean-proto` - Clean generated proto files
 
 **Run Server & Client:**

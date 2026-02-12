@@ -1,12 +1,11 @@
 package storage
 
 import (
-	"bufio"
 	"context"
 	"io"
 
+	gogio "github.com/gogo/protobuf/io"
 	pb "github.com/uber/tango/tangopb"
-	"google.golang.org/protobuf/encoding/protodelim"
 )
 
 type GraphReader interface {
@@ -21,15 +20,13 @@ type GraphReader interface {
 // streams the delimited GetTargetGraphResponse messages from Storage to the provided YARPC server stream.
 // After streaming completes, subsequent Read calls return io.EOF.
 type graphReaderCloser struct {
-	reader        *bufio.Reader
-	closer        io.Closer
-	unmarshalOpts protodelim.UnmarshalOptions
+	reader gogio.ReadCloser
 }
 
 // Read reads the next message from the storage.
 func (g *graphReaderCloser) Read() (*pb.GetTargetGraphResponse, error) {
 	m := new(pb.GetTargetGraphResponse)
-	err := g.unmarshalOpts.UnmarshalFrom(g.reader, m)
+	err := g.reader.ReadMsg(m)
 	if err != nil {
 		return nil, err
 	}
@@ -40,8 +37,8 @@ func (g *graphReaderCloser) Read() (*pb.GetTargetGraphResponse, error) {
 }
 
 func (g *graphReaderCloser) Close() error {
-	if g.closer != nil {
-		return g.closer.Close()
+	if g.reader != nil {
+		return g.reader.Close()
 	}
 	return nil
 }
@@ -56,8 +53,6 @@ func NewGraphReader(ctx context.Context, st Storage, key string) (GraphReader, e
 		return nil, nil
 	}
 	return &graphReaderCloser{
-		reader:        bufio.NewReader(resp.ReadCloser),
-		closer:        resp.ReadCloser,
-		unmarshalOpts: protodelim.UnmarshalOptions{MaxSize: 32 << 20}, // 32MB/message limit
+		reader: gogio.NewDelimitedReader(resp.ReadCloser, 32<<20), // 32MB/message limit
 	}, nil
 }

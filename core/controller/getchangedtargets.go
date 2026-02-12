@@ -189,7 +189,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 		if !exists {
 			// new target -> new
 			changedByName[name] = &pb.ChangedTarget{
-				ChangeType: pb.ChangeType_CHANGE_TYPE_NEW,
+				ChangeType: pb.CHANGE_TYPE_NEW,
 				NewTarget: transposeOptimizedTarget(
 					newT,
 					secondMetadata.GetTargetIdMapping(),
@@ -206,13 +206,13 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			// same hash -> unchanged
 			continue
 		}
-		initial := pb.ChangeType_CHANGE_TYPE_INDIRECT
+		initial := pb.CHANGE_TYPE_INDIRECT
 		// If we know the source file rule type, classify changes accordingly.
 		// Otherwise, leave as UNSPECIFIED.
-		// check if the target is a source file, if so, it is a direct change
+			// check if the target is a source file, if so, it is a direct change
 		isSource := newT.GetRuleType() == sourceFileRuleTypeID && sourceFileRuleTypeID != -1
 		if isSource {
-			initial = pb.ChangeType_CHANGE_TYPE_DIRECT
+			initial = pb.CHANGE_TYPE_DIRECT
 			// Save the target name to the set of changed source file targets.
 			// This is used to check if the source file is a direct dependencies of other targets.
 			changedSourceFileTargets[name] = struct{}{}
@@ -240,14 +240,14 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 		)
 		changedByName[name] = &pb.ChangedTarget{
 			ChangeType: initial,
-			OldTarget:  oldTarget,
-			NewTarget:  newTarget,
+			OldTarget: oldTarget,
+			NewTarget: newTarget,
 		}
 	}
 
 	// Iterate over the changed targets and check if any of them are DIRECT changes.
 	for name, ct := range changedByName {
-		if ct.GetChangeType() == pb.ChangeType_CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.ChangeType_CHANGE_TYPE_NEW {
+		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
 			// Already marked as direct or new
 			continue
 		}
@@ -256,7 +256,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 
 		// Check if any dependency is a changed source file
 		if hasDepInChangedSourceFileTargets(newT.GetDirectDependencies(), secondMetadata, changedSourceFileTargets) {
-			ct.ChangeType = pb.ChangeType_CHANGE_TYPE_DIRECT
+			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
 			continue
 		}
 
@@ -266,7 +266,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			return nil, fmt.Errorf("failed to check dependencies changed: %w", err)
 		}
 		if depsChanged {
-			ct.ChangeType = pb.ChangeType_CHANGE_TYPE_DIRECT
+			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
 			continue
 		}
 		// Check if attributes changed
@@ -275,7 +275,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			return nil, fmt.Errorf("failed to check attributes changed: %w", err)
 		}
 		if attrsChanged {
-			ct.ChangeType = pb.ChangeType_CHANGE_TYPE_DIRECT
+			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
 		}
 	}
 
@@ -287,11 +287,11 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 
 	// 5) Construct canonical metadata and emit responses.
 	meta := &pb.Metadata{
-		TargetIdMapping:             targetMapper.Invert(),
-		RuleTypeMapping:             ruleTypeMapper.Invert(),
-		TagMapping:                  tagMapper.Invert(),
-		AttributeNameMapping:        attrNameMapper.Invert(),
-		AttributeStringValueMapping: attrValMapper.Invert(),
+		TargetIdMapping:              targetMapper.Invert(),
+		RuleTypeMapping:              ruleTypeMapper.Invert(),
+		TagMapping:                   tagMapper.Invert(),
+		AttributeNameMapping:         attrNameMapper.Invert(),
+		AttributeStringValueMapping:  attrValMapper.Invert(),
 	}
 
 	// Emit changes and metadata as separate responses.

@@ -18,6 +18,7 @@ test:
 # Generate protobuf files using protoc
 proto:
 	@echo "Generating protobuf files with protoc..."
+	@protoc --gogoslick_out=tangopb --proto_path=proto proto/tango.proto
 	@protoc --go_out=tangopb --go_opt=paths=source_relative \
 	  --go-grpc_out=tangopb --go-grpc_opt=paths=source_relative \
 	  --yarpc-go_out=tangopb --yarpc-go_opt=paths=source_relative \
@@ -71,7 +72,7 @@ help:
 	@echo "  make clean         - Clean generated files and binaries"
 	@echo ""
 	@echo "Protobuf:"
-	@echo "  make proto         - Generate protobuf files (go, grpc, yarpc)"
+	@echo "  make proto         - Generate protobuf files (gogoslick, grpc, yarpc)"
 	@echo "  make clean-proto   - Clean generated proto files"
 	@echo ""
 	@echo "Run Server & Client:"

@@ -12,7 +12,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//tangopb",
-        "@org_golang_google_protobuf//encoding/protodelim",
+        "@com_github_gogo_protobuf//io",
     ],
 )
 
