@@ -65,12 +65,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 				revision = request.GetSecondRevision()
 			}
 			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig())
-			if err != nil {
+			// something's wrong with getGraph
+			if err != nil || graphReader == nil {
 				results <- graphResult{order: idx, err: err}
-				return
-			}
-			if graphReader == nil {
-				results <- graphResult{order: idx}
 				return
 			}
 			defer graphReader.Close()
@@ -98,15 +95,23 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		case res := <-results:
 			jobs[res.order].graphStreamChunks = res.chunks
 			jobs[res.order].completed = true
-			if res.err != nil {
-				jobs[res.order].err = res.err
+			jobs[res.order].err = res.err
+			if res.err == io.EOF {
+				jobs[res.order].err = nil
+			}
+			if res.chunks == nil && res.err == nil {
+				jobs[res.order].err = errors.New("no chunks returned")
+			}
 
-				// one of the computations failed, if the other one has not completed yet, cancel it and wait for the result to come in, which would be a context cancelled result then
+			// one of the computations failed, if the other one has not
+			// completed yet, cancel it and wait for the result to come in,
+			// which would be a context cancelled result then
+			if res.err != nil {
 				other := (res.order + 1) % 2
 				if !jobs[other].completed {
 					jobs[other].cancel()
-
-					// explicitly mark that this job is cancelled, so we can ignore its error later
+					// explicitly mark that this job is cancelled, so we can
+					// ignore its error later
 					jobs[other].cancelled = true
 				}
 			}
