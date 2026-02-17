@@ -189,6 +189,11 @@ func callGetChangedTargets(ctx context.Context, client pb.TangoYARPCClient, logg
 		switch x := msg.Item.(type) {
 		case *pb.GetChangedTargetsResponse_ChangedTargets:
 			fmt.Printf("Received changed targets packet with %d targets\n", len(x.ChangedTargets.GetChangedTargets()))
+			json, err := json.Marshal(x.ChangedTargets)
+			if err != nil {
+				return fmt.Errorf("marshal changed targets: %w", err)
+			}
+			fmt.Printf("ChangedTargets: %s\n", string(json))
 		case *pb.GetChangedTargetsResponse_Metadata:
 			// unmarshal response to json
 			json, err := json.Marshal(x.Metadata)

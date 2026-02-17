@@ -49,10 +49,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// Start jobs for both revisions. Success or failure, the result will report to the results channel.
 	type graphResult struct {
 		// order is 0 or 1, 0 is the base (first) revision, 1 is the target (second) revision
-		order int
-		// TODO: pb.GetTargetGraphResponse is a stream, so most likely we can't use GetTargetGraphResponse as a return type and we'll want to read it fully before joining the threads
-		graph *pb.GetTargetGraphResponse
-		err   error
+		order  int
+		chunks []*pb.GetTargetGraphResponse
+		err    error
 	}
 	results := make(chan graphResult, len(jobs))
 
@@ -71,11 +70,25 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 				return
 			}
 			if graphReader == nil {
-				results <- graphResult{order: idx, err: nil}
+				results <- graphResult{order: idx}
 				return
 			}
-			graph, err := graphReader.Read()
-			results <- graphResult{order: idx, graph: graph, err: err}
+			defer graphReader.Close()
+
+			// Read all chunks from the stream
+			var chunks []*pb.GetTargetGraphResponse
+			for {
+				chunk, err := graphReader.Read()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					results <- graphResult{order: idx, err: err}
+					return
+				}
+				chunks = append(chunks, chunk)
+			}
+			results <- graphResult{order: idx, chunks: chunks}
 		}(i)
 	}
 
@@ -83,16 +96,8 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	for range jobs {
 		select {
 		case res := <-results:
-			if res.graph != nil {
-				jobs[res.order].graphStreamChunks = append(jobs[res.order].graphStreamChunks, res.graph)
-			}
-			if res.graph == nil {
-				jobs[res.order].completed = true
-			}
-			if res.err == io.EOF {
-				res.err = nil
-				jobs[res.order].completed = true
-			}
+			jobs[res.order].graphStreamChunks = res.chunks
+			jobs[res.order].completed = true
 			if res.err != nil {
 				jobs[res.order].err = res.err
 
@@ -209,7 +214,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 		initial := pb.CHANGE_TYPE_INDIRECT
 		// If we know the source file rule type, classify changes accordingly.
 		// Otherwise, leave as UNSPECIFIED.
-			// check if the target is a source file, if so, it is a direct change
+		// check if the target is a source file, if so, it is a direct change
 		isSource := newT.GetRuleType() == sourceFileRuleTypeID && sourceFileRuleTypeID != -1
 		if isSource {
 			initial = pb.CHANGE_TYPE_DIRECT
@@ -240,8 +245,8 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 		)
 		changedByName[name] = &pb.ChangedTarget{
 			ChangeType: initial,
-			OldTarget: oldTarget,
-			NewTarget: newTarget,
+			OldTarget:  oldTarget,
+			NewTarget:  newTarget,
 		}
 	}
 
@@ -287,11 +292,11 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 
 	// 5) Construct canonical metadata and emit responses.
 	meta := &pb.Metadata{
-		TargetIdMapping:              targetMapper.Invert(),
-		RuleTypeMapping:              ruleTypeMapper.Invert(),
-		TagMapping:                   tagMapper.Invert(),
-		AttributeNameMapping:         attrNameMapper.Invert(),
-		AttributeStringValueMapping:  attrValMapper.Invert(),
+		TargetIdMapping:             targetMapper.Invert(),
+		RuleTypeMapping:             ruleTypeMapper.Invert(),
+		TagMapping:                  tagMapper.Invert(),
+		AttributeNameMapping:        attrNameMapper.Invert(),
+		AttributeStringValueMapping: attrValMapper.Invert(),
 	}
 
 	// Emit changes and metadata as separate responses.

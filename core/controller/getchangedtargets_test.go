@@ -4,17 +4,19 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 
+	gogio "github.com/gogo/protobuf/io"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
-	gogio "github.com/gogo/protobuf/io"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -180,7 +182,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestGetChangedTargets_Success(t *testing.T) {
+func TestGetChangedTargets_singleChunk(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
@@ -211,6 +213,110 @@ func TestGetChangedTargets_Success(t *testing.T) {
 
 	err = c.GetChangedTargets(request, stream)
 	assert.NoError(t, err)
+}
+
+func TestGetChangedTargets_streamChunks(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+
+	var sentResponses []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, opts ...interface{}) error {
+		sentResponses = append(sentResponses, resp)
+		return nil
+	}).Times(2)
+
+	storagemock := storagemock.NewMockStorage(ctrl)
+
+	// Build first revision graph (2 chunks: Targets + Metadata)
+	var buf1 bytes.Buffer
+	w1 := gogio.NewDelimitedWriter(&buf1)
+	w1.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{
+			Targets: &pb.OptimizedTargets{
+				Targets: []*pb.OptimizedTarget{
+					{Id: 1, Hash: "h1", RuleType: 100},
+					{Id: 2, Hash: "h2-old", RuleType: 200},
+				},
+			},
+		},
+	})
+	w1.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{
+			Metadata: &pb.Metadata{
+				TargetIdMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
+				RuleTypeMapping: map[int32]string{100: "go_library", 200: "go_binary"},
+			},
+		},
+	})
+	graph1Bytes := buf1.Bytes()
+
+	// Build second revision graph - target2 has different hash
+	var buf2 bytes.Buffer
+	w2 := gogio.NewDelimitedWriter(&buf2)
+	w2.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{
+			Targets: &pb.OptimizedTargets{
+				Targets: []*pb.OptimizedTarget{
+					{Id: 1, Hash: "h1", RuleType: 100},
+					{Id: 2, Hash: "h2-new", RuleType: 200}, // changed hash
+				},
+			},
+		},
+	})
+	w2.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{
+			Metadata: &pb.Metadata{
+				TargetIdMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
+				RuleTypeMapping: map[int32]string{100: "go_library", 200: "go_binary"},
+			},
+		},
+	})
+	graph2Bytes := buf2.Bytes()
+
+	// Each revision needs: treehash lookup + graph lookup
+	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
+			switch {
+			case strings.Contains(req.Key, "sha1"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
+			case strings.Contains(req.Key, "sha2"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
+			case strings.Contains(req.Key, "treehash1"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph1Bytes))}, nil
+			case strings.Contains(req.Key, "treehash2"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph2Bytes))}, nil
+			default:
+				return nil, fmt.Errorf("unexpected key: %s", req.Key)
+			}
+		}).Times(4)
+
+	c := NewController(Params{
+		Logger:       zaptest.NewLogger(t),
+		Storage:      storagemock,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+	})
+
+	request := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+	}
+
+	err := c.GetChangedTargets(request, stream)
+	require.NoError(t, err)
+
+	// xactly 2 responses: ChangedTargets + Metadata
+	require.Len(t, sentResponses, 2)
+	changedTargets := sentResponses[0].GetChangedTargets()
+	metadata := sentResponses[1].GetMetadata()
+
+	// Verify target2 is detected as changed (hash changed from h2-old to h2-new)
+	require.Len(t, changedTargets.GetChangedTargets(), 1, "should detect 1 changed target")
+	changed := changedTargets.GetChangedTargets()[0]
+	assert.Equal(t, "h2-old", changed.GetOldTarget().GetHash())
+	assert.Equal(t, "h2-new", changed.GetNewTarget().GetHash())
+
+	targetID := changed.GetNewTarget().GetId()
+	assert.Equal(t, "//app:target2", metadata.GetTargetIdMapping()[targetID])
 }
 
 func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
@@ -275,7 +381,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			Item: &pb.GetTargetGraphResponse_Targets{
 				Targets: &pb.OptimizedTargets{
 					Targets: []*pb.OptimizedTarget{
-						{Id: 1, Hash: "h1", RuleType: 100},                      // "source file"
+						{Id: 1, Hash: "h1", RuleType: 100},                                 // "source file"
 						{Id: 2, Hash: "h1", RuleType: 200, DirectDependencies: []int32{1}}, // "rule"
 					},
 				},
@@ -302,7 +408,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			Item: &pb.GetTargetGraphResponse_Targets{
 				Targets: &pb.OptimizedTargets{
 					Targets: []*pb.OptimizedTarget{
-						{Id: 11, Hash: "h2", RuleType: 101},                      // "source file"
+						{Id: 11, Hash: "h2", RuleType: 101},                                  // "source file"
 						{Id: 22, Hash: "h2", RuleType: 201, DirectDependencies: []int32{11}}, // "rule"
 					},
 				},
@@ -673,7 +779,7 @@ func TestCompareTargetGraphs_IndirectWhenOnlyHashChanged(t *testing.T) {
 							Id:                 2,
 							Hash:               "h2", // Changed
 							RuleType:           201,
-							DirectDependencies: []int32{20}, // Same dep (//app:A)
+							DirectDependencies: []int32{20},            // Same dep (//app:A)
 							Attributes:         map[int32]int32{2: 20}, // Same attribute
 						},
 						{Id: 20, Hash: "h2", RuleType: 201}, // Dep A hash changed

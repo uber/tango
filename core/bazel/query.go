@@ -83,12 +83,7 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 		b.logger.Error("Error in stream processing: %v", streamErr)
 		return nil, streamErr
 	}
-	// TODO: Remove these placeholder logs
-	b.logger.Info("\nParsed targets (%d):\n", len(queryResults.Target))
-	b.logger.Info("STDOUT: %s", stdoutBuf.String())
-	if stderrBuf.Len() > 0 {
-		b.logger.Debugf("STDERR: %s", stderrBuf.String())
-	}
+	b.logger.Debugf("Parsed %d targets from bazel query", len(queryResults.Target))
 	return queryResults, nil
 }
 
