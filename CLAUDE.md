@@ -86,7 +86,8 @@ GetTargetGraph Request
 
 To publish a new version:
 ```bash
-git tag v3.0.27.35
-git commit -m "Release v3.0.27.35"
-git push origin v3.0.27.35
+git tag v0.0.1
+git commit -m "Release v0.0.1"
+git push origin v0.0.1
 ```
+Use strict semantic version for versioning.
