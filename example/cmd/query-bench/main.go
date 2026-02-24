@@ -83,15 +83,16 @@ func run() error {
 			return fmt.Errorf("run %d: query failed: %w", i+1, err)
 		}
 
+		totalDuration += elapsed
 		fmt.Printf("run %d: bazel query: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(resp.Result.Target))
 		start = time.Now()
-		targethasherResult, err := targethasher.FromProto(context.Background(), resp.Result, *workspace, targethasher.HashConfig{})
+		targethasherResult, err := targethasher.FromProto(ctx, resp.Result, *workspace, targethasher.HashConfig{})
 		if err != nil {
 			return fmt.Errorf("converting result to targethasher.Result: %w", err)
 		}
 		elapsed = time.Since(start)
-		fmt.Printf("run %d: targethasher: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(targethasherResult.TargetNames))
 		totalDuration += elapsed
+		fmt.Printf("run %d: targethasher: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(targethasherResult.TargetNames))
 	}
 
 	if *runs > 1 {
