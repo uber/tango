@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "query-bench_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/uber/tango/example/cmd/query-bench",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//core/bazel",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_binary(
+    name = "query-bench",
+    embed = [":query-bench_lib"],
+    visibility = ["//visibility:public"],
+)

@@ -16,7 +16,7 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/encoding/protodelim"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestExecuteQuery_Success(t *testing.T) {
@@ -33,12 +33,16 @@ func TestExecuteQuery_Success(t *testing.T) {
 			RuleClass: &ruleClass,
 		},
 	}
-	var protoData bytes.Buffer
-	_, err := protodelim.MarshalTo(&protoData, target)
+
+	// Create a QueryResult with the target (batch proto format, not protodelim streaming)
+	queryResult := &buildpb.QueryResult{
+		Target: []*buildpb.Target{target},
+	}
+	protoData, err := proto.Marshal(queryResult)
 	require.NoError(t, err)
+
 	gomock.InOrder(
-		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(&protoData), nil),
-		mockCmd.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil),
+		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(bytes.NewReader(protoData)), nil),
 		mockCmd.EXPECT().Start().Return(nil),
 		mockCmd.EXPECT().Wait().Return(nil),
 	)
@@ -75,14 +79,17 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 			RuleClass: &ruleClass,
 		},
 	}
-	var protoData bytes.Buffer
-	_, err := protodelim.MarshalTo(&protoData, target)
+
+	// Create a QueryResult with the target (batch proto format)
+	queryResult := &buildpb.QueryResult{
+		Target: []*buildpb.Target{target},
+	}
+	protoData, err := proto.Marshal(queryResult)
 	require.NoError(t, err)
 
 	var capturedArgs []string
 	gomock.InOrder(
-		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(&protoData), nil),
-		mockCmd.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil),
+		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(bytes.NewReader(protoData)), nil),
 		mockCmd.EXPECT().Start().Return(nil),
 		mockCmd.EXPECT().Wait().Return(nil),
 	)
@@ -105,31 +112,30 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Verify command structure: bazel <startupOpts> query <AdditionalArgs> --output=streamed_proto <Query>
+	// Verify command structure: bazel <startupOpts> query <AdditionalArgs> --output=proto <Query>
 	require.Equal(t, []string{
 		"--bazelrc=/custom/.bazelrc",
 		"--output_base=/tmp/bazel",
 		"query",
 		"--keep_going",
-		"--output=streamed_proto",
+		"--output=proto",
 		"//...",
 	}, capturedArgs)
 }
 
-func TestexecuteQueryInternal_ContextTimeout(t *testing.T) {
+func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
 	mockCmd := commandermock.NewMockcommander(ctrl)
 
 	prStdout, pwStdout := io.Pipe()
-	prStderr, pwStderr := io.Pipe()
 
 	// Set up the mock expectations in the exact order they will be called.
+	// Note: When io.ReadAll gets an error (like context deadline), we return immediately
+	// without calling Wait(), so we don't expect Wait() to be called here.
 	gomock.InOrder(
 		mockCmd.EXPECT().StdoutPipe().Return(prStdout, nil),
-		mockCmd.EXPECT().StderrPipe().Return(prStderr, nil),
 		mockCmd.EXPECT().Start().Return(nil),
-		mockCmd.EXPECT().Wait().Return(context.DeadlineExceeded),
 	)
 
 	client, err := NewBazelClient(Params{
@@ -146,12 +152,10 @@ func TestexecuteQueryInternal_ContextTimeout(t *testing.T) {
 			go func() {
 				<-ctx.Done() // Wait for the timeout to fire
 
-				// "Killing" the process: close the pipes.
-				//    This unblocks the Read() calls in your
-				//    streamAndParseTargets and streamOutput goroutines.
-				//    We close with the context's error so g.Wait() sees it.
+				// "Killing" the process: close the pipe.
+				//    This unblocks the Read() call in io.ReadAll.
+				//    We close with the context's error so the read sees it.
 				pwStdout.CloseWithError(ctx.Err())
-				pwStderr.CloseWithError(ctx.Err())
 			}()
 			return mockCmd
 		},
@@ -162,7 +166,7 @@ func TestexecuteQueryInternal_ContextTimeout(t *testing.T) {
 	assert.Contains(t, err.Error(), "context deadline exceeded")
 }
 
-func TestexecuteQueryInternal_Failures(t *testing.T) {
+func TestExecuteQueryInternal_Failures(t *testing.T) {
 	tests := []struct {
 		name            string
 		setupMock       func(*commandermock.Mockcommander)
@@ -178,19 +182,9 @@ func TestexecuteQueryInternal_Failures(t *testing.T) {
 			expectNilResult: true,
 		},
 		{
-			name: "stderr pipe failure",
-			setupMock: func(m *commandermock.Mockcommander) {
-				m.EXPECT().StdoutPipe().Return(io.NopCloser(strings.NewReader("")), nil)
-				m.EXPECT().StderrPipe().Return(nil, errors.New("stderr pipe failed"))
-			},
-			expectedError:   "stderr pipe failed",
-			expectNilResult: true,
-		},
-		{
 			name: "command start failure",
 			setupMock: func(m *commandermock.Mockcommander) {
 				m.EXPECT().StdoutPipe().Return(io.NopCloser(strings.NewReader("")), nil)
-				m.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil)
 				m.EXPECT().Start().Return(errors.New("failed to start process"))
 			},
 			expectedError:   "failed to start process",
@@ -200,12 +194,11 @@ func TestexecuteQueryInternal_Failures(t *testing.T) {
 			name: "command wait failure",
 			setupMock: func(m *commandermock.Mockcommander) {
 				m.EXPECT().StdoutPipe().Return(io.NopCloser(strings.NewReader("")), nil)
-				m.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil)
 				m.EXPECT().Start().Return(nil)
 				m.EXPECT().Wait().Return(errors.New("command wait failed"))
 			},
 			expectedError:   "command wait failed",
-			expectNilResult: false,
+			expectNilResult: true, // Changed from false - implementation returns nil on Wait() error
 		},
 	}
 

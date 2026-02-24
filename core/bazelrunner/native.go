@@ -43,6 +43,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		// --noproto: parameters exclude fields from the output that are not used for hashing anyways, making
 		// proto blob smaller and serialization/deserialization faster
 		// TODO: pass in --enable_workspace or --enable_bzlmod based on the config
+
 		AdditionalArgs: []string{"--order_output=no", "--proto:locations", "--noproto:default_values"},
 	})
 	if err != nil {
