@@ -1,4 +1,4 @@
-// query-bench is a local benchmarking tool for the bazel query execution path.
+// query-bench is a local benchmarking tool for the bazel query execution path and targethasher.
 // It runs the same query that nativeGraphRunner uses and reports timing and target counts.
 //
 // Usage:
@@ -18,6 +18,7 @@ import (
 
 	"github.com/uber/tango/core/bazel"
 	"go.uber.org/zap"
+	"github.com/uber/tango/core/targethasher"
 )
 
 func main() {
@@ -82,13 +83,19 @@ func run() error {
 			return fmt.Errorf("run %d: query failed: %w", i+1, err)
 		}
 
+		fmt.Printf("run %d: bazel query: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(resp.Result.Target))
+		start = time.Now()
+		targethasherResult, err := targethasher.FromProto(context.Background(), resp.Result, *workspace, targethasher.HashConfig{})
+		if err != nil {
+			return fmt.Errorf("converting result to targethasher.Result: %w", err)
+		}
+		elapsed = time.Since(start)
+		fmt.Printf("run %d: targethasher: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(targethasherResult.TargetNames))
 		totalDuration += elapsed
-		fmt.Printf("run %d: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(resp.Result.Target))
 	}
 
 	if *runs > 1 {
 		fmt.Printf("\naverage: %v\n", (totalDuration / time.Duration(*runs)).Round(time.Millisecond))
 	}
-
 	return nil
 }
