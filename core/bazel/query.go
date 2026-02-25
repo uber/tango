@@ -11,7 +11,6 @@ import (
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -48,7 +47,6 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	defer cancel()
 	// setup bazel query command
 	cmd := b.setupCommand(cmdCtx, query, startupOptions, additionalArgs...)
-	// Get pipes for stdout and stderr BEFORE starting the process
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -57,42 +55,28 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	if err != nil {
 		return nil, err
 	}
-	// orchestrate `allOfFailFast`
-	// create a `g` group and a new `gCtx` derived from our timeout `ctx`.
-	g, gCtx := errgroup.WithContext(cmdCtx)
 
 	// Start the process
 	if err = cmd.Start(); err != nil {
 		return nil, err
 	}
 
-	// Goroutine 1: stream and parse targets from stdout
-	g.Go(func() error {
-		queryResults, err = streamAndParseTargets(gCtx, stdout)
-		return err
-	})
+	queryResults, err = streamAndParseTargets(stdout)
 
-	// Goroutine 2: stream stderr
-	g.Go(func() error {
-		return streamOutput(gCtx, stderr, &stderrBuf)
-	})
+	err = streamOutput(stderr, &stderrBuf)
+	if err != nil {
+		return nil, err
+	}
 
 	// Wait for both to complete to prevent zombie processes and goroutine leaks
-	streamErr := g.Wait()
 	waitErr := cmd.Wait()
 
 	// Get stderr for error messages
 	stderrStr := stderrBuf.String()
-
 	// Handle errors with full context (both have completed at this point)
 	if waitErr != nil {
 		b.logger.Error("Bazel query process failed", zap.Error(waitErr), zap.String("stderr", stderrStr))
 		return nil, fmt.Errorf("bazel query process failed: %w\nstderr:\n%s", waitErr, stderrStr)
-	}
-
-	if streamErr != nil {
-		b.logger.Error("Stream processing failed", zap.Error(streamErr), zap.String("stderr", stderrStr))
-		return nil, fmt.Errorf("error parsing bazel query output: %w\nstderr:\n%s", streamErr, stderrStr)
 	}
 
 	// Both succeeded

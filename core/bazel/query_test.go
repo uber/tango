@@ -164,18 +164,15 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 		WorkspacePath: "/tmp/test",
 		Logger:        zap.NewNop().Sugar(),
 		EnvVarsMap:    map[string]string{},
-		QueryTimeout:  1 * time.Nanosecond, // Induce timeout immediately
+		QueryTimeout:  10 * time.Millisecond, // Short timeout for test
 
 		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
-			// This goroutine simulates the OS/exec.Cmd behavior:
-			//    When the context is canceled, the process is "killed",
-			//    which closes its stdout/stderr pipes.
+			// Simulate process behavior: when context is cancelled, close pipes
 			go func() {
-				<-ctx.Done() // Wait for the timeout to fire
-
-				// "Killing" the process: close the pipes.
-				pwStdout.CloseWithError(ctx.Err())
-				pwStderr.CloseWithError(ctx.Err())
+				<-ctx.Done()
+				// Close pipes to unblock readers
+				pwStdout.Close()
+				pwStderr.Close()
 			}()
 			return mockCmd
 		},
@@ -183,7 +180,9 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	require.NoError(t, err)
 	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
 	require.Nil(t, result)
-	assert.Error(t, err)
+	require.Error(t, err)
+	// Should get timeout or deadline exceeded error
+	assert.Contains(t, err.Error(), "deadline exceeded")
 }
 
 func TestExecuteQueryInternal_Failures(t *testing.T) {

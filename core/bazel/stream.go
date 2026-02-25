@@ -2,7 +2,6 @@ package bazel
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"io"
 
@@ -11,7 +10,7 @@ import (
 )
 
 // streamOutput copies data from src to dst, checking context periodically
-func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
+func streamOutput(src io.Reader, dst io.Writer) error {
 	buf := make([]byte, 32*1024)
 	for {
 		n, readErr := src.Read(buf)
@@ -36,7 +35,7 @@ func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
 }
 
 // streamAndParseTargets reads delimited Target protos from src
-func streamAndParseTargets(ctx context.Context, src io.Reader) (*buildpb.QueryResult, error) {
+func streamAndParseTargets(src io.Reader) (*buildpb.QueryResult, error) {
 	result := &buildpb.QueryResult{
 		Target: make([]*buildpb.Target, 0),
 	}
