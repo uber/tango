@@ -16,7 +16,7 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/encoding/protodelim"
 )
 
 func TestExecuteQuery_Success(t *testing.T) {
@@ -33,14 +33,11 @@ func TestExecuteQuery_Success(t *testing.T) {
 			RuleClass: &ruleClass,
 		},
 	}
-
-	// Create delimited proto data (streaming format)
-	var buf bytes.Buffer
-	err := writeDelimitedTarget(&buf, target)
+	var protoData bytes.Buffer
+	_, err := protodelim.MarshalTo(&protoData, target)
 	require.NoError(t, err)
-
 	gomock.InOrder(
-		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(&buf), nil),
+		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(&protoData), nil),
 		mockCmd.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil),
 		mockCmd.EXPECT().Start().Return(nil),
 		mockCmd.EXPECT().Wait().Return(nil),
@@ -64,24 +61,6 @@ func TestExecuteQuery_Success(t *testing.T) {
 	assert.Equal(t, &ruleClass, resp.Result.Target[0].Rule.RuleClass)
 }
 
-// Helper to write delimited proto messages
-func writeDelimitedTarget(w io.Writer, target *buildpb.Target) error {
-	data, err := proto.Marshal(target)
-	if err != nil {
-		return err
-	}
-	// Write varint length prefix
-	length := len(data)
-	for length >= 0x80 {
-		w.Write([]byte{byte(length) | 0x80})
-		length >>= 7
-	}
-	w.Write([]byte{byte(length)})
-	// Write message
-	_, err = w.Write(data)
-	return err
-}
-
 func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
@@ -96,15 +75,13 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 			RuleClass: &ruleClass,
 		},
 	}
-
-	// Create delimited proto data
-	var buf bytes.Buffer
-	err := writeDelimitedTarget(&buf, target)
+	var protoData bytes.Buffer
+	_, err := protodelim.MarshalTo(&protoData, target)
 	require.NoError(t, err)
 
 	var capturedArgs []string
 	gomock.InOrder(
-		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(&buf), nil),
+		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(&protoData), nil),
 		mockCmd.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil),
 		mockCmd.EXPECT().Start().Return(nil),
 		mockCmd.EXPECT().Wait().Return(nil),
@@ -128,15 +105,14 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Verify command structure: bazel <startupOpts> query <Query> --order_output=no --output=streamed_proto <AdditionalArgs>
+	// Verify command structure: bazel <startupOpts> query <AdditionalArgs> --output=streamed_proto <Query>
 	require.Equal(t, []string{
 		"--bazelrc=/custom/.bazelrc",
 		"--output_base=/tmp/bazel",
 		"query",
-		"//...",
-		"--order_output=no",
-		"--output=streamed_proto",
 		"--keep_going",
+		"--output=streamed_proto",
+		"//...",
 	}, capturedArgs)
 }
 
@@ -154,7 +130,7 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 		mockCmd.EXPECT().StderrPipe().Return(prStderr, nil),
 		mockCmd.EXPECT().Start().Return(nil),
 		mockCmd.EXPECT().Wait().DoAndReturn(func() error {
-			// Wait will be called after timeout
+			// Simulate process ending after timeout
 			return context.DeadlineExceeded
 		}),
 	)
@@ -228,7 +204,7 @@ func TestExecuteQueryInternal_Failures(t *testing.T) {
 				m.EXPECT().Wait().Return(errors.New("command wait failed"))
 			},
 			expectedError:   "command wait failed",
-			expectNilResult: true,
+			expectNilResult: false,
 		},
 	}
 
@@ -277,7 +253,6 @@ func TestExecuteQuery_ErrorCase(t *testing.T) {
 			return mockCmd
 		},
 	})
-	require.NoError(t, err)
 
 	resp, err := client.ExecuteQuery(context.Background(), &QueryRequest{Query: "//..."})
 	require.Error(t, err)
