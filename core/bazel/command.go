@@ -1,6 +1,8 @@
 package bazel
 
-import "io"
+import (
+	"io"
+)
 
 type commander interface {
 	StdoutPipe() (io.ReadCloser, error)

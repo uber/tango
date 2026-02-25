@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/uber/tango/core/bazel"
-	"go.uber.org/zap"
 	"github.com/uber/tango/core/targethasher"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -77,7 +77,7 @@ func run() error {
 		start := time.Now()
 		resp, err := client.ExecuteQuery(ctx, req)
 		elapsed := time.Since(start)
-		cancel()
+		defer cancel()
 
 		if err != nil {
 			return fmt.Errorf("run %d: query failed: %w", i+1, err)
