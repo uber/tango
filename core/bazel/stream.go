@@ -52,13 +52,13 @@ func getQueryResult(src io.Reader, dst io.Writer) (*buildpb.QueryResult, error) 
 	}
 	tr := io.TeeReader(src, dst)
 	br := bufio.NewReader(tr)
-	// unmarshalOpts := protodelim.UnmarshalOptions{
-	// 	MaxSize: 64 * 1024 * 1024, // 64MB limit
-	// }
+	unmarshalOpts := protodelim.UnmarshalOptions{
+		MaxSize: 64 * 1024 * 1024, // 64MB limit
+	}
 	var parseErr error
 	for {
 		var target buildpb.Target
-		err := protodelim.UnmarshalFrom(br, &target)
+		err := unmarshalOpts.UnmarshalFrom(br, &target)
 		if err == io.EOF {
 			break
 		}
