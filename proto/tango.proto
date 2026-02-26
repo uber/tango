@@ -17,15 +17,11 @@ message BuildDescription {
     // List of change request URLs to apply on top of the base revision.
     // This can be a phabricator diff URL or a github pull request URL.
     // If empty, the computation happens on the base revision.
-    repeated change changes = 3;
+    repeated string request_urls = 3;
     // The computation strategy of the original target graph
     ComputationStrategy strategy = 4;
 }
 
-message change {
-    string url = 1;
-    string commit_hash = 2;
-}
 
 // ComputationStrategy controls the computation strategy to use for the target graph
 enum ComputationStrategy {
