@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -26,6 +27,7 @@ type Interface interface {
 	Clone(ctx context.Context, target, destination string, options ...string) error
 	ApplyPatch(ctx context.Context, patch []byte) error
 	RevParse(ctx context.Context, ref string) (string, error)
+	Log(ctx context.Context, ref string, limit int) ([]string, error)
 	Commit(ctx context.Context, message string, options ...string) error
 	SubmoduleUpdate(ctx context.Context) error
 	FileHashes(ctx context.Context, ref string) (map[string][]byte, error)
@@ -92,6 +94,21 @@ func (c *impl) RevParse(ctx context.Context, ref string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// Log returns up to limit commit SHAs reachable from ref, most recent first.
+func (c *impl) Log(ctx context.Context, ref string, limit int) ([]string, error) {
+	out, err := c.runner.output(ctx, c.directory, "git", "log", "--format=%H", fmt.Sprintf("-n%d", limit), ref)
+	if err != nil {
+		return nil, err
+	}
+	var shas []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			shas = append(shas, line)
+		}
+	}
+	return shas, nil
 }
 
 // Commit commits the changes to the repository.

@@ -29,7 +29,7 @@ func TestGitRequest_Apply_EmptyCommit_ReturnsError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().RevParse(gomock.Any(), "pull/123/head").Return("deadbeef\n", nil)
+	git.EXPECT().Log(gomock.Any(), "pull/123/head", 50).Return([]string{"deadbeef"}, nil)
 	req := NewGitRequest(git, "123", "baseRef", "")
 	err := req.Apply(context.Background())
 	require.Error(t, err)
@@ -39,7 +39,21 @@ func TestGitRequest_Apply_CommitMatches_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().RevParse(gomock.Any(), "pull/123/head").Return("deadbeef\n", nil)
+	git.EXPECT().Log(gomock.Any(), "pull/123/head", 50).Return([]string{"deadbeef", "aabbccdd"}, nil)
+	git.EXPECT().Diff(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
+	git.EXPECT().ApplyPatch(gomock.Any(), gomock.Any()).Return(nil)
+	git.EXPECT().Commit(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	git.EXPECT().SubmoduleUpdate(gomock.Any()).Return(nil)
+	req := NewGitRequest(git, "123", "baseRef", "deadbeef")
+	err := req.Apply(context.Background())
+	require.NoError(t, err)
+}
+
+func TestGitRequest_Apply_CommitInAncestors_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	git := gitmock.NewMockInterface(ctrl)
+	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
+	git.EXPECT().Log(gomock.Any(), "pull/123/head", 50).Return([]string{"aabbccdd", "11223344", "deadbeef"}, nil)
 	git.EXPECT().Diff(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
 	git.EXPECT().ApplyPatch(gomock.Any(), gomock.Any()).Return(nil)
 	git.EXPECT().Commit(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
@@ -53,21 +67,20 @@ func TestGitRequest_Apply_CommitMismatch_ReturnsError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().RevParse(gomock.Any(), "pull/456/head").Return("aabbccdd\n", nil)
+	git.EXPECT().Log(gomock.Any(), "pull/456/head", 50).Return([]string{"aabbccdd", "11223344"}, nil)
 	req := NewGitRequest(git, "456", "baseRef", "deadbeef")
 	err := req.Apply(context.Background())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "aabbccdd")
 	assert.Contains(t, err.Error(), "deadbeef")
 }
 
-func TestGitRequest_Apply_RevParseFails_ReturnsError(t *testing.T) {
+func TestGitRequest_Apply_LogFails_ReturnsError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().RevParse(gomock.Any(), "pull/789/head").Return("", errors.New("rev-parse failed"))
+	git.EXPECT().Log(gomock.Any(), "pull/789/head", 50).Return(nil, errors.New("log failed"))
 	req := NewGitRequest(git, "789", "baseRef", "deadbeef")
 	err := req.Apply(context.Background())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to resolve PR head")
+	assert.Contains(t, err.Error(), "failed to read PR commit history")
 }

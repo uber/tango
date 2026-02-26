@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/uber/tango/core/git"
 )
@@ -34,12 +33,19 @@ func (r *gitRequest) Apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	actual, err := r.git.RevParse(ctx, fmt.Sprintf("pull/%s/head", r.requestID))
+	commits, err := r.git.Log(ctx, fmt.Sprintf("pull/%s/head", r.requestID), 50)
 	if err != nil {
-		return fmt.Errorf("failed to resolve PR head: %w", err)
+		return fmt.Errorf("failed to read PR commit history: %w", err)
 	}
-	if strings.TrimSpace(actual) != r.commit {
-		return fmt.Errorf("PR %s HEAD is %q, expected commit %q", r.requestID, strings.TrimSpace(actual), r.commit)
+	found := false
+	for _, sha := range commits {
+		if sha == r.commit {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("commit %q not found in last 50 commits of PR %s", r.commit, r.requestID)
 	}
 	patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
 	if err != nil {
