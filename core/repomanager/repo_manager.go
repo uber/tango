@@ -38,7 +38,7 @@ type workerPool struct {
 	originMu  sync.Mutex // one lock per repo for orginal clone
 	cloned    bool
 
-	avail chan *workerSlot // available slots; channel size = pool capacity
+	avail chan *workerSlot // available slots; = pool capacity
 }
 
 // workerSlot is a pre-allocated workspace directory that may or may not
