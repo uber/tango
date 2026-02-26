@@ -27,6 +27,8 @@ type Interface interface {
 	ApplyPatch(ctx context.Context, patch []byte) error
 	RevParse(ctx context.Context, ref string) (string, error)
 	Commit(ctx context.Context, message string, options ...string) error
+	Clean(ctx context.Context) error
+	Reset(ctx context.Context) error
 	SubmoduleUpdate(ctx context.Context) error
 	FileHashes(ctx context.Context, ref string) (map[string][]byte, error)
 }
@@ -100,6 +102,20 @@ func (c *impl) Commit(ctx context.Context, message string, options ...string) er
 	defer cancel()
 	args := append([]string{"commit", "-am", message}, options...)
 	return c.runner.run(ctx, c.directory, "git", args...)
+}
+
+// Clean removes untracked files and directories (git clean -fdx).
+func (c *impl) Clean(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
+	defer cancel()
+	return c.runner.run(ctx, c.directory, "git", "clean", "-fdx")
+}
+
+// Reset discards all local changes (git reset --hard).
+func (c *impl) Reset(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
+	defer cancel()
+	return c.runner.run(ctx, c.directory, "git", "reset", "--hard")
 }
 
 // SubmoduleUpdate updates the submodules in the repository.
