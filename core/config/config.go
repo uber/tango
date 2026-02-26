@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	yaml "github.com/goccy/go-yaml"
@@ -25,6 +26,9 @@ func Parse(configFilePath string) (*Config, error) {
 	// Default to memory storage if not specified
 	if config.Storage.Type == "" {
 		config.Storage.Type = StorageTypeMemory
+	}
+	if config.Repository.WorkspacePoolSize <= 0 {
+		return nil, fmt.Errorf("repository.workspace_pool_size must be > 0, got %d", config.Repository.WorkspacePoolSize)
 	}
 	return &config, nil
 }

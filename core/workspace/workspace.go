@@ -17,23 +17,26 @@ type Workspace interface {
 }
 
 type workspace struct {
-	path   string
-	git    git.Interface
-	logger *zap.SugaredLogger
+	path      string
+	git       git.Interface
+	logger    *zap.SugaredLogger
+	onRelease func() // optional callback invoked on Release
 }
 
 type WorkspaceParams struct {
-	Path   string
-	Git    git.Interface
-	Logger *zap.SugaredLogger
+	Path      string
+	Git       git.Interface
+	Logger    *zap.SugaredLogger
+	OnRelease func() // if set, called when the workspace is released
 }
 
 // NewWorkspace creates a new workspace with the given parameters.
 func NewWorkspace(p WorkspaceParams) Workspace {
 	return &workspace{
-		path:   p.Path,
-		git:    p.Git,
-		logger: p.Logger,
+		path:      p.Path,
+		git:       p.Git,
+		logger:    p.Logger,
+		onRelease: p.OnRelease,
 	}
 }
 
@@ -69,7 +72,11 @@ func (w *workspace) Checkout(ctx context.Context, remote string, ref string) err
 	return w.git.Checkout(ctx, ref)
 }
 
-// Release is a no-op for the base workspace; pooled workspaces override this.
+// Release invokes the onRelease callback if set (e.g., to return the
+// workspace to a pool), otherwise it's a no-op.
 func (w *workspace) Release() error {
+	if w.onRelease != nil {
+		w.onRelease()
+	}
 	return nil
 }

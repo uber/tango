@@ -9,6 +9,7 @@ type RepositoryConfig struct {
 	ExcludeExternalTargets bool     `yaml:"exclude_external_targets"`
 	BzlmodEnabled          bool     `yaml:"bzlmod_enabled"`
 	BazelCommand           string   `yaml:"bazel_command"`
-	QueryTimeout           int64    `yaml:"query_timeout"` // in seconds
-	GitTimeout             int64    `yaml:"git_timeout"`   // in seconds
+	QueryTimeout           int64    `yaml:"query_timeout"`       // in seconds
+	GitTimeout             int64    `yaml:"git_timeout"`         // in seconds
+	WorkspacePoolSize      int      `yaml:"workspace_pool_size"` // number of worker workspaces per repo
 }
