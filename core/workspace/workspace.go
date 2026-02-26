@@ -55,7 +55,6 @@ func (w *workspace) ApplyRequests(ctx context.Context, requests []Request) error
 
 // Checkout resets the workspace to a clean state and checks out the given ref.
 func (w *workspace) Checkout(ctx context.Context, remote string, ref string) error {
-	// Reset any local modifications so the checkout starts clean.
 	if err := w.git.Reset(ctx); err != nil {
 		return fmt.Errorf("git reset --hard: %w", err)
 	}
