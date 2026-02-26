@@ -70,8 +70,9 @@ func TestWorkspace_Checkout_RevParseSuccess(t *testing.T) {
 
 	ref := "abc123"
 	commitRef := ref + "^{commit}"
+	g.EXPECT().Reset(gomock.Any()).Return(nil)
+	g.EXPECT().Clean(gomock.Any()).Return(nil)
 	g.EXPECT().RevParse(gomock.Any(), commitRef).Return("abc123", nil)
-	// expect Checkout with commit hash and workspace path as option
 	g.EXPECT().Checkout(gomock.Any(), "abc123").Return(nil)
 
 	err := w.Checkout(context.Background(), "origin", ref)
@@ -89,6 +90,8 @@ func TestWorkspace_Checkout_FetchError(t *testing.T) {
 	ref := "refs/heads/feature"
 	commitRef := ref + "^{commit}"
 
+	g.EXPECT().Reset(gomock.Any()).Return(nil)
+	g.EXPECT().Clean(gomock.Any()).Return(nil)
 	g.EXPECT().RevParse(gomock.Any(), commitRef).Return("", errors.New("missing"))
 	g.EXPECT().Fetch(gomock.Any(), remote, ref).Return(errors.New("fetch failed"))
 

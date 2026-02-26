@@ -53,8 +53,16 @@ func (w *workspace) ApplyRequests(ctx context.Context, requests []Request) error
 	return nil
 }
 
-// Checkout checks out the given reference in the workspace.
+// Checkout resets the workspace to a clean state and checks out the given ref.
 func (w *workspace) Checkout(ctx context.Context, remote string, ref string) error {
+	// Reset any local modifications so the checkout starts clean.
+	if err := w.git.Reset(ctx); err != nil {
+		return fmt.Errorf("git reset --hard: %w", err)
+	}
+	if err := w.git.Clean(ctx); err != nil {
+		return fmt.Errorf("git clean -fdx: %w", err)
+	}
+
 	// check if base ref exists in local repository
 	commit := fmt.Sprintf("%s^{commit}", ref)
 	_, err := w.git.RevParse(ctx, commit)

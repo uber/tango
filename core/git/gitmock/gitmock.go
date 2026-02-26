@@ -54,6 +54,20 @@ func (mr *MockInterfaceMockRecorder) ApplyPatch(ctx, patch any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyPatch", reflect.TypeOf((*MockInterface)(nil).ApplyPatch), ctx, patch)
 }
 
+// Clean mocks base method.
+func (m *MockInterface) Clean(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Clean", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Clean indicates an expected call of Clean.
+func (mr *MockInterfaceMockRecorder) Clean(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Clean", reflect.TypeOf((*MockInterface)(nil).Clean), ctx)
+}
+
 // Checkout mocks base method.
 func (m *MockInterface) Checkout(ctx context.Context, ref string, options ...string) error {
 	m.ctrl.T.Helper()
@@ -163,6 +177,20 @@ func (m *MockInterface) FileHashes(ctx context.Context, ref string) (map[string]
 func (mr *MockInterfaceMockRecorder) FileHashes(ctx, ref any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FileHashes", reflect.TypeOf((*MockInterface)(nil).FileHashes), ctx, ref)
+}
+
+// Reset mocks base method.
+func (m *MockInterface) Reset(ctx context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Reset", ctx)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Reset indicates an expected call of Reset.
+func (mr *MockInterfaceMockRecorder) Reset(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reset", reflect.TypeOf((*MockInterface)(nil).Reset), ctx)
 }
 
 // RevParse mocks base method.
