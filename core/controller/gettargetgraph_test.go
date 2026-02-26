@@ -40,8 +40,8 @@ func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
 			Requests: []*pb.Request{
-				{Url: "github://repo/1"},
-				{Url: "github://repo/2"},
+				{Url: "github://repo/1", Commit: "abc111"},
+				{Url: "github://repo/2", Commit: "abc222"},
 			},
 		},
 	}
@@ -65,8 +65,8 @@ func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
 			Requests: []*pb.Request{
-				{Url: "github://repo/1"},
-				{Url: "github://repo/2"},
+				{Url: "github://repo/1", Commit: "abc111"},
+				{Url: "github://repo/2", Commit: "abc222"},
 			},
 		},
 	}, stream)
@@ -91,8 +91,8 @@ func TestGetTargetGraph_DecodeError_ReturnsError(t *testing.T) {
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
 			Requests: []*pb.Request{
-				{Url: "github://repo/1"},
-				{Url: "github://repo/2"},
+				{Url: "github://repo/1", Commit: "abc111"},
+				{Url: "github://repo/2", Commit: "abc222"},
 			},
 		},
 	}, stream)
@@ -124,8 +124,8 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
 			Requests: []*pb.Request{
-				{Url: "github://repo/1"},
-				{Url: "github://repo/2"},
+				{Url: "github://repo/1", Commit: "abc111"},
+				{Url: "github://repo/2", Commit: "abc222"},
 			},
 		},
 	}, stream)
@@ -145,8 +145,8 @@ func TestGetTargetGraph_BuildDescriptionMissingRequiredFields_ReturnsError(t *te
 		BuildDescription: &pb.BuildDescription{
 			Remote: "repo:go-code",
 			Requests: []*pb.Request{
-				{Url: "github://repo/1"},
-				{Url: "github://repo/2"},
+				{Url: "github://repo/1", Commit: "abc111"},
+				{Url: "github://repo/2", Commit: "abc222"},
 			},
 		},
 	}, stream)
@@ -163,6 +163,28 @@ func TestGetTargetGraph_MissingBuildDescription_ReturnsError(t *testing.T) {
 		Storage: store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{}, stream)
+	assert.Error(t, err)
+}
+
+func TestGetTargetGraph_RequestMissingCommit_ReturnsError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+	store := storagemock.NewMockStorage(ctrl)
+	c := NewController(Params{
+		Logger:  zaptest.NewLogger(t),
+		Storage: store,
+	})
+	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+		BuildDescription: &pb.BuildDescription{
+			Remote:  "repo:go-code",
+			BaseSha: "sha",
+			Requests: []*pb.Request{
+				{Url: "github://repo/1", Commit: "abc123"},
+				{Url: "github://repo/2"}, // missing commit
+			},
+		},
+	}, stream)
 	assert.Error(t, err)
 }
 

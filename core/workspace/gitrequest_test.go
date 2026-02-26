@@ -25,17 +25,14 @@ func TestNewGitRequest_ExtractsID(t *testing.T) {
 	assert.Equal(t, "abc123", gr.commit)
 }
 
-func TestGitRequest_Apply_NoCommit_Success(t *testing.T) {
+func TestGitRequest_Apply_EmptyCommit_ReturnsError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().Diff(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
-	git.EXPECT().ApplyPatch(gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().Commit(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().SubmoduleUpdate(gomock.Any()).Return(nil)
+	git.EXPECT().RevParse(gomock.Any(), "pull/123/head").Return("deadbeef\n", nil)
 	req := NewGitRequest(git, "123", "baseRef", "")
 	err := req.Apply(context.Background())
-	require.NoError(t, err)
+	require.Error(t, err)
 }
 
 func TestGitRequest_Apply_CommitMatches_Success(t *testing.T) {

@@ -34,14 +34,12 @@ func (r *gitRequest) Apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if r.commit != "" {
-		actual, err := r.git.RevParse(ctx, fmt.Sprintf("pull/%s/head", r.requestID))
-		if err != nil {
-			return fmt.Errorf("failed to resolve PR head: %w", err)
-		}
-		if strings.TrimSpace(actual) != r.commit {
-			return fmt.Errorf("PR %s HEAD is %q, expected commit %q", r.requestID, strings.TrimSpace(actual), r.commit)
-		}
+	actual, err := r.git.RevParse(ctx, fmt.Sprintf("pull/%s/head", r.requestID))
+	if err != nil {
+		return fmt.Errorf("failed to resolve PR head: %w", err)
+	}
+	if strings.TrimSpace(actual) != r.commit {
+		return fmt.Errorf("PR %s HEAD is %q, expected commit %q", r.requestID, strings.TrimSpace(actual), r.commit)
 	}
 	patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
 	if err != nil {
