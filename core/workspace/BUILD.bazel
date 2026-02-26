@@ -11,7 +11,6 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core/git",
-        "@com_github_gofrs_flock//:flock",
         "@org_uber_go_zap//:zap",
     ],
 )
@@ -28,7 +27,6 @@ go_test(
         "//core/git",
         "//core/git/gitmock",
         "//core/workspace/requestmock",
-        "@com_github_gofrs_flock//:flock",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@org_uber_go_mock//gomock",

@@ -3,12 +3,10 @@ package workspace
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	gitmock "github.com/uber/tango/core/git/gitmock"
 	requestmock "github.com/uber/tango/core/workspace/requestmock"
-	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -25,26 +23,21 @@ func TestNewWorkspace_SetsFields(t *testing.T) {
 	defer ctrl.Finish()
 	g := gitmock.NewMockInterface(ctrl)
 	tmpDir := t.TempDir()
-	lockPath := filepath.Join(tmpDir, "ws.lock")
-	l := flock.New(lockPath)
 
 	w := NewWorkspace(WorkspaceParams{
 		Path: tmpDir,
-		Lock: l,
 		Git:  g,
 	})
 
 	iw, ok := w.(*workspace)
 	require.True(t, ok)
 	assert.Equal(t, tmpDir, iw.path)
-	assert.Equal(t, l, iw.lock)
 	assert.Equal(t, g, iw.git)
 }
 
 func TestWorkspace_ApplyRequests_Success(t *testing.T) {
 	w := NewWorkspace(WorkspaceParams{
 		Path:   "/tmp/workspace",
-		Lock:   flock.New("/tmp/workspace.lock"),
 		Git:    gitmock.NewMockInterface(gomock.NewController(t)),
 		Logger: zap.NewNop().Sugar(),
 	})
@@ -103,19 +96,8 @@ func TestWorkspace_Checkout_FetchError(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestWorkspace_Release_NoLock(t *testing.T) {
-	w := &workspace{lock: nil}
-	err := w.Release()
-	require.NoError(t, err)
-}
-
-func TestWorkspace_Release_WithLock(t *testing.T) {
-	tmpDir := t.TempDir()
-	lockPath := filepath.Join(tmpDir, "ws.lock")
-	l := flock.New(lockPath)
-	require.NoError(t, l.Lock())
-	w := &workspace{lock: l}
-
+func TestWorkspace_Release(t *testing.T) {
+	w := &workspace{}
 	err := w.Release()
 	require.NoError(t, err)
 }

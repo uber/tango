@@ -9,7 +9,6 @@ go_library(
         "//core/git",
         "//core/workspace",
         "//tangopb",
-        "@com_github_gofrs_flock//:flock",
         "@org_uber_go_zap//:zap",
     ],
 )

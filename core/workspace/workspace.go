@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/uber/tango/core/git"
-	"github.com/gofrs/flock"
 	"go.uber.org/zap"
 )
 
@@ -19,14 +18,12 @@ type Workspace interface {
 
 type workspace struct {
 	path   string
-	lock   *flock.Flock
 	git    git.Interface
 	logger *zap.SugaredLogger
 }
 
 type WorkspaceParams struct {
 	Path   string
-	Lock   *flock.Flock
 	Git    git.Interface
 	Logger *zap.SugaredLogger
 }
@@ -35,7 +32,6 @@ type WorkspaceParams struct {
 func NewWorkspace(p WorkspaceParams) Workspace {
 	return &workspace{
 		path:   p.Path,
-		lock:   p.Lock,
 		git:    p.Git,
 		logger: p.Logger,
 	}
@@ -73,10 +69,7 @@ func (w *workspace) Checkout(ctx context.Context, remote string, ref string) err
 	return w.git.Checkout(ctx, ref)
 }
 
-// Release releases the workspace lock.
+// Release is a no-op for the base workspace; pooled workspaces override this.
 func (w *workspace) Release() error {
-	if w.lock == nil {
-		return nil
-	}
-	return w.lock.Unlock()
+	return nil
 }
