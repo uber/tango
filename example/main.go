@@ -57,6 +57,7 @@ func run() error {
 		Git:           git.New(rootWS),
 		Logger:        logger,
 		RootWorkspace: rootWS,
+		PoolSize:      cfg.Repository.WorkspacePoolSize,
 	})
 	orch := orchestrator.NewNativeOrchestrator(orchestrator.Params{
 		Storage:        store,

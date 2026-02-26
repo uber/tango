@@ -1,11 +1,13 @@
-remote: "testrepo"
-default_branch: "main"
-full_hash_repos:
-  - "//"
-  - "//external"
-excluded_files:
-  - "*.gen.go"
-exclude_external_targets: true
-bzlmod_enabled: true
-query_timeout: 15
-git_timeout: 15
+repository:
+  remote: "testrepo"
+  default_branch: "main"
+  full_hash_repos:
+    - "//"
+    - "//external"
+  excluded_files:
+    - "*.gen.go"
+  exclude_external_targets: true
+  bzlmod_enabled: true
+  query_timeout: 15
+  git_timeout: 15
+  workspace_pool_size: 3

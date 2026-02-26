@@ -24,3 +24,4 @@ repository:
   bzlmod_enabled: true
   query_timeout: 300
   git_timeout: 300
+  workspace_pool_size: 5

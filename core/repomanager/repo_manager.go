@@ -14,8 +14,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultPoolSize = 3
-
 // RepoManager manages repository workspaces with a pool of workers per repo.
 type RepoManager interface {
 	Lease(ctx context.Context, desc tangopb.BuildDescription) (workspace.Workspace, error)
@@ -38,7 +36,7 @@ type workerPool struct {
 	originMu  sync.Mutex // one lock per repo for orginal clone
 	cloned    bool
 
-	avail chan *workerSlot // available slots; = pool capacity
+	avail chan *workerSlot // available slots; pool capacity
 }
 
 // workerSlot is a pre-allocated workspace directory that may or may not
@@ -53,20 +51,16 @@ type Params struct {
 	Git           git.Interface
 	Logger        *zap.SugaredLogger
 	RootWorkspace string
-	PoolSize      int // number of worker workspaces per repo; 0 uses default (3)
+	PoolSize      int
 }
 
 // NewRepoManager creates a new repo manager with pooled worker workspaces.
 func NewRepoManager(p Params) RepoManager {
-	size := p.PoolSize
-	if size <= 0 {
-		size = defaultPoolSize
-	}
 	return &repoManager{
 		git:           p.Git,
 		rootWorkspace: p.RootWorkspace,
 		logger:        p.Logger,
-		poolSize:      size,
+		poolSize:      p.PoolSize,
 		pools:         make(map[string]*workerPool),
 	}
 }
@@ -78,7 +72,10 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 	if pool, ok := r.pools[repo]; ok {
 		return pool
 	}
-
+	// default to 1 worker workspace per repo
+	if r.poolSize <= 0 {
+		r.poolSize = 1
+	}
 	pool := &workerPool{
 		originDir: filepath.Join(r.rootWorkspace, repo),
 		avail:     make(chan *workerSlot, r.poolSize),
@@ -129,12 +126,14 @@ func (r *repoManager) Lease(ctx context.Context, desc tangopb.BuildDescription) 
 	}
 
 	repoGit := git.New(slot.dir)
-	ws := workspace.NewWorkspace(workspace.WorkspaceParams{
+	return workspace.NewWorkspace(workspace.WorkspaceParams{
 		Path:   slot.dir,
 		Git:    repoGit,
 		Logger: r.logger,
-	})
-	return &pooledWorkspace{Workspace: ws, pool: pool, slot: slot}, nil
+		OnRelease: func() {
+			pool.avail <- slot
+		},
+	}), nil
 }
 
 // ensureOrigin clones the origin repository if it doesn't exist yet.
@@ -169,18 +168,6 @@ func (r *repoManager) createWorker(ctx context.Context, originDir, workerDir str
 		return err
 	}
 	return r.git.Clone(ctx, originDir, workerDir, "--local")
-}
-
-// pooledWorkspace wraps a workspace and returns its slot to the pool on release.
-type pooledWorkspace struct {
-	workspace.Workspace
-	pool *workerPool
-	slot *workerSlot
-}
-
-func (pw *pooledWorkspace) Release() error {
-	pw.pool.avail <- pw.slot
-	return nil
 }
 
 func toShortRemote(remote string) string {
