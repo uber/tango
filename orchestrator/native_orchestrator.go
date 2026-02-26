@@ -76,15 +76,15 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		return nil, err
 	}
 
-	requests := make([]workspace.Request, 0, len(param.Req.BuildDescription.RequestUrls))
+	requests := make([]workspace.Request, 0, len(param.Req.BuildDescription.Requests))
 	factory := b.gitFactory
 	if factory == nil {
 		factory = git.New
 	}
 
 	gitModule := factory(ws.Path())
-	for _, url := range param.Req.BuildDescription.RequestUrls {
-		request, err := workspace.NewRequest(url, gitModule, param.Req.BuildDescription.BaseSha)
+	for _, req := range param.Req.BuildDescription.Requests {
+		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.BaseSha)
 		if err != nil {
 			b.logger.Error("getGraph: Error creating request", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 			return nil, err

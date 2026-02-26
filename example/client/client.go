@@ -52,19 +52,19 @@ func main() {
 
 	switch *method {
 	case "get-target-graph":
-		var urls []string
+		var requests []*pb.Request
 		if trimmed := strings.TrimSpace(*reqURLs); trimmed != "" {
 			for _, u := range strings.Split(trimmed, ",") {
 				if v := strings.TrimSpace(u); v != "" {
-					urls = append(urls, v)
+					requests = append(requests, &pb.Request{Url: v})
 				}
 			}
 		}
 		req := &pb.GetTargetGraphRequest{
 			BuildDescription: &pb.BuildDescription{
-				Remote:      *remote,
-				BaseSha:     *baseSHA,
-				RequestUrls: urls,
+				Remote:   *remote,
+				BaseSha:  *baseSHA,
+				Requests: requests,
 			},
 		}
 		if err := callGetTargetGraph(ctx, client, logger, req); err != nil {
@@ -73,7 +73,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "get-changed-targets":
-		var requests []string
+		var requests []*pb.Request
 		// check if both reqURLs and newRequestURLs are provided
 		if *baseSHA == "" && *newBaseSHA == "" {
 			logger.Errorf("Error: both baseSHA and newBaseSHA cannot be empty")
@@ -82,28 +82,28 @@ func main() {
 		if trimmed := strings.TrimSpace(*reqURLs); trimmed != "" {
 			for _, u := range strings.Split(trimmed, ",") {
 				if v := strings.TrimSpace(u); v != "" {
-					requests = append(requests, v)
+					requests = append(requests, &pb.Request{Url: v})
 				}
 			}
 		}
-		var newRequests []string
+		var newRequests []*pb.Request
 		if trimmed := strings.TrimSpace(*newRequestURLs); trimmed != "" {
 			for _, u := range strings.Split(trimmed, ",") {
 				if v := strings.TrimSpace(u); v != "" {
-					newRequests = append(newRequests, v)
+					newRequests = append(newRequests, &pb.Request{Url: v})
 				}
 			}
 		}
 		req := &pb.GetChangedTargetsRequest{
 			FirstRevision: &pb.BuildDescription{
-				Remote:      *remote,
-				BaseSha:     *baseSHA,
-				RequestUrls: requests,
+				Remote:   *remote,
+				BaseSha:  *baseSHA,
+				Requests: requests,
 			},
 			SecondRevision: &pb.BuildDescription{
-				Remote:      *remote,
-				BaseSha:     *newBaseSHA,
-				RequestUrls: newRequests,
+				Remote:   *remote,
+				BaseSha:  *newBaseSHA,
+				Requests: newRequests,
 			},
 		}
 		if err := callGetChangedTargets(ctx, client, logger, req); err != nil {

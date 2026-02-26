@@ -341,6 +341,14 @@ message Request {
 </td><td>
 
 ```protobuf
+message Request {
+    // URL of the change request (GitHub PR or Phabricator diff)
+    string url = 1;
+
+    // Commit SHA associated with the request (optional)
+    string commit = 2;
+}
+
 message BuildDescription {
     // Git remote URL
     string remote = 1;
@@ -348,8 +356,8 @@ message BuildDescription {
     // Base commit SHA
     string base_sha = 2;
 
-    // Pull request URLs to apply
-    repeated string request_urls = 3;
+    // Change requests to apply on top of base revision
+    repeated Request requests = 3;
 }
 ```
 

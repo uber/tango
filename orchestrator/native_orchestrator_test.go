@@ -188,7 +188,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 			BuildDescription: &pb.BuildDescription{
 				Remote:      "git@github:uber/tango",
 				BaseSha:     "1234567890",
-				RequestUrls: []string{"github://org/repo/pull/123"},
+				Requests: []*pb.Request{{Url: "github://org/repo/pull/123"}},
 			},
 		},
 	})

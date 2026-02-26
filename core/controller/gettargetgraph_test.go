@@ -39,9 +39,9 @@ func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
 		BuildDescription: &pb.BuildDescription{
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
-			RequestUrls: []string{
-				"github://repo/1",
-				"github://repo/2",
+			Requests: []*pb.Request{
+				{Url: "github://repo/1"},
+				{Url: "github://repo/2"},
 			},
 		},
 	}
@@ -64,9 +64,9 @@ func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 		BuildDescription: &pb.BuildDescription{
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
-			RequestUrls: []string{
-				"github://repo/1",
-				"github://repo/2",
+			Requests: []*pb.Request{
+				{Url: "github://repo/1"},
+				{Url: "github://repo/2"},
 			},
 		},
 	}, stream)
@@ -90,9 +90,9 @@ func TestGetTargetGraph_DecodeError_ReturnsError(t *testing.T) {
 		BuildDescription: &pb.BuildDescription{
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
-			RequestUrls: []string{
-				"github://repo/1",
-				"github://repo/2",
+			Requests: []*pb.Request{
+				{Url: "github://repo/1"},
+				{Url: "github://repo/2"},
 			},
 		},
 	}, stream)
@@ -123,9 +123,9 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 		BuildDescription: &pb.BuildDescription{
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
-			RequestUrls: []string{
-				"github://repo/1",
-				"github://repo/2",
+			Requests: []*pb.Request{
+				{Url: "github://repo/1"},
+				{Url: "github://repo/2"},
 			},
 		},
 	}, stream)
@@ -144,9 +144,9 @@ func TestGetTargetGraph_BuildDescriptionMissingRequiredFields_ReturnsError(t *te
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Remote: "repo:go-code",
-			RequestUrls: []string{
-				"github://repo/1",
-				"github://repo/2",
+			Requests: []*pb.Request{
+				{Url: "github://repo/1"},
+				{Url: "github://repo/2"},
 			},
 		},
 	}, stream)

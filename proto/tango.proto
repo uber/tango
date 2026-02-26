@@ -7,6 +7,14 @@ option java_multiple_files = true;
 option java_outer_classname = "TangoProto";
 option java_package = "com.uber.devexp.tango";
 
+// Request represents a single change request with a URL and optional commit SHA.
+message Request {
+    // The URL of the change request (e.g., a GitHub pull request URL or Phabricator diff URL)
+    string url = 1;
+    // The commit SHA associated with the change request
+    string commit = 2;
+}
+
 // BuildDescription defines a Storage state by a primary revision string and
 // an optional list of change identifiers (e.g., diff IDs or PR IDs).
 message BuildDescription {
@@ -14,10 +22,10 @@ message BuildDescription {
     string remote = 1;
     // The base commit sha of the Storage
     string base_sha = 2;
-    // List of change request URLs to apply on top of the base revision.
-    // This can be a phabricator diff URL or a github pull request URL.
-    // If empty, the computation happens on the base revision.
-    repeated string request_urls = 3;
+    // List of change requests to apply on top of the base revision.
+    // Each request contains a URL (e.g., a GitHub pull request or Phabricator diff URL)
+    // and an required commit SHA. If empty, the computation happens on the base revision.
+    repeated Request requests = 3;
     // The computation strategy of the original target graph
     ComputationStrategy strategy = 4;
 }

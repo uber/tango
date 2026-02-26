@@ -57,19 +57,22 @@ func TestGetGraphByTreeHash(t *testing.T) {
 
 func TestGetTreehashCachePath(t *testing.T) {
 	t.Parallel()
-	reqs := []string{"github://org/repo/pull/1", "custom://foo/bar"}
+	reqs := []*pb.Request{
+		{Url: "github://org/repo/pull/1"},
+		{Url: "custom://foo/bar"},
+	}
 	desc := &pb.BuildDescription{
-		Remote:      "git@github:uber/tango",
-		BaseSha:     "deadbeef",
-		RequestUrls: reqs,
+		Remote:   "git@github:uber/tango",
+		BaseSha:  "deadbeef",
+		Requests: reqs,
 	}
 	got := GetTreehashCachePath(desc)
 	// Build expected with the same encoding semantics used by the implementation
 	encoded := []string{
-		base64.RawURLEncoding.EncodeToString([]byte(reqs[0])),
-		base64.RawURLEncoding.EncodeToString([]byte(reqs[1])),
+		base64.RawURLEncoding.EncodeToString([]byte(reqs[0].Url)),
+		base64.RawURLEncoding.EncodeToString([]byte(reqs[1].Url)),
 	}
-	want := filepath.Join("uber/tango", "deadbeef", encoded[0]+"-"+encoded[1])
+	want := filepath.Join("uber/tango", "deadbeef", encoded[0]+"-"+encoded[1], pb.COMPUTATION_STRATEGY_INVALID.String())
 	if got != want {
 		t.Fatalf("GetTreehashCachePath(..) = %q, want %q", got, want)
 	}
@@ -79,22 +82,22 @@ func TestGetReqsBase64(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		in   []string
+		in   []*pb.Request
 		want string
 	}{
 		{
 			name: "empty",
-			in:   []string{},
+			in:   []*pb.Request{},
 			want: "",
 		},
 		{
 			name: "single",
-			in:   []string{"github://org/repo/pull/42"},
+			in:   []*pb.Request{{Url: "github://org/repo/pull/42"}},
 			want: base64.RawURLEncoding.EncodeToString([]byte("github://org/repo/pull/42")),
 		},
 		{
 			name: "multiple",
-			in:   []string{"a", "b"},
+			in:   []*pb.Request{{Url: "a"}, {Url: "b"}},
 			want: base64.RawURLEncoding.EncodeToString([]byte("a")) + "-" + base64.RawURLEncoding.EncodeToString([]byte("b")),
 		},
 	}
