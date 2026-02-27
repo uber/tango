@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/uber/tango/core/targethasher"
@@ -72,7 +73,8 @@ func TestGetTreehashCachePath(t *testing.T) {
 		base64.RawURLEncoding.EncodeToString([]byte(reqs[0].Url)),
 		base64.RawURLEncoding.EncodeToString([]byte(reqs[1].Url)),
 	}
-	want := filepath.Join("uber/tango", "deadbeef", encoded[0]+"-"+encoded[1], pb.COMPUTATION_STRATEGY_INVALID.String())
+	sort.Strings(encoded)
+	want := filepath.Join("uber/tango", "deadbeef", encoded[0]+"-"+encoded[1]) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
 	if got != want {
 		t.Fatalf("GetTreehashCachePath(..) = %q, want %q", got, want)
 	}
