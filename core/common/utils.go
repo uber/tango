@@ -35,6 +35,9 @@ func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
 
 // getReqsBase64 returns the base64 encoded request URLs.
 func getReqsBase64(requests []*tangopb.Request) string {
+	if len(requests) == 0 {
+		return ""
+	}
 	encodedURLs := make([]string, 0, len(requests))
 	for _, req := range requests {
 		encoded := base64.RawURLEncoding.EncodeToString([]byte(req.GetUrl()))
