@@ -289,6 +289,9 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 		}
 	}
 
+	// Compute BFS distances from CHANGE_TYPE_DIRECT targets through the dependency graph.
+	computeDistances(c.logger, changedByName, secondByName, secondMetadata)
+
 	// Collect changed targets.
 	changed := make([]*pb.ChangedTarget, 0, len(changedByName))
 	for _, ct := range changedByName {
@@ -560,6 +563,73 @@ func transposeOptimizedTarget(
 		dst.Attributes = out
 	}
 	return dst
+}
+
+// computeDistances computes the shortest distance from any CHANGE_TYPE_DIRECT
+// target to each changed target via the reverse dependency graph using BFS.
+// DIRECT targets get distance 0, their reverse dependants get 1, and so on.
+//
+// Targets unreachable from any DIRECT target keep the initial distance of -1, this should not happen.
+func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTarget, targetsByName map[string]*pb.OptimizedTarget, meta *pb.Metadata) {
+	if meta == nil {
+		return
+	}
+
+	targetIDMapping := meta.GetTargetIdMapping()
+
+	// Build reverse dependency graph: if B depends on A, then A -> B.
+	reverseDeps := make(map[string][]string, len(targetsByName))
+	for name, t := range targetsByName {
+		for _, depID := range t.GetDirectDependencies() {
+			depName := targetIDMapping[depID]
+			if depName != "" {
+				reverseDeps[depName] = append(reverseDeps[depName], name)
+			}
+		}
+	}
+
+	// initialize all distances to -1, means not set, DIRECT targets at 0.
+	var queue []string
+	visited := make(map[string]struct{}, len(changedByName))
+	for name, ct := range changedByName {
+		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT {
+			ct.Distance = 0
+			queue = append(queue, name)
+			visited[name] = struct{}{}
+		} else {
+			ct.Distance = -1
+		}
+	}
+
+	// BFS from DIRECT targets through reverseDeps. Shortest distance wins.
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		currentDist := changedByName[current].GetDistance()
+
+		for _, revDep := range reverseDeps[current] {
+			// BFS guarantees shortest distance, so skip if already visited.
+			if _, seen := visited[revDep]; seen {
+				continue
+			}
+			visited[revDep] = struct{}{}
+			queue = append(queue, revDep)
+
+			if ct, ok := changedByName[revDep]; ok {
+				ct.Distance = currentDist + 1
+			}
+		}
+	}
+
+	// Just in case a target is marked changed but has no distance to DIRECT change.
+	// Warn about such cases. Probably a hashing bug.
+	for name, ct := range changedByName {
+		if ct.GetChangeType() == pb.CHANGE_TYPE_INDIRECT && ct.GetDistance() == -1 {
+			logger.Warn("computeDistances: INDIRECT target has no path to a DIRECT change, possible hashing issue",
+				zap.String("target", name),
+			)
+		}
+	}
 }
 
 func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) error {

@@ -708,6 +708,54 @@ func TestCompareTargetGraphs_DirectWhenNewAttributeAdded(t *testing.T) {
 	require.Equal(t, pb.CHANGE_TYPE_DIRECT, cs.GetChangedTargets()[0].GetChangeType(), "Target with new attribute added should be marked as DIRECT")
 }
 
+func TestComputeDistances(t *testing.T) {
+	// Graph:
+	//   A (DIRECT)  <-  B (INDIRECT)  <-  C (INDIRECT)
+	//   D (DIRECT)  <---------------------┘
+	//   E (INDIRECT, no deps — unreachable)
+	//
+	// Expected distances:
+	//   A=0  B=1  C=1  D=0  E=-1
+
+	meta := &pb.Metadata{
+		TargetIdMapping: map[int32]string{
+			1: "A", 2: "B", 3: "C", 4: "D", 5: "E",
+		},
+	}
+
+	targetsByName := map[string]*pb.OptimizedTarget{
+		"A": {Id: 1},
+		"B": {Id: 2, DirectDependencies: []int32{1}},    // [A]
+		"C": {Id: 3, DirectDependencies: []int32{2, 4}}, // [B, D]
+		"D": {Id: 4},
+		"E": {Id: 5},
+	}
+
+	changedByName := map[string]*pb.ChangedTarget{
+		"A": {ChangeType: pb.CHANGE_TYPE_DIRECT},
+		"B": {ChangeType: pb.CHANGE_TYPE_INDIRECT},
+		"C": {ChangeType: pb.CHANGE_TYPE_INDIRECT},
+		"D": {ChangeType: pb.CHANGE_TYPE_DIRECT},
+		"E": {ChangeType: pb.CHANGE_TYPE_INDIRECT},
+	}
+
+	computeDistances(zap.NewNop(), changedByName, targetsByName, meta)
+
+	assert.Equal(t, int32(0), changedByName["A"].GetDistance(), "DIRECT target A should have distance 0")
+	assert.Equal(t, int32(1), changedByName["B"].GetDistance(), "B depends on DIRECT A, distance should be 1")
+	assert.Equal(t, int32(1), changedByName["C"].GetDistance(), "C depends on DIRECT D (shorter than 2 via A→B), distance should be 1")
+	assert.Equal(t, int32(0), changedByName["D"].GetDistance(), "DIRECT target D should have distance 0")
+	assert.Equal(t, int32(-1), changedByName["E"].GetDistance(), "E has no path to any DIRECT target, distance should be -1")
+}
+
+func TestComputeDistances_NilMetadata(t *testing.T) {
+	changedByName := map[string]*pb.ChangedTarget{
+		"A": {ChangeType: pb.CHANGE_TYPE_DIRECT},
+	}
+	computeDistances(zap.NewNop(), changedByName, nil, nil)
+	assert.Equal(t, int32(0), changedByName["A"].GetDistance())
+}
+
 func TestCompareTargetGraphs_IndirectWhenOnlyHashChanged(t *testing.T) {
 	c := &controller{logger: zaptest.NewLogger(t)}
 
