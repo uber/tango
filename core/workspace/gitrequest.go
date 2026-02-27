@@ -33,23 +33,26 @@ func (r *gitRequest) Apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	commits, err := r.git.Log(ctx, fmt.Sprintf("pull/%s/head", r.requestID), 50)
-	if err != nil {
-		return fmt.Errorf("failed to read PR commit history: %w", err)
-	}
-	found := false
-	for _, sha := range commits {
-		if sha == r.commit {
-			found = true
-			break
+	// check if commit exists
+	if r.commit != "" {
+		commits, err := r.git.Log(ctx, fmt.Sprintf("pull/%s/head", r.requestID), 50)
+		if err != nil {
+			return fmt.Errorf("failed to read PR commit history: %w", err)
 		}
-	}
-	if !found {
-		return fmt.Errorf("commit %q not found in last 50 commits of PR %s", r.commit, r.requestID)
-	}
-	patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
-	if err != nil {
-		return err
+		found := false
+		for _, sha := range commits {
+			if sha == r.commit {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("commit %q not found in last 50 commits of PR %s", r.commit, r.requestID)
+		}
+		patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
+		if err != nil {
+			return err
+		}
 	}
 	err = r.git.ApplyPatch(ctx, patch)
 	if err != nil {
