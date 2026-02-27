@@ -103,6 +103,10 @@ message ChangedTarget {
     ChangeType change_type = 1;      // Type of the change
     OptimizedTarget old_target = 2; // The old target before the change (first revision)
     OptimizedTarget new_target = 3; // The new target after the change (second revision)
+    // Distance from the nearest CHANGE_TYPE_DIRECT target in the reverse dependency graph.
+    // 0 means the target itself is DIRECT, 1 means it directly depends on a DIRECT target, etc.
+    // -1 means the distance is not set (e.g., for NEW targets or targets unreachable from DIRECT targets).
+    int32 distance = 4;
 }
 
 // Metadata emitted as the last stream item to provide id->name mappings, etc.

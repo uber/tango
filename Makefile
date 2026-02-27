@@ -18,9 +18,7 @@ test:
 # Generate protobuf files using protoc
 proto:
 	@echo "Generating protobuf files with protoc..."
-	@protoc --gogoslick_out=tangopb --proto_path=proto proto/tango.proto
-	@protoc --go_out=tangopb --go_opt=paths=source_relative \
-	  --go-grpc_out=tangopb --go-grpc_opt=paths=source_relative \
+	@protoc --gogoslick_out=tangopb \
 	  --yarpc-go_out=tangopb --yarpc-go_opt=paths=source_relative \
 	  --proto_path=proto proto/tango.proto
 	@echo "Protobuf files generated successfully!"
