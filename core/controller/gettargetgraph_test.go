@@ -166,27 +166,6 @@ func TestGetTargetGraph_MissingBuildDescription_ReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestGetTargetGraph_RequestMissingCommit_ReturnsError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-	store := storagemock.NewMockStorage(ctrl)
-	c := NewController(Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
-	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{
-			Remote:  "repo:go-code",
-			BaseSha: "sha",
-			Requests: []*pb.Request{
-				{Url: "github://repo/1", Commit: "abc123"},
-				{Url: "github://repo/2"}, // missing commit
-			},
-		},
-	}, stream)
-	assert.Error(t, err)
-}
 
 // New coverage: Storage returns NotFound on treehash path -> orchestrator is called to compute the target graph.
 func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {

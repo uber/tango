@@ -50,11 +50,6 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 	if buildDescription.GetBaseSha() == "" || buildDescription.GetRemote() == "" {
 		return nil, fmt.Errorf("build description is missing required fields: base_sha: %s, remote: %s", buildDescription.GetBaseSha(), buildDescription.GetRemote())
 	}
-	for i, req := range buildDescription.GetRequests() {
-		if req.GetCommit() == "" {
-			return nil, fmt.Errorf("request at index %d is missing required commit field (url: %s)", i, req.GetUrl())
-		}
-	}
 	// Look up the the git treehash based on cache path
 	treehashCachePath := common.GetTreehashCachePath(buildDescription)
 	treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
