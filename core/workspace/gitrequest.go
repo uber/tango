@@ -33,7 +33,6 @@ func (r *gitRequest) Apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// check if commit exists
 	if r.commit != "" {
 		commits, err := r.git.Log(ctx, fmt.Sprintf("pull/%s/head", r.requestID), 50)
 		if err != nil {
