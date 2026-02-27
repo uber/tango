@@ -34,19 +34,12 @@ func (r *gitRequest) Apply(ctx context.Context) error {
 		return err
 	}
 	if r.commit != "" {
-		commits, err := r.git.Log(ctx, fmt.Sprintf("pull/%s/head", r.requestID), 50)
+		isAncestor, err := r.git.IsAncestor(ctx, r.commit, fmt.Sprintf("pull/%s/head", r.requestID))
 		if err != nil {
 			return fmt.Errorf("failed to read PR commit history: %w", err)
 		}
-		found := false
-		for _, sha := range commits {
-			if sha == r.commit {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("commit %q not found in last 50 commits of PR %s", r.commit, r.requestID)
+		if !isAncestor {
+			return fmt.Errorf("commit %q is not an ancestor of PR %s", r.commit, r.requestID)
 		}
 	}
 	patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")

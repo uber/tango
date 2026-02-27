@@ -26,11 +26,11 @@ func TestNewGitRequest_ExtractsID(t *testing.T) {
 }
 
 
-func TestGitRequest_Apply_CommitMatches_Success(t *testing.T) {
+func TestGitRequest_Apply_CommitIsAncestor_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().Log(gomock.Any(), "pull/123/head", 50).Return([]string{"deadbeef", "aabbccdd"}, nil)
+	git.EXPECT().IsAncestor(gomock.Any(), "deadbeef", "pull/123/head").Return(true, nil)
 	git.EXPECT().Diff(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
 	git.EXPECT().ApplyPatch(gomock.Any(), gomock.Any()).Return(nil)
 	git.EXPECT().Commit(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
@@ -40,36 +40,22 @@ func TestGitRequest_Apply_CommitMatches_Success(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestGitRequest_Apply_CommitInAncestors_Success(t *testing.T) {
+func TestGitRequest_Apply_CommitNotAncestor_ReturnsError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().Log(gomock.Any(), "pull/123/head", 50).Return([]string{"aabbccdd", "11223344", "deadbeef"}, nil)
-	git.EXPECT().Diff(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
-	git.EXPECT().ApplyPatch(gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().Commit(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().SubmoduleUpdate(gomock.Any()).Return(nil)
-	req := NewGitRequest(git, "123", "baseRef", "deadbeef")
-	err := req.Apply(context.Background())
-	require.NoError(t, err)
-}
-
-func TestGitRequest_Apply_CommitMismatch_ReturnsError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	git := gitmock.NewMockInterface(ctrl)
-	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().Log(gomock.Any(), "pull/456/head", 50).Return([]string{"aabbccdd", "11223344"}, nil)
+	git.EXPECT().IsAncestor(gomock.Any(), "deadbeef", "pull/456/head").Return(false, nil)
 	req := NewGitRequest(git, "456", "baseRef", "deadbeef")
 	err := req.Apply(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deadbeef")
 }
 
-func TestGitRequest_Apply_LogFails_ReturnsError(t *testing.T) {
+func TestGitRequest_Apply_IsAncestorFails_ReturnsError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
-	git.EXPECT().Log(gomock.Any(), "pull/789/head", 50).Return(nil, errors.New("log failed"))
+	git.EXPECT().IsAncestor(gomock.Any(), "deadbeef", "pull/789/head").Return(false, errors.New("ancestor check failed"))
 	req := NewGitRequest(git, "789", "baseRef", "deadbeef")
 	err := req.Apply(context.Background())
 	require.Error(t, err)
