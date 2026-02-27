@@ -49,10 +49,10 @@ func (r *gitRequest) Apply(ctx context.Context) error {
 		if !found {
 			return fmt.Errorf("commit %q not found in last 50 commits of PR %s", r.commit, r.requestID)
 		}
-		patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
-		if err != nil {
-			return err
-		}
+	}
+	patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
+	if err != nil {
+		return err
 	}
 	err = r.git.ApplyPatch(ctx, patch)
 	if err != nil {
