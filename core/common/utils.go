@@ -29,7 +29,7 @@ func GetGraphByTreeHash(remote, treehash string) string {
 
 // GetTreehashCachePath returns the cache path for the treehash.
 func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
-	return filepath.Join(ToShortRemote(buildDescription.Remote), buildDescription.BaseSha, getReqsBase64(buildDescription.Requests), buildDescription.Strategy.String())
+	return filepath.Join(ToShortRemote(buildDescription.Remote), buildDescription.BaseSha, getReqsBase64(buildDescription.Requests)) + "-" + buildDescription.Strategy.String()
 }
 
 // getReqsBase64 returns the base64 encoded request URLs.
@@ -39,6 +39,7 @@ func getReqsBase64(requests []*tangopb.Request) string {
 		encoded := base64.RawURLEncoding.EncodeToString([]byte(req.GetUrl()))
 		encodedURLs = append(encodedURLs, encoded)
 	}
+	sort.Strings(encodedURLs)
 	return strings.Join(encodedURLs, "-")
 }
 
