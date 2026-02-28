@@ -42,4 +42,6 @@ type Storage interface {
 	Get(ctx context.Context, req DownloadRequest) (*DownloadResponse, error)
 	// Put uploads a blob to the storage
 	Put(ctx context.Context, req UploadRequest) error
+	// Exists checks whether a blob exists in the storage.
+	Exists(ctx context.Context, key string) (bool, error)
 }

@@ -41,6 +41,21 @@ func (m *MockStorage) EXPECT() *MockStorageMockRecorder {
 	return m.recorder
 }
 
+// Exists mocks base method.
+func (m *MockStorage) Exists(ctx context.Context, key string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Exists", ctx, key)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Exists indicates an expected call of Exists.
+func (mr *MockStorageMockRecorder) Exists(ctx, key any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exists", reflect.TypeOf((*MockStorage)(nil).Exists), ctx, key)
+}
+
 // Get mocks base method.
 func (m *MockStorage) Get(ctx context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
 	m.ctrl.T.Helper()

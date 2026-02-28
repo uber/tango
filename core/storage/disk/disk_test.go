@@ -77,6 +77,36 @@ func TestStorage_PutAndGet(t *testing.T) {
 	})
 }
 
+func TestStorage_Exists(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	s, err := New(tmpDir)
+	require.NoError(t, err)
+
+	t.Run("returns false for missing key", func(t *testing.T) {
+		exists, err := s.Exists(ctx, "nonexistent.txt")
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+
+	t.Run("returns true after put", func(t *testing.T) {
+		err := s.Put(ctx, storage.UploadRequest{Key: "exists.txt", Reader: bytes.NewReader([]byte("data"))})
+		require.NoError(t, err)
+
+		exists, err := s.Exists(ctx, "exists.txt")
+		require.NoError(t, err)
+		assert.True(t, exists)
+	})
+
+	t.Run("returns false with cancelled context", func(t *testing.T) {
+		cancelledCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		exists, err := s.Exists(cancelledCtx, "any.txt")
+		assert.Error(t, err)
+		assert.False(t, exists)
+	})
+}
+
 func TestStorage_Get_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

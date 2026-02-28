@@ -44,3 +44,10 @@ func (m *memoryStorage) Put(ctx context.Context, req UploadRequest) error {
 	m.data[req.Key] = buf.Bytes()
 	return nil
 }
+
+func (m *memoryStorage) Exists(ctx context.Context, key string) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.data[key]
+	return ok, nil
+}
