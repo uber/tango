@@ -74,3 +74,18 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 	}
 	return os.Rename(tmpPath, path)
 }
+
+// Exists checks whether a blob exists in the storage.
+func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	_, err := os.Stat(filepath.Join(d.rootDir, key))
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
