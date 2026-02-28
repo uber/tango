@@ -741,11 +741,11 @@ func TestComputeDistances(t *testing.T) {
 
 	computeDistances(zap.NewNop(), changedByName, targetsByName, meta)
 
-	assert.Equal(t, int32(0), changedByName["A"].GetDistance())
-	assert.Equal(t, int32(1), changedByName["B"].GetDistance())
-	assert.Equal(t, int32(1), changedByName["C"].GetDistance())
-	assert.Equal(t, int32(0), changedByName["D"].GetDistance())
-	assert.Equal(t, int32(-1), changedByName["E"].GetDistance())
+	assert.Equal(t, int32(0), changedByName["A"].GetDistance(), "DIRECT target A should have distance 0")
+	assert.Equal(t, int32(1), changedByName["B"].GetDistance(), "B depends on DIRECT A, distance should be 1")
+	assert.Equal(t, int32(1), changedByName["C"].GetDistance(), "C depends on DIRECT D (shorter than 2 via A→B), distance should be 1")
+	assert.Equal(t, int32(0), changedByName["D"].GetDistance(), "DIRECT target D should have distance 0")
+	assert.Equal(t, int32(-1), changedByName["E"].GetDistance(), "E has no path to any DIRECT target, distance should be -1")
 }
 
 func TestComputeDistances_NilMetadata(t *testing.T) {
