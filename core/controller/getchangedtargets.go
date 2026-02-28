@@ -296,6 +296,9 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 		computeDistances(c.logger, changedByName, secondByName, secondMetadata)
 	}
 
+	// TODO: https://github.com/uber/tango/issues/34
+	// only return changed targets changed within x distance from a direct target
+
 	// Collect changed targets.
 	changed := make([]*pb.ChangedTarget, 0, len(changedByName))
 	for _, ct := range changedByName {
