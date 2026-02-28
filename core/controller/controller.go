@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"github.com/uber/tango/core/config"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
@@ -13,14 +12,12 @@ import (
 type Params struct {
 	fx.In
 	Logger       *zap.Logger
-	Config       *config.Config
 	Storage      storage.Storage
 	Orchestrator orchestrator.Orchestrator
 }
 
 type controller struct {
 	logger       *zap.Logger
-	config       *config.Config
 	storage      storage.Storage
 	orchestrator orchestrator.Orchestrator
 }
@@ -29,7 +26,6 @@ type controller struct {
 func NewController(p Params) pb.TangoYARPCServer {
 	return &controller{
 		logger:       p.Logger,
-		config:       p.Config,
 		storage:      p.Storage,
 		orchestrator: p.Orchestrator,
 	}

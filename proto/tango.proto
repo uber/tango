@@ -54,6 +54,8 @@ message OutputConfig {
     bool include_hashes = 3;
     // Indicates if only root targets (i.e. targets that are not depended on by any other targets) should be included in the response
     bool roots_only = 4;
+    // Indicates if BFS distances from CHANGE_TYPE_DIRECT targets should be computed for each ChangedTarget
+    bool compute_distances = 5;
 }
 
 // OptimizedTarget represents a build target in a compact format with stable numeric identifiers for

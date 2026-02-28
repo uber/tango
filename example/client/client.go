@@ -105,6 +105,9 @@ func main() {
 				BaseSha:  *newBaseSHA,
 				Requests: newRequests,
 			},
+			OutputConfig: &pb.OutputConfig{
+				ComputeDistances: false,
+			},
 		}
 		if err := callGetChangedTargets(ctx, client, logger, req); err != nil {
 			logger.Errorf("Error: %v", err)

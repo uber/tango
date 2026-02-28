@@ -70,7 +70,6 @@ func run() error {
 	// Controller (YARPC server implementation)
 	ctrl := controller.NewController(controller.Params{
 		Logger:       zl,
-		Config:       cfg,
 		Storage:      store,
 		Orchestrator: orch,
 	})
