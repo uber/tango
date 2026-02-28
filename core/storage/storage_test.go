@@ -1,11 +1,30 @@
 package storage
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestMemoryStorage_Exists(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemoryStorage()
+
+	exists, err := s.Exists(ctx, "missing")
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	err = s.Put(ctx, UploadRequest{Key: "present", Reader: bytes.NewReader([]byte("data"))})
+	require.NoError(t, err)
+
+	exists, err = s.Exists(ctx, "present")
+	require.NoError(t, err)
+	assert.True(t, exists)
+}
 
 func TestNotFoundError_Error(t *testing.T) {
 	err := &NotFoundError{Path: "test/path"}
