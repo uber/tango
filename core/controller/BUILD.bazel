@@ -13,6 +13,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core/common",
+        "//core/config",
         "//core/storage",
         "//orchestrator",
         "//tangopb",

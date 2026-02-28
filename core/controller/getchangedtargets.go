@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/uber/tango/core/common"
+	"github.com/uber/tango/core/config"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
@@ -209,6 +210,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 					secondMetadata.GetAttributeStringValueMapping(),
 					getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
 				),
+				Distance: getDefaultDistance(c.config, true),
 			}
 			continue
 		}
@@ -252,6 +254,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			ChangeType: initial,
 			OldTarget:  oldTarget,
 			NewTarget:  newTarget,
+			Distance:   getDefaultDistance(c.config, false),
 		}
 	}
 
@@ -290,7 +293,9 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 	}
 
 	// Compute BFS distances from CHANGE_TYPE_DIRECT targets through the dependency graph.
-	computeDistances(c.logger, changedByName, secondByName, secondMetadata)
+	if c.config == nil || !c.config.Repository.DisableComputeDistances {
+		computeDistances(c.logger, changedByName, secondByName, secondMetadata)
+	}
 
 	// Collect changed targets.
 	changed := make([]*pb.ChangedTarget, 0, len(changedByName))
@@ -661,4 +666,15 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 		return errors.New("first and second revision must have the same remote")
 	}
 	return nil
+}
+
+func getDefaultDistance(cfg *config.Config, forNewTarget bool) int32 {
+	if cfg == nil && cfg.Repository.DisableComputeDistances {
+		return -1
+	}
+	// new targets are always DIRECT CHANGED
+	if forNewTarget {
+		return 0
+	}
+	return -1
 }
