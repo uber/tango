@@ -12,5 +12,5 @@ type RepositoryConfig struct {
 	QueryTimeout            int64    `yaml:"query_timeout"`             // in seconds
 	GitTimeout              int64    `yaml:"git_timeout"`               // in seconds
 	WorkspacePoolSize       int      `yaml:"workspace_pool_size"`       // number of worker workspaces per repo
-	DisableComputeDistances bool     `yaml:"disable_compute_distances"` // disable BFS distance computation from DIRECT targets, by default it's enabled
+	DisableComputeDistances bool     `yaml:"disable_compute_distances"` // disable BFS distance computation from DIRECT targets, enabled by default
 }

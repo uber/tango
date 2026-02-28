@@ -669,7 +669,7 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 }
 
 func getDefaultDistance(cfg *config.Config, forNewTarget bool) int32 {
-	if cfg == nil && cfg.Repository.DisableComputeDistances {
+	if cfg == nil || cfg.Repository.DisableComputeDistances {
 		return -1
 	}
 	// new targets are always DIRECT CHANGED
