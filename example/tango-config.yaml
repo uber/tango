@@ -8,7 +8,7 @@ storage:
 
 # Repository configuration
 repository:
-  remote: "https://github.com/uber/tango.git"
+  remote: "gitolite@code.uber.internal:go-code"
   default_branch: "main"
   full_hash_repos:
     - ""
@@ -25,3 +25,7 @@ repository:
   query_timeout: 300
   git_timeout: 300
   workspace_pool_size: 5
+  # root for origin clones; defaults to os.TempDir()/tango-repo-manager
+  repo_manager_clone_path: "/Users/tanx"
+  # root for worker checkouts; defaults to repo_manager_clone_path/.workers
+  worker_root_path: "/tmp/tango/workers"

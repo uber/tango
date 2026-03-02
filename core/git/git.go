@@ -67,7 +67,7 @@ func (c *impl) Fetch(ctx context.Context, remote, ref string, options ...string)
 func (c *impl) Clone(ctx context.Context, target, destination string, options ...string) error {
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
-	args := append([]string{"clone", target, destination}, options...)
+	args := append(append([]string{"clone"}, options...), target, destination)
 	return c.runner.run(ctx, c.directory, "git", args...)
 }
 

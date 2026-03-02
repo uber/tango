@@ -47,17 +47,23 @@ func run() error {
 	logger.Infof("Using storage type: %s", cfg.Storage.Type)
 
 	// Repo manager and orchestrator
-	rootWS := filepath.Join(os.TempDir(), "tango-workspaces")
-	if err := os.MkdirAll(rootWS, 0o755); err != nil {
-		return fmt.Errorf("failed to create root workspace: %w", err)
+	repoManagerClonePath := cfg.Repository.RepoManagerClonePath
+	workerRootPath := cfg.Repository.WorkerRootPath
+	if err := os.MkdirAll(repoManagerClonePath, 0o755); err != nil {
+		return fmt.Errorf("failed to create repo manager clone path: %w", err)
 	}
-	defer os.RemoveAll(rootWS)
+	defer os.RemoveAll(repoManagerClonePath)
+	if err := os.MkdirAll(workerRootPath, 0o755); err != nil {
+		return fmt.Errorf("failed to create worker root path: %w", err)
+	}
+	defer os.RemoveAll(workerRootPath)
 
 	rm := repomanager.NewRepoManager(repomanager.Params{
-		Git:           git.New(rootWS),
-		Logger:        logger,
-		RootWorkspace: rootWS,
-		PoolSize:      cfg.Repository.WorkspacePoolSize,
+		Git:                  git.New(repoManagerClonePath),
+		Logger:               logger,
+		RepoManagerClonePath: repoManagerClonePath,
+		WorkerRootPath:       workerRootPath,
+		PoolSize:             cfg.Repository.WorkspacePoolSize,
 	})
 	orch := orchestrator.NewNativeOrchestrator(orchestrator.Params{
 		Storage:        store,

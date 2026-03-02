@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	yaml "github.com/goccy/go-yaml"
 )
@@ -26,6 +27,15 @@ func Parse(configFilePath string) (*Config, error) {
 	// Default to memory storage if not specified
 	if config.Storage.Type == "" {
 		config.Storage.Type = StorageTypeMemory
+	}
+	if config.Repository.WorkerRootPath != "" && config.Repository.RepoManagerClonePath == "" {
+		return nil, fmt.Errorf("repository.repo_manager_clone_path must be set when worker_root_path is specified")
+	}
+	if config.Repository.RepoManagerClonePath == "" {
+		config.Repository.RepoManagerClonePath = filepath.Join(os.TempDir(), "tango-repo-manager")
+	}
+	if config.Repository.WorkerRootPath == "" {
+		config.Repository.WorkerRootPath = filepath.Join(config.Repository.RepoManagerClonePath, ".workers")
 	}
 	if config.Repository.WorkspacePoolSize <= 0 {
 		return nil, fmt.Errorf("repository.workspace_pool_size must be > 0, got %d", config.Repository.WorkspacePoolSize)

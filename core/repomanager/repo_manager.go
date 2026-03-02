@@ -20,10 +20,11 @@ type RepoManager interface {
 }
 
 type repoManager struct {
-	git           git.Interface
-	rootWorkspace string
-	logger        *zap.SugaredLogger
-	poolSize      int
+	git                  git.Interface
+	repoManagerClonePath string
+	workerRootPath       string
+	logger               *zap.SugaredLogger
+	poolSize             int
 
 	mu    sync.Mutex
 	pools map[string]*workerPool
@@ -48,20 +49,22 @@ type workerSlot struct {
 
 // Params for creating a RepoManager.
 type Params struct {
-	Git           git.Interface
-	Logger        *zap.SugaredLogger
-	RootWorkspace string
-	PoolSize      int
+	Git                  git.Interface
+	Logger               *zap.SugaredLogger
+	RepoManagerClonePath string
+	WorkerRootPath       string
+	PoolSize             int
 }
 
 // NewRepoManager creates a new repo manager with pooled worker workspaces.
 func NewRepoManager(p Params) RepoManager {
 	return &repoManager{
-		git:           p.Git,
-		rootWorkspace: p.RootWorkspace,
-		logger:        p.Logger,
-		poolSize:      p.PoolSize,
-		pools:         make(map[string]*workerPool),
+		git:                  p.Git,
+		repoManagerClonePath: p.RepoManagerClonePath,
+		workerRootPath:       p.WorkerRootPath,
+		logger:               p.Logger,
+		poolSize:             p.PoolSize,
+		pools:                make(map[string]*workerPool),
 	}
 }
 
@@ -77,13 +80,13 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 		r.poolSize = 1
 	}
 	pool := &workerPool{
-		originDir: filepath.Join(r.rootWorkspace, repo),
+		originDir: filepath.Join(r.repoManagerClonePath, repo),
 		avail:     make(chan *workerSlot, r.poolSize),
 	}
 
 	// Pre-allocate fixed worker slots. Existing directories from a previous
 	// run are detected and reused without re-cloning.
-	workersDir := filepath.Join(r.rootWorkspace, ".workers", repo)
+	workersDir := filepath.Join(r.workerRootPath, repo)
 	for i := 1; i <= r.poolSize; i++ {
 		dir := filepath.Join(workersDir, fmt.Sprintf("worker-%d", i))
 		slot := &workerSlot{dir: dir}
@@ -152,7 +155,7 @@ func (p *workerPool) ensureOrigin(ctx context.Context, g git.Interface, remote s
 	if err := os.MkdirAll(filepath.Dir(p.originDir), 0o755); err != nil {
 		return fmt.Errorf("mkdir origin dir: %w", err)
 	}
-	if err := g.Clone(ctx, remote, p.originDir); err != nil {
+	if err := g.Clone(ctx, remote, p.originDir, "-c", "gc.auto=0"); err != nil {
 		os.RemoveAll(p.originDir)
 		return fmt.Errorf("clone origin: %w", err)
 	}
@@ -167,7 +170,7 @@ func (r *repoManager) createWorker(ctx context.Context, originDir, workerDir str
 	if err := os.MkdirAll(filepath.Dir(workerDir), 0o755); err != nil {
 		return err
 	}
-	return r.git.Clone(ctx, originDir, workerDir, "--local")
+	return r.git.Clone(ctx, originDir, workerDir, "--local", "-c", "gc.auto=0")
 }
 
 func toShortRemote(remote string) string {
