@@ -6,6 +6,8 @@ MODULE.bazel.lock
 .idea/
 .claude/
 .ijwb/
+CLAUDE.md
+.mcp.*
 
 
 # Built binaries
