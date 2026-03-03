@@ -1,4 +1,4 @@
-.PHONY: build test proto gazelle clean clean-proto run-server run-client run-changed-targets help
+.PHONY: build test proto gazelle clean clean-proto run-server run-client help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -55,17 +55,6 @@ run-client:
 		-base-sha "$(or $(BASE_SHA),)" \
 		-request-urls "$(or $(REQUEST_URLS),)"
 
-# Run get-changed-targets via the Tango client
-run-changed-targets:
-	@$(BAZEL) run //example/client:client -- \
-		-addr $(or $(SERVER_ADDR),127.0.0.1:8081) \
-		-method get-changed-targets \
-		-remote "$(or $(REMOTE),)" \
-		-base-sha "$(or $(BASE_SHA),)" \
-		-request-urls "$(or $(REQUEST_URLS),)" \
-		-new-base-sha "$(or $(NEW_BASE_SHA),)" \
-		-new-request-urls "$(or $(NEW_REQUEST_URLS),)"
-
 # Show Bazel version
 version:
 	@$(BAZEL) version
@@ -87,13 +76,12 @@ help:
 	@echo "Run Server & Client:"
 	@echo "  make run-server    - Run the Tango server (port 8081)"
 	@echo "  make run-client    - Run the Tango client"
-	@echo "  make run-changed-targets - Run get-changed-targets"
 	@echo ""
 	@echo "Other:"
 	@echo "  make version       - Show Bazel version"
 	@echo "  make help          - Show this help message"
 	@echo ""
-	@echo "Examples:"
+	@echo "Examples:"git
 	@echo "  # Build and test everything"
 	@echo "  make build && make test"
 	@echo ""
@@ -107,5 +95,5 @@ help:
 	@echo "  make run-server"
 	@echo ""
 	@echo "  # Run client with custom parameters"
-	@echo "  make run-client REMOTE=org/repo BASE_SHA=abc123"
+	@echo "  make run-client REMOTE=mobile/android BASE_SHA=abc123"
 	@echo ""

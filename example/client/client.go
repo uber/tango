@@ -33,7 +33,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8081", "server address (gRPC inbound)")
-	method := flag.String("method", "get-target-graph", "method to call: get-target-graph, get-changed-targets")
+	method := flag.String("method", "get-target-graph", "method to call: get-target-graph")
 	remote := flag.String("remote", "", "build description remote")
 	baseSHA := flag.String("base-sha", "", "build description base sha")
 	reqURLs := flag.String("request-urls", "", "comma-separated change request URLs")

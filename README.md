@@ -36,7 +36,7 @@ make run-server
 make run-client
 
 # Run client with custom parameters
-make run-client REMOTE=org/repo BASE_SHA=abc123 REQUEST_URLS=https://github.com/uber/repo/pull/123
+make run-client REMOTE=mobile/android BASE_SHA=abc123 REQUEST_URLS=https://github.com/uber/repo/pull/123
 ```
 
 For a complete list of available commands, run `make help`.
@@ -65,11 +65,6 @@ make build
 ```
 
 ## Development
-
-### Setup IDE
-You can either 
-- use any IDE that support native golang toolchain
-- or use [gopackagesdriver](https://github.com/bazel-contrib/rules_go/wiki/Editor-setup#debugging) for bazel based IDE
 
 ### Updating BUILD files
 - Add all direct GO dependencies explicitly to the MODULE.bazel.
@@ -139,7 +134,6 @@ Run `make help` to see all available commands:
 **Run Server & Client:**
 - `make run-server` - Run the Tango server (port 8081)
 - `make run-client` - Run the Tango client
-- `make run-changed-targets` - Run get-changed-targets
 
 **Other:**
 - `make version` - Show Bazel version
@@ -155,8 +149,7 @@ You can customize the client behavior with these environment variables:
 
 Example:
 ```bash
-make run-client REMOTE=https://github.com/uber/tango.git  METHOD=get-target-graph BASE_SHA=872881fd
-make run-changed-targets REMOTE=https://github.com/uber/tango.git BASE_SHA=872881fd~1 NEW_BASE_SHA=872881fd
+make run-client REMOTE=https://github.com/uber/tango.git  METHOD=get-target-graph BASE_SHA=HEAD
 ```
 
 ## CI/CD
