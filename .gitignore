@@ -8,7 +8,7 @@ MODULE.bazel.lock
 .ijwb/
 CLAUDE.md
 .mcp.*
-
+tools/gopackagesdriver.sh
 
 # Built binaries
 bin/

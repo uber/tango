@@ -95,5 +95,5 @@ help:
 	@echo "  make run-server"
 	@echo ""
 	@echo "  # Run client with custom parameters"
-	@echo "  make run-client REMOTE=mobile/android BASE_SHA=abc123"
+	@echo "  make run-client REMOTE=org/repo BASE_SHA=abc123"
 	@echo ""

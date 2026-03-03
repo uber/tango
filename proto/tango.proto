@@ -18,7 +18,7 @@ message Request {
 // BuildDescription defines a Storage state by a primary revision string and
 // an optional list of change identifiers (e.g., diff IDs or PR IDs).
 message BuildDescription {
-    // The remote of the Storage, like "mobile/android"
+    // The remote of the Storage, like "org/repo"
     string remote = 1;
     // The base commit sha of the Storage
     string base_sha = 2;

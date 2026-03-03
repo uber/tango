@@ -36,7 +36,7 @@ make run-server
 make run-client
 
 # Run client with custom parameters
-make run-client REMOTE=mobile/android BASE_SHA=abc123 REQUEST_URLS=https://github.com/uber/repo/pull/123
+make run-client REMOTE=org/repo BASE_SHA=abc123 REQUEST_URLS=https://github.com/uber/repo/pull/123
 ```
 
 For a complete list of available commands, run `make help`.
@@ -65,6 +65,11 @@ make build
 ```
 
 ## Development
+
+### Setup IDE
+You can either 
+- use any IDE that support native golang toolchain
+- or use [gopackagesdriver](https://github.com/bazel-contrib/rules_go/wiki/Editor-setup#debugging) for bazel based IDE
 
 ### Updating BUILD files
 - Add all direct GO dependencies explicitly to the MODULE.bazel.
