@@ -139,6 +139,7 @@ Run `make help` to see all available commands:
 **Run Server & Client:**
 - `make run-server` - Run the Tango server (port 8081)
 - `make run-client` - Run the Tango client
+- `make run-changed-targets` - Run get-changed-targets
 
 **Other:**
 - `make version` - Show Bazel version
@@ -154,7 +155,8 @@ You can customize the client behavior with these environment variables:
 
 Example:
 ```bash
-make run-client REMOTE=https://github.com/uber/tango.git  METHOD=get-target-graph BASE_SHA=HEAD
+make run-client REMOTE=https://github.com/uber/tango.git  METHOD=get-target-graph BASE_SHA=872881fd
+make run-changed-targets REMOTE=https://github.com/uber/tango.git BASE_SHA=872881fd~1 NEW_BASE_SHA=872881fd
 ```
 
 ## CI/CD

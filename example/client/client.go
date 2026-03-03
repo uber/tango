@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -23,16 +24,16 @@ import (
 	"strings"
 	"time"
 
-	"encoding/json"
-	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/yarpc"
 	yarpcgrpc "go.uber.org/yarpc/transport/grpc"
 	"go.uber.org/zap"
+
+	pb "github.com/uber/tango/tangopb"
 )
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8081", "server address (gRPC inbound)")
-	method := flag.String("method", "get-target-graph", "method to call: get-target-graph")
+	method := flag.String("method", "get-target-graph", "method to call: get-target-graph, get-changed-targets")
 	remote := flag.String("remote", "", "build description remote")
 	baseSHA := flag.String("base-sha", "", "build description base sha")
 	reqURLs := flag.String("request-urls", "", "comma-separated change request URLs")
