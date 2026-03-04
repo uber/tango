@@ -136,8 +136,8 @@ Run `make help` to see all available commands:
 
 **Run Server & Client:**
 - `make run-server` - Run the Tango server (port 8081)
-- `make run-client` - Run the Tango client
-- `make run-changed-targets` - Run get-changed-targets
+- `make run-client-get-graph` - Run get-target-graph via the Tango client
+- `make run-client-changed-targets` - Run get-changed-targets from Client
 
 **Other:**
 - `make version` - Show Bazel version

@@ -1,4 +1,4 @@
-.PHONY: build test proto gazelle clean clean-proto run-server run-client run-changed-targets help
+.PHONY: build test proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -86,8 +86,8 @@ help:
 	@echo ""
 	@echo "Run Server & Client:"
 	@echo "  make run-server    - Run the Tango server (port 8081)"
-	@echo "  make run-client    - Run the Tango client"
-	@echo "  make run-changed-targets - Run get-changed-targets"
+	@echo "  make run-client-get-graph     - Run get-target-graph via the Tango client"
+	@echo "  make run-client-changed-targets - Run get-changed-targets via the Tango client"
 	@echo ""
 	@echo "Other:"
 	@echo "  make version       - Show Bazel version"
@@ -107,5 +107,6 @@ help:
 	@echo "  make run-server"
 	@echo ""
 	@echo "  # Run client with custom parameters"
-	@echo "  make run-client REMOTE=org/repo BASE_SHA=abc123"
-	@echo ""
+	@echo "  make run-client-get-graph REMOTE=org/repo BASE_SHA=abc123"
+	@echo "  # Run get-changed-targets via the Tango client"
+	@echo "  make run-client-changed-targets REMOTE=org/repo BASE_SHA=abc123 NEW_BASE_SHA=abc123~"

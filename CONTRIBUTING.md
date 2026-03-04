@@ -9,8 +9,9 @@ get started.
 2. Clone your fork locally: `git clone https://github.com/<your-user>/tango.git`
 3. Create a feature branch: `git checkout -b my-feature`
 4. Make your changes and ensure tests pass: `make build && make test`
-5. Commit your changes with a descriptive message.
-6. Push to your fork and open a Pull Request against `main`.
+5. Test behavior: `make run-server` and `make run-client-get-graph REMOTE=org/repo BASE_SHA=abc123 REQUEST_URLS=https://github.com/uber/repo/pull/123` (See [README](README.md) for more details)
+6. Commit your changes with a descriptive message.
+7. Push to your fork and open a Pull Request against `main`.
 
 ## Development Setup
 
@@ -22,7 +23,7 @@ files.
 
 - Keep PRs focused on a single change.
 - Include tests for new functionality.
-- Ensure all existing tests pass (`make test`).
+- Ensure all existing tests pass (`bazel test //...`).
 - Follow the existing code style and patterns (see `CLAUDE.md` for detailed
   conventions).
 - Fill out the PR template with a description, motivation, and test plan.
