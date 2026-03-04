@@ -82,7 +82,7 @@ func NewBazelClient(p Params) (*BazelClient, error) {
 	}
 	bazelCommand, err := detectBazelExecutable(p.BazelCommand)
 	if err != nil {
-		p.Logger.Error("NewBazelClient: Error detecting bazel executable", zap.Error(err))
+		p.Logger.Errorw("NewBazelClient: Error detecting bazel executable", zap.Error(err))
 		return nil, err
 	}
 	return &BazelClient{

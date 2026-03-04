@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -36,7 +37,7 @@ func (b *BazelClient) setupCommand(ctx context.Context, query string, startupOpt
 	args = append(args, additionalArgs...)
 	args = append(args, "--output=streamed_proto")
 	args = append(args, query)
-	b.logger.Info("Querying Bazel", zap.String("workspacePath", b.workspacePath), zap.String("query", query))
+	b.logger.Infow("Querying Bazel", zap.String("workspacePath", b.workspacePath), zap.String("query", query))
 	return b.execCommandContext(ctx, b.bazelCommand, args...)
 }
 
@@ -88,13 +89,13 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	streamErr := g.Wait()
 	// The command itself failed.
 	if waitErr != nil {
-		b.logger.Error("Bazel query failed failed: %v", waitErr)
-		return queryResults, waitErr
+		b.logger.Errorf("Bazel query failed: %v\nstderr:\n%s", waitErr, stderrBuf.String())
+		return queryResults, fmt.Errorf("bazel query failed: %w\nstderr:\n%s", waitErr, stderrBuf.String())
 	}
 	// The command succeeded, but there was an error in the stream processing.
 	if streamErr != nil {
-		b.logger.Error("Error in stream processing: %v", streamErr)
-		return nil, streamErr
+		b.logger.Errorf("Error in stream processing: %v\nstderr:\n%s", streamErr, stderrBuf.String())
+		return nil, fmt.Errorf("stream processing failed: %w\nstderr:\n%s", streamErr, stderrBuf.String())
 	}
 	b.logger.Debugf("Parsed %d targets from bazel query", len(queryResults.Target))
 	return queryResults, nil
