@@ -16,11 +16,15 @@ package bazel
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"time"
 
-	"fmt"
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"go.uber.org/zap"
 )
@@ -82,9 +86,10 @@ func NewBazelClient(p Params) (*BazelClient, error) {
 	}
 	bazelCommand, err := detectBazelExecutable(p.BazelCommand)
 	if err != nil {
-		p.Logger.Error("NewBazelClient: Error detecting bazel executable", zap.Error(err))
+		p.Logger.Errorw("NewBazelClient: Error detecting bazel executable", zap.Error(err))
 		return nil, err
 	}
+	p.Logger.Info("NewBazelClient", zap.String("bazelCommand", bazelCommand), zap.String("workspacePath", p.WorkspacePath))
 	return &BazelClient{
 		workspacePath:      p.WorkspacePath,
 		envVarsMap:         p.EnvVarsMap,
@@ -95,32 +100,78 @@ func NewBazelClient(p Params) (*BazelClient, error) {
 	}, nil
 }
 
-// detectBazelExecutable detects the bazel executable path.
-// If bazelCommand is provided, it returns the bazelCommand.
-// Otherwise, it looks for the bazel executable in the PATH.
-// If the bazel executable is not found, it returns an error.
+// detectBazelExecutable returns the path to a bazelisk binary.
+// If bazelCommand is explicitly provided, it is used as-is.
+// Otherwise, bazelisk is downloaded from GitHub into a local cache directory.
 func detectBazelExecutable(bazelCommand string) (string, error) {
 	if bazelCommand != "" {
 		return bazelCommand, nil
 	}
-	// Most correct: honor Bazelisk wrapper env vars
-	if p, ok := bazelFromEnv(); ok {
-		return p, nil
-	}
-
-	// Otherwise fall back to PATH search
-	path, err := exec.LookPath("bazel")
-	if err != nil {
-		return "", fmt.Errorf("could not locate bazel: %w", err)
-	}
-	return path, nil
+	return ensureBazelisk()
 }
 
-func bazelFromEnv() (string, bool) {
-	for _, key := range []string{"BAZEL_REAL", "BAZELISK_BIN", "BAZEL"} {
-		if v := os.Getenv(key); v != "" {
-			return v, true
-		}
+// ensureBazelisk returns the path to a cached bazelisk binary,
+// downloading it from GitHub releases if it doesn't already exist.
+func ensureBazelisk() (string, error) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("could not determine cache directory: %w", err)
 	}
-	return "", false
+	dir := filepath.Join(cacheDir, "tango", "bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("could not create cache directory: %w", err)
+	}
+
+	binName := "bazelisk"
+	if runtime.GOOS == "windows" {
+		binName = "bazelisk.exe"
+	}
+	dest := filepath.Join(dir, binName)
+
+	if _, err := os.Stat(dest); err == nil {
+		return dest, nil
+	}
+
+	arch := runtime.GOARCH
+	if arch == "aarch64" {
+		arch = "arm64"
+	}
+	url := fmt.Sprintf(
+		"https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-%s-%s",
+		runtime.GOOS, arch,
+	)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("failed to download bazelisk from %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download bazelisk from %s: HTTP %d", url, resp.StatusCode)
+	}
+
+	tmp, err := os.CreateTemp(dir, "bazelisk-download-*")
+	if err != nil {
+		return "", fmt.Errorf("could not create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		// Clean up temp file on any failure path.
+		os.Remove(tmpPath)
+	}()
+
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		tmp.Close()
+		return "", fmt.Errorf("failed writing bazelisk binary: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("failed closing bazelisk binary: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		return "", fmt.Errorf("failed to chmod bazelisk binary: %w", err)
+	}
+	if err := os.Rename(tmpPath, dest); err != nil {
+		return "", fmt.Errorf("failed to move bazelisk binary into place: %w", err)
+	}
+	return dest, nil
 }
