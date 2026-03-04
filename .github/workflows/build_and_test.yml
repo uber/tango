@@ -29,3 +29,42 @@ jobs:
       run: |
         echo "=== Test logs ==="
         find . -name "test.log" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No test logs found"
+
+  dependencies-and-gazelle:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Run go mod tidy
+      run: go mod tidy
+
+    - name: Run bazel mod tidy
+      run: ./tools/bazel mod tidy
+
+    - name: Check for uncommitted changes after tidy
+      run: |
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "::error::Files changed after running go mod tidy and bazel mod tidy. Please run these locally and commit the results."
+          git diff
+          git status
+          exit 1
+        fi
+
+    - name: Run gazelle
+      run: make gazelle
+
+    - name: Check for uncommitted changes after gazelle
+      run: |
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "::error::BUILD files changed after running gazelle. Please run 'make gazelle' locally and commit the results."
+          git diff
+          git status
+          exit 1
+        fi
