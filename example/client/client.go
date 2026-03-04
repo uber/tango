@@ -33,7 +33,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8081", "server address (gRPC inbound)")
-	method := flag.String("method", "get-target-graph", "method to call: get-target-graph")
+	method := flag.String("method", "get-target-graph", "method to call: get-target-graph, get-changed-targets")
 	remote := flag.String("remote", "", "build description remote")
 	baseSHA := flag.String("base-sha", "", "build description base sha")
 	reqURLs := flag.String("request-urls", "", "comma-separated change request URLs")
@@ -121,7 +121,7 @@ func main() {
 				Requests: newRequests,
 			},
 			OutputConfig: &pb.OutputConfig{
-				ComputeDistances: false,
+				ComputeDistances: true,
 			},
 		}
 		if err := callGetChangedTargets(ctx, client, logger, req); err != nil {
@@ -129,7 +129,7 @@ func main() {
 			os.Exit(1)
 		}
 	default:
-		fmt.Printf("Error: unsupported method: %s\n", *method)
+		logger.Errorf("unsupported method: %s", *method)
 		os.Exit(1)
 	}
 	logger.Info("Done.")
@@ -151,31 +151,30 @@ func callGetTargetGraph(ctx context.Context, client pb.TangoYARPCClient, logger 
 			return fmt.Errorf("recv: %w", err)
 		}
 		if msg == nil {
-			fmt.Println("Received empty message")
+			logger.Warn("Received empty message")
 			return nil
 		}
 		if msg.Item == nil {
-			fmt.Println("Received empty item")
+			logger.Warn("Received empty item")
 			return nil
 		}
 		switch x := msg.Item.(type) {
 		case *pb.GetTargetGraphResponse_Targets:
-			fmt.Printf("Received targets packet with %d targets\n", len(x.Targets.GetTargets()))
-			// unmarshal response to json
-			json, err := json.Marshal(x.Targets)
+			logger.Infof("Received targets packet with %d targets", len(x.Targets.GetTargets()))
+			j, err := json.Marshal(x.Targets)
 			if err != nil {
 				return fmt.Errorf("marshal targets: %w", err)
 			}
-			fmt.Printf("Targets: %s\n", string(json))
+			fmt.Println(string(j))
 		case *pb.GetTargetGraphResponse_Metadata:
-			// unmarshal response to json
-			json, err := json.Marshal(x.Metadata)
+			logger.Info("Metadata:")
+			j, err := json.Marshal(x.Metadata)
 			if err != nil {
 				return fmt.Errorf("marshal metadata: %w", err)
 			}
-			fmt.Printf("Metadata: %s\n", string(json))
+			fmt.Println(string(j))
 		default:
-			fmt.Println("Received unknown item")
+			logger.Warn("Received unknown item")
 		}
 	}
 	return nil
@@ -201,24 +200,24 @@ func callGetChangedTargets(ctx context.Context, client pb.TangoYARPCClient, logg
 			return nil
 		}
 		if msg.Item == nil {
-			fmt.Println("Received empty item")
+			logger.Warn("Received empty item")
 			return nil
 		}
 		switch x := msg.Item.(type) {
 		case *pb.GetChangedTargetsResponse_ChangedTargets:
-			fmt.Printf("Received changed targets packet with %d targets\n", len(x.ChangedTargets.GetChangedTargets()))
-			json, err := json.Marshal(x.ChangedTargets)
+			logger.Infof("Received changed targets packet with %d targets", len(x.ChangedTargets.GetChangedTargets()))
+			j, err := json.Marshal(x.ChangedTargets)
 			if err != nil {
 				return fmt.Errorf("marshal changed targets: %w", err)
 			}
-			fmt.Printf("ChangedTargets: %s\n", string(json))
+			fmt.Println(string(j))
 		case *pb.GetChangedTargetsResponse_Metadata:
-			// unmarshal response to json
-			json, err := json.Marshal(x.Metadata)
+			logger.Info("Metadata:")
+			j, err := json.Marshal(x.Metadata)
 			if err != nil {
 				return fmt.Errorf("marshal metadata: %w", err)
 			}
-			fmt.Printf("Metadata: %s\n", string(json))
+			fmt.Println(string(j))
 		}
 	}
 	return nil

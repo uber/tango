@@ -32,11 +32,9 @@ make help
 # Run the Tango server (port 8081)
 make run-server
 
-# In another terminal, run the client
-make run-client
-
-# Run client with custom parameters
-make run-client REMOTE=mobile/android BASE_SHA=abc123 REQUEST_URLS=https://github.com/uber/repo/pull/123
+# In another terminal, run client with custom parameters
+make run-client-get-graph REMOTE=https://github.com/uber/tango.git  METHOD=get-target-graph BASE_SHA=HEAD
+make run-client-changed-targets REMOTE=https://github.com/uber/tango.git BASE_SHA=872881fd~1 NEW_BASE_SHA=872881fd
 ```
 
 For a complete list of available commands, run `make help`.
@@ -65,6 +63,11 @@ make build
 ```
 
 ## Development
+
+### Setup IDE
+You can either 
+- use any IDE that support native golang toolchain
+- or use [gopackagesdriver](https://github.com/bazel-contrib/rules_go/wiki/Editor-setup#debugging) for bazel based IDE
 
 ### Updating BUILD files
 - Add all direct GO dependencies explicitly to the MODULE.bazel.
@@ -112,9 +115,9 @@ mockgen -package=tangopbmock  -self_package=tangopbmock  -destination=tangopbmoc
 ### Update new module version
 Run
 ```bash
-git tag <version>          # git tag 3.0.27.35
-git commit -m "Initialize new version"
-git push origin <version>  # git push origin 3.0.27.35
+git tag <version>
+git commit -m "release a new version"
+git push origin <version>
 ```
 
 ## Available Make Commands
@@ -134,27 +137,25 @@ Run `make help` to see all available commands:
 **Run Server & Client:**
 - `make run-server` - Run the Tango server (port 8081)
 - `make run-client` - Run the Tango client
+- `make run-changed-targets` - Run get-changed-targets
 
 **Other:**
 - `make version` - Show Bazel version
 - `make help` - Show this help message
 
 **Client Parameters:**
-You can customize the client behavior with these environment variables:
-- `SERVER_ADDR` - Server address (default: 127.0.0.1:8081)
-- `METHOD` - RPC method to call (default: get-target-graph)
-- `REMOTE` - Build description remote
-- `BASE_SHA` - Build description base SHA
-- `REQUEST_URLS` - Comma-separated change request URLs
+You can customize the client behavior with various parameters
 
 Example:
 ```bash
-make run-client REMOTE=https://github.com/uber/tango.git  METHOD=get-target-graph BASE_SHA=HEAD
+bazel run //example/client:client -- -h
+bazel run //example/client:client -- -addr 127.0.0.1:8081 -method get-changed-targets -remote https://github.com/uber/tango.git -base-sha 47f5e72 -new-base-sha 47f5e72~
 ```
 
 ## CI/CD
 
 This project uses GitHub Actions for continuous integration. The workflow automatically:
+- Resolve dependencies
 - Builds all targets
 - Runs all tests
 - Reports test failures with detailed logs
