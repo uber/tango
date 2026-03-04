@@ -155,7 +155,7 @@ type BuildDescription struct {
 	// and an required commit SHA. If empty, the computation happens on the base revision.
 	Requests []*Request `protobuf:"bytes,3,rep,name=requests,proto3" json:"requests,omitempty"`
 	// The computation strategy of the original target graph
-	Strategy ComputationStrategy `protobuf:"varint,4,opt,name=strategy,proto3,enum=uber.devexp.tango.ComputationStrategy" json:"strategy,omitempty"`
+	Strategy ComputationStrategy `protobuf:"varint,4,opt,name=strategy,proto3,enum=uber.tango.ComputationStrategy" json:"strategy,omitempty"`
 }
 
 func (m *BuildDescription) Reset()      { *m = BuildDescription{} }
@@ -501,7 +501,7 @@ func (m *ChangedTargets) GetChangedTargets() []*ChangedTarget {
 
 // ChangedTarget represents a changed target and its associated optimized targets.
 type ChangedTarget struct {
-	ChangeType ChangeType       `protobuf:"varint,1,opt,name=change_type,json=changeType,proto3,enum=uber.devexp.tango.ChangeType" json:"change_type,omitempty"`
+	ChangeType ChangeType       `protobuf:"varint,1,opt,name=change_type,json=changeType,proto3,enum=uber.tango.ChangeType" json:"change_type,omitempty"`
 	OldTarget  *OptimizedTarget `protobuf:"bytes,2,opt,name=old_target,json=oldTarget,proto3" json:"old_target,omitempty"`
 	NewTarget  *OptimizedTarget `protobuf:"bytes,3,opt,name=new_target,json=newTarget,proto3" json:"new_target,omitempty"`
 	// Distance from the nearest CHANGE_TYPE_DIRECT target in the reverse dependency graph.
@@ -1216,30 +1216,30 @@ func (*GetChangedTargetGraphResponse) XXX_OneofWrappers() []interface{} {
 }
 
 func init() {
-	proto.RegisterEnum("uber.devexp.tango.ComputationStrategy", ComputationStrategy_name, ComputationStrategy_value)
-	proto.RegisterEnum("uber.devexp.tango.ChangeType", ChangeType_name, ChangeType_value)
-	proto.RegisterType((*Request)(nil), "uber.devexp.tango.Request")
-	proto.RegisterType((*BuildDescription)(nil), "uber.devexp.tango.BuildDescription")
-	proto.RegisterType((*OutputConfig)(nil), "uber.devexp.tango.OutputConfig")
-	proto.RegisterType((*OptimizedTarget)(nil), "uber.devexp.tango.OptimizedTarget")
-	proto.RegisterMapType((map[int32]int32)(nil), "uber.devexp.tango.OptimizedTarget.AttributesEntry")
-	proto.RegisterType((*OptimizedTargets)(nil), "uber.devexp.tango.OptimizedTargets")
-	proto.RegisterType((*ChangedTargets)(nil), "uber.devexp.tango.ChangedTargets")
-	proto.RegisterType((*ChangedTarget)(nil), "uber.devexp.tango.ChangedTarget")
-	proto.RegisterType((*Metadata)(nil), "uber.devexp.tango.Metadata")
-	proto.RegisterMapType((map[int32]string)(nil), "uber.devexp.tango.Metadata.AttributeNameMappingEntry")
-	proto.RegisterMapType((map[int32]string)(nil), "uber.devexp.tango.Metadata.AttributeStringValueMappingEntry")
-	proto.RegisterMapType((map[int32]string)(nil), "uber.devexp.tango.Metadata.RuleTypeMappingEntry")
-	proto.RegisterMapType((map[int32]string)(nil), "uber.devexp.tango.Metadata.TagMappingEntry")
-	proto.RegisterMapType((map[int32]string)(nil), "uber.devexp.tango.Metadata.TargetIdMappingEntry")
-	proto.RegisterType((*GetTargetGraphRequest)(nil), "uber.devexp.tango.GetTargetGraphRequest")
-	proto.RegisterType((*GetTargetGraphResponse)(nil), "uber.devexp.tango.GetTargetGraphResponse")
-	proto.RegisterType((*GetChangedTargetsRequest)(nil), "uber.devexp.tango.GetChangedTargetsRequest")
-	proto.RegisterType((*GetChangedTargetsResponse)(nil), "uber.devexp.tango.GetChangedTargetsResponse")
-	proto.RegisterType((*GetChangedServicesRequest)(nil), "uber.devexp.tango.GetChangedServicesRequest")
-	proto.RegisterType((*GetChangedServicesResponse)(nil), "uber.devexp.tango.GetChangedServicesResponse")
-	proto.RegisterType((*GetChangedTargetGraphRequest)(nil), "uber.devexp.tango.GetChangedTargetGraphRequest")
-	proto.RegisterType((*GetChangedTargetGraphResponse)(nil), "uber.devexp.tango.GetChangedTargetGraphResponse")
+	proto.RegisterEnum("uber.tango.ComputationStrategy", ComputationStrategy_name, ComputationStrategy_value)
+	proto.RegisterEnum("uber.tango.ChangeType", ChangeType_name, ChangeType_value)
+	proto.RegisterType((*Request)(nil), "uber.tango.Request")
+	proto.RegisterType((*BuildDescription)(nil), "uber.tango.BuildDescription")
+	proto.RegisterType((*OutputConfig)(nil), "uber.tango.OutputConfig")
+	proto.RegisterType((*OptimizedTarget)(nil), "uber.tango.OptimizedTarget")
+	proto.RegisterMapType((map[int32]int32)(nil), "uber.tango.OptimizedTarget.AttributesEntry")
+	proto.RegisterType((*OptimizedTargets)(nil), "uber.tango.OptimizedTargets")
+	proto.RegisterType((*ChangedTargets)(nil), "uber.tango.ChangedTargets")
+	proto.RegisterType((*ChangedTarget)(nil), "uber.tango.ChangedTarget")
+	proto.RegisterType((*Metadata)(nil), "uber.tango.Metadata")
+	proto.RegisterMapType((map[int32]string)(nil), "uber.tango.Metadata.AttributeNameMappingEntry")
+	proto.RegisterMapType((map[int32]string)(nil), "uber.tango.Metadata.AttributeStringValueMappingEntry")
+	proto.RegisterMapType((map[int32]string)(nil), "uber.tango.Metadata.RuleTypeMappingEntry")
+	proto.RegisterMapType((map[int32]string)(nil), "uber.tango.Metadata.TagMappingEntry")
+	proto.RegisterMapType((map[int32]string)(nil), "uber.tango.Metadata.TargetIdMappingEntry")
+	proto.RegisterType((*GetTargetGraphRequest)(nil), "uber.tango.GetTargetGraphRequest")
+	proto.RegisterType((*GetTargetGraphResponse)(nil), "uber.tango.GetTargetGraphResponse")
+	proto.RegisterType((*GetChangedTargetsRequest)(nil), "uber.tango.GetChangedTargetsRequest")
+	proto.RegisterType((*GetChangedTargetsResponse)(nil), "uber.tango.GetChangedTargetsResponse")
+	proto.RegisterType((*GetChangedServicesRequest)(nil), "uber.tango.GetChangedServicesRequest")
+	proto.RegisterType((*GetChangedServicesResponse)(nil), "uber.tango.GetChangedServicesResponse")
+	proto.RegisterType((*GetChangedTargetGraphRequest)(nil), "uber.tango.GetChangedTargetGraphRequest")
+	proto.RegisterType((*GetChangedTargetGraphResponse)(nil), "uber.tango.GetChangedTargetGraphResponse")
 }
 
 func init() { proto.RegisterFile("tango.proto", fileDescriptor_c4210c857dbeec96) }
