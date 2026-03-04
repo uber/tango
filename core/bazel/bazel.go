@@ -111,67 +111,49 @@ func detectBazelExecutable(bazelCommand string) (string, error) {
 }
 
 // ensureBazelisk returns the path to a cached bazelisk binary,
-// downloading it from GitHub releases if it doesn't already exist.
 func ensureBazelisk() (string, error) {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
-		return "", fmt.Errorf("could not determine cache directory: %w", err)
+		return "", fmt.Errorf("cache dir: %w", err)
 	}
 	dir := filepath.Join(cacheDir, "tango", "bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("could not create cache directory: %w", err)
+		return "", fmt.Errorf("mkdir cache: %w", err)
 	}
-
-	binName := "bazelisk"
-	if runtime.GOOS == "windows" {
-		binName = "bazelisk.exe"
-	}
-	dest := filepath.Join(dir, binName)
-
+	dest := filepath.Join(dir, "bazelisk")
 	if _, err := os.Stat(dest); err == nil {
 		return dest, nil
 	}
-
-	arch := runtime.GOARCH
-	if arch == "aarch64" {
-		arch = "arm64"
-	}
 	url := fmt.Sprintf(
 		"https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-%s-%s",
-		runtime.GOOS, arch,
+		runtime.GOOS, runtime.GOARCH,
 	)
-
 	resp, err := http.Get(url)
 	if err != nil {
-		return "", fmt.Errorf("failed to download bazelisk from %s: %w", url, err)
+		return "", fmt.Errorf("download bazelisk: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download bazelisk from %s: HTTP %d", url, resp.StatusCode)
+		return "", fmt.Errorf("download bazelisk: HTTP %d from %s", resp.StatusCode, url)
 	}
-
-	tmp, err := os.CreateTemp(dir, "bazelisk-download-*")
+	// Write to a temp file then atomically rename to avoid partial binaries.
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".bazelisk-*")
 	if err != nil {
-		return "", fmt.Errorf("could not create temp file: %w", err)
+		return "", fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer func() {
-		// Clean up temp file on any failure path.
-		os.Remove(tmpPath)
-	}()
+	defer os.Remove(tmpPath)
 
 	if _, err := io.Copy(tmp, resp.Body); err != nil {
 		tmp.Close()
-		return "", fmt.Errorf("failed writing bazelisk binary: %w", err)
+		return "", fmt.Errorf("write bazelisk: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("failed closing bazelisk binary: %w", err)
-	}
+	tmp.Close()
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		return "", fmt.Errorf("failed to chmod bazelisk binary: %w", err)
+		return "", fmt.Errorf("chmod bazelisk: %w", err)
 	}
 	if err := os.Rename(tmpPath, dest); err != nil {
-		return "", fmt.Errorf("failed to move bazelisk binary into place: %w", err)
+		return "", fmt.Errorf("install bazelisk: %w", err)
 	}
 	return dest, nil
 }
