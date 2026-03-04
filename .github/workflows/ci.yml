@@ -42,29 +42,28 @@ jobs:
       with:
         go-version-file: go.mod
 
-    - name: Run go mod tidy
-      run: go mod tidy
-
-    - name: Run bazel mod tidy
-      run: ./tools/bazel mod tidy
-
-    - name: Check for uncommitted changes after tidy
+    - name: Run go mod tidy and bazel mod tidy
       run: |
-        if [ -n "$(git status --porcelain)" ]; then
-          echo "::error::Files changed after running go mod tidy and bazel mod tidy. Please run these locally and commit the results."
-          git diff
-          git status
-          exit 1
-        fi
+        go mod tidy
+        ./tools/bazel mod tidy
 
     - name: Run gazelle
       run: make gazelle
 
-    - name: Check for uncommitted changes after gazelle
+    - name: Verify no uncommitted changes
       run: |
         if [ -n "$(git status --porcelain)" ]; then
-          echo "::error::BUILD files changed after running gazelle. Please run 'make gazelle' locally and commit the results."
+          echo "::error::Generated files are out of date. Please run 'go mod tidy', 'bazel mod tidy', and 'make gazelle' locally and commit the results."
           git diff
-          git status
           exit 1
         fi
+
+  required-checks:
+    name: Required Checks
+    runs-on: ubuntu-latest
+    needs:
+      - build-and-test
+      - dependencies-and-gazelle
+    steps:
+      - name: All required checks passed
+        run: echo "All required checks passed!" >&2
