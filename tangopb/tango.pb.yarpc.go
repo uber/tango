@@ -59,7 +59,7 @@ type TangoServiceGetChangedTargetGraphYARPCClient interface {
 func newTangoYARPCClient(clientConfig transport.ClientConfig, anyResolver jsonpb.AnyResolver, options ...protobuf.ClientOption) TangoYARPCClient {
 	return &_TangoYARPCCaller{protobuf.NewStreamClient(
 		protobuf.ClientParams{
-			ServiceName:  "uber.devexp.tango.Tango",
+			ServiceName:  "uber.tango.Tango",
 			ClientConfig: clientConfig,
 			AnyResolver:  anyResolver,
 			Options:      options,
@@ -113,7 +113,7 @@ func buildTangoYARPCProcedures(params buildTangoYARPCProceduresParams) []transpo
 	handler := &_TangoYARPCHandler{params.Server}
 	return protobuf.BuildProcedures(
 		protobuf.BuildProceduresParams{
-			ServiceName:         "uber.devexp.tango.Tango",
+			ServiceName:         "uber.tango.Tango",
 			UnaryHandlerParams:  []protobuf.BuildProceduresUnaryHandlerParams{},
 			OnewayHandlerParams: []protobuf.BuildProceduresOnewayHandlerParams{},
 			StreamHandlerParams: []protobuf.BuildProceduresStreamHandlerParams{
@@ -258,7 +258,7 @@ func NewFxTangoYARPCProcedures() interface{} {
 //
 // See https://github.com/grpc/grpc/blob/master/doc/server-reflection.md.
 var TangoReflectionMeta = reflection.ServerMeta{
-	ServiceName:     "uber.devexp.tango.Tango",
+	ServiceName:     "uber.tango.Tango",
 	FileDescriptors: yarpcFileDescriptorClosurec4210c857dbeec96,
 }
 

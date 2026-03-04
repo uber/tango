@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package uber.devexp.tango;
+package uber.tango;
 
 option go_package = "tangopb";
 option java_multiple_files = true;
 option java_outer_classname = "TangoProto";
-option java_package = "com.uber.devexp.tango";
+option java_package = "com.uber.tango";
 
 // Request represents a single change request with a URL and optional commit SHA.
 message Request {
