@@ -17,8 +17,8 @@ package workspace
 import (
 	"testing"
 
-	"github.com/uber/tango/core/git"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/core/git"
 )
 
 func TestNewRequest_Github_Success(t *testing.T) {
@@ -35,7 +35,6 @@ func TestNewRequest_Github_Success(t *testing.T) {
 	require.Equal(t, "abc123", gr.commit)
 	require.Nil(t, gr.git)
 }
-
 
 func TestNewRequest_InvalidURL(t *testing.T) {
 	rawURL := "://bad"

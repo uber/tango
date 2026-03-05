@@ -16,8 +16,9 @@ package bazel
 
 import (
 	"bufio"
-	"io"
 	"context"
+	"io"
+
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"google.golang.org/protobuf/encoding/protodelim"
 )
@@ -45,7 +46,7 @@ func streamAndParseTargets(ctx context.Context, src io.Reader, dst io.Writer) (*
 	done := make(chan result, 1)
 
 	go func() {
-		queryResult, err := getQueryResult(ctx,src, dst)
+		queryResult, err := getQueryResult(ctx, src, dst)
 		done <- result{queryResult: queryResult, err: err}
 	}()
 
@@ -56,8 +57,6 @@ func streamAndParseTargets(ctx context.Context, src io.Reader, dst io.Writer) (*
 		return res.queryResult, res.err
 	}
 }
-
-
 
 // getQueryResult reads a QueryResult containing targets from the stream and returns it.
 func getQueryResult(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb.QueryResult, error) {

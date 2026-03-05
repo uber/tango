@@ -19,10 +19,10 @@ import (
 	"errors"
 	"testing"
 
-	gitmock "github.com/uber/tango/core/git/gitmock"
-	requestmock "github.com/uber/tango/core/workspace/requestmock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	gitmock "github.com/uber/tango/core/git/gitmock"
+	requestmock "github.com/uber/tango/core/workspace/requestmock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )

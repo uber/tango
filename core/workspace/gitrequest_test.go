@@ -39,7 +39,6 @@ func TestNewGitRequest_ExtractsID(t *testing.T) {
 	assert.Equal(t, "abc123", gr.commit)
 }
 
-
 func TestGitRequest_Apply_CommitIsAncestor_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)

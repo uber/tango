@@ -17,8 +17,8 @@ package common
 import (
 	"encoding/base64"
 	"path/filepath"
-	"strings"
 	"sort"
+	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/uber/tango/core/targethasher"

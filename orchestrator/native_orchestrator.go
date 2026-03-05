@@ -19,8 +19,10 @@ import (
 	"context"
 	"os"
 
-	"github.com/uber/tango/core/bazel"
+	"time"
+
 	"github.com/uber/tango/bazelrunner"
+	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/config"
 	"github.com/uber/tango/core/git"
@@ -28,7 +30,6 @@ import (
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/workspace"
 	"go.uber.org/zap"
-	"time"
 )
 
 // nativeOrchestrator implements native version of Orchestrator

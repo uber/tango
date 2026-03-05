@@ -18,9 +18,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/orchestrator"
-	"io"
 
 	"github.com/uber/tango/core/storage"
 	pb "github.com/uber/tango/tangopb"

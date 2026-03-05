@@ -180,7 +180,6 @@ func TestGetTargetGraph_MissingBuildDescription_ReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-
 // New coverage: Storage returns NotFound on treehash path -> orchestrator is called to compute the target graph.
 func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	ctrl := gomock.NewController(t)
