@@ -17,8 +17,8 @@ package graphrunner
 import (
 	"context"
 
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
-	"github.com/uber/tango/core/config"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/core/workspace"

@@ -9,9 +9,9 @@ go_library(
     importpath = "github.com/uber/tango/orchestrator",
     visibility = ["//visibility:public"],
     deps = [
+        "//config",
         "//core/bazel",
         "//core/common",
-        "//core/config",
         "//core/git",
         "//core/repomanager",
         "//core/storage",

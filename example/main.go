@@ -22,8 +22,8 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/controller"
-	"github.com/uber/tango/core/config"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"

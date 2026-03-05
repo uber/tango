@@ -7,7 +7,7 @@ go_library(
         "repository_config.go",
         "storage_config.go",
     ],
-    importpath = "github.com/uber/tango/core/config",
+    importpath = "github.com/uber/tango/config",
     visibility = ["//visibility:public"],
     deps = ["@com_github_goccy_go_yaml//:go-yaml"],
 )
