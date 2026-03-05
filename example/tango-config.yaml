@@ -8,7 +8,7 @@ storage:
 
 # Repository configuration
 repository:
-  "https://github.com/uber/tango.git":
+  - remote: "https://github.com/uber/tango.git"
     default_branch: "main"
     full_hash_repos:
       - ""
@@ -17,7 +17,6 @@ repository:
     exclude_external_targets: true
     bzlmod_enabled: true
     query_timeout: 300
-    git_timeout: 300
 
 # Service configuration
 service:
