@@ -21,7 +21,7 @@ import (
 
 	"time"
 
-	"github.com/uber/tango/bazelrunner"
+	"github.com/uber/tango/graphrunner"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/config"
@@ -39,7 +39,7 @@ type nativeOrchestrator struct {
 	logger      *zap.SugaredLogger
 	// gitFactory allows injecting a git.Interface constructor for testing
 	gitFactory     func(directory string) git.Interface
-	graphRunner    bazelrunner.GraphRunner
+	graphRunner    graphrunner.GraphRunner
 	configFilePath string
 }
 
@@ -48,7 +48,7 @@ type Params struct {
 	RepoManager    repomanager.RepoManager
 	Logger         *zap.SugaredLogger
 	GitFactory     func(directory string) git.Interface
-	GraphRunner    bazelrunner.GraphRunner
+	GraphRunner    graphrunner.GraphRunner
 	ConfigFilePath string
 }
 
@@ -139,7 +139,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 					return nil, err
 				}
 				// Use default native graph runner
-				runner = bazelrunner.NewNativeGraphRunner(bazelrunner.NativeGraphRunnerParams{
+				runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
 					BazelClient: client,
 					GitClient:   gitModule,
 					Config:      cfg.Repository,

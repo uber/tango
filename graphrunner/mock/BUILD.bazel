@@ -3,7 +3,7 @@ load("@rules_go//go:def.bzl", "go_library")
 go_library(
     name = "mock",
     srcs = ["mock.go"],
-    importpath = "github.com/uber/tango/bazelrunner/mock",
+    importpath = "github.com/uber/tango/graphrunner/mock",
     visibility = ["//visibility:public"],
     deps = [
         "//core/targethasher",

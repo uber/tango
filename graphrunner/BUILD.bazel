@@ -1,12 +1,13 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
-    name = "bazelrunner",
+    name = "graphrunner",
     srcs = [
-        "graph.go",
+        "graph_runner.go",
         "native.go",
+        "shell.go",
     ],
-    importpath = "github.com/uber/tango/bazelrunner",
+    importpath = "github.com/uber/tango/graphrunner",
     visibility = ["//visibility:public"],
     deps = [
         "//core/bazel",
@@ -18,9 +19,9 @@ go_library(
 )
 
 go_test(
-    name = "bazelrunner_test",
+    name = "graphrunner_test",
     srcs = ["native_test.go"],
-    embed = [":bazelrunner"],
+    embed = [":graphrunner"],
     deps = [
         "//core/bazel",
         "//core/bazel/bazelmock",

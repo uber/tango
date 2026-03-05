@@ -24,7 +24,7 @@ import (
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	graphmock "github.com/uber/tango/bazelrunner/mock"
+	graphmock "github.com/uber/tango/graphrunner/mock"
 	"github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
 	repomanagermock "github.com/uber/tango/core/repomanager/mock"
