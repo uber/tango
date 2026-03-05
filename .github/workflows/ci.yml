@@ -30,7 +30,7 @@ jobs:
         echo "=== Test logs ==="
         find . -name "test.log" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No test logs found"
 
-  dependencies-and-lint:
+  dependencies:
     runs-on: ubuntu-latest
 
     steps:
@@ -66,6 +66,21 @@ jobs:
           exit 1
         fi
 
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Run gazelle
+      run: make gazelle
+
     - name: Run linters
       run: |
         gofmt -w .
@@ -74,7 +89,7 @@ jobs:
     - name: Verify no uncommitted changes from linters
       run: |
         if [ -n "$(git status --porcelain)" ]; then
-          echo "::error::Code is not formatted. Please run 'gofmt -w .' and 'goimports -w .' locally and commit the results."
+          echo "::error::Code is not formatted. Please run 'make gazelle', 'gofmt -w .', and 'goimports -w .' locally and commit the results."
           git diff
           exit 1
         fi
@@ -84,7 +99,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build-and-test
-      - dependencies-and-lint
+      - dependencies
+      - lint
     steps:
       - name: All required checks passed
         run: echo "All required checks passed!" >&2
