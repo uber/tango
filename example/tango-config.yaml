@@ -24,7 +24,10 @@ repository:
   bzlmod_enabled: true
   query_timeout: 300
   git_timeout: 300
-  workspace_pool_size: 5
+
+# Service configuration
+service:
+  worker_pool_size: 5
   # root for origin clones; defaults to os.TempDir()/tango-repo-manager
   repo_manager_clone_path: "/tmp/tango-repo-manager"
   # root for worker checkouts; defaults to repo_manager_clone_path/.workers

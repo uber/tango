@@ -26,6 +26,7 @@ import (
 type Config struct {
 	Repository RepositoryConfig `yaml:"repository"`
 	Storage    StorageConfig    `yaml:"storage"`
+	Service    ServiceConfig    `yaml:"service"`
 }
 
 // Parse parses the full configuration from the given file path.
@@ -42,17 +43,17 @@ func Parse(configFilePath string) (*Config, error) {
 	if config.Storage.Type == "" {
 		config.Storage.Type = StorageTypeMemory
 	}
-	if config.Repository.WorkerRootPath != "" && config.Repository.RepoManagerClonePath == "" {
-		return nil, fmt.Errorf("repository.repo_manager_clone_path must be set when worker_root_path is specified")
+	if config.Service.WorkerRootPath != "" && config.Service.RepoManagerClonePath == "" {
+		return nil, fmt.Errorf("service.repo_manager_clone_path must be set when worker_root_path is specified")
 	}
-	if config.Repository.RepoManagerClonePath == "" {
-		config.Repository.RepoManagerClonePath = filepath.Join(os.TempDir(), "tango-repo-manager")
+	if config.Service.RepoManagerClonePath == "" {
+		config.Service.RepoManagerClonePath = filepath.Join(os.TempDir(), "tango-repo-manager")
 	}
-	if config.Repository.WorkerRootPath == "" {
-		config.Repository.WorkerRootPath = filepath.Join(config.Repository.RepoManagerClonePath, ".workers")
+	if config.Service.WorkerRootPath == "" {
+		config.Service.WorkerRootPath = filepath.Join(config.Service.RepoManagerClonePath, ".workers")
 	}
-	if config.Repository.WorkspacePoolSize <= 0 {
-		return nil, fmt.Errorf("repository.workspace_pool_size must be > 0, got %d", config.Repository.WorkspacePoolSize)
+	if config.Service.WorkerPoolSize <= 0 {
+		return nil, fmt.Errorf("service.worker_pool_size must be > 0, got %d", config.Service.WorkerPoolSize)
 	}
 	return &config, nil
 }

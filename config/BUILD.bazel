@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "config.go",
         "repository_config.go",
+        "service_config.go",
         "storage_config.go",
     ],
     importpath = "github.com/uber/tango/config",
