@@ -24,17 +24,22 @@ import (
 
 // Config is the root configuration structure.
 type Config struct {
-	// Repository is a map from remote URL to its configuration.
-	Repository map[string]RepositoryConfig `yaml:"repository"`
-	Storage    StorageConfig               `yaml:"storage"`
-	Service    ServiceConfig               `yaml:"service"`
+	Repository []RepositoryConfig `yaml:"repository"`
+	Storage    StorageConfig      `yaml:"storage"`
+	Service    ServiceConfig      `yaml:"service"`
+
+	// repositoryByRemote is built at parse time for O(1) lookup.
+	repositoryByRemote map[string]*RepositoryConfig
 }
 
 // GetRepositoryConfig returns the RepositoryConfig for the given remote URL.
 // Returns a zero-value config and false if the remote is not found.
 func (c *Config) GetRepositoryConfig(remote string) (RepositoryConfig, bool) {
-	repo, ok := c.Repository[remote]
-	return repo, ok
+	repo, ok := c.repositoryByRemote[remote]
+	if !ok {
+		return RepositoryConfig{}, false
+	}
+	return *repo, true
 }
 
 // Parse parses the full configuration from the given file path.
@@ -62,6 +67,17 @@ func Parse(configFilePath string) (*Config, error) {
 	}
 	if config.Service.WorkerPoolSize <= 0 {
 		return nil, fmt.Errorf("service.worker_pool_size must be > 0, got %d", config.Service.WorkerPoolSize)
+	}
+	config.repositoryByRemote = make(map[string]*RepositoryConfig, len(config.Repository))
+	for i := range config.Repository {
+		remote := config.Repository[i].Remote
+		if remote == "" {
+			return nil, fmt.Errorf("repository[%d].remote must not be empty", i)
+		}
+		if _, exists := config.repositoryByRemote[remote]; exists {
+			return nil, fmt.Errorf("duplicate repository remote %q", remote)
+		}
+		config.repositoryByRemote[remote] = &config.Repository[i]
 	}
 	return &config, nil
 }
