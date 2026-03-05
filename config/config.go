@@ -24,9 +24,17 @@ import (
 
 // Config is the root configuration structure.
 type Config struct {
-	Repository RepositoryConfig `yaml:"repository"`
-	Storage    StorageConfig    `yaml:"storage"`
-	Service    ServiceConfig    `yaml:"service"`
+	// Repository is a map from remote URL to its configuration.
+	Repository map[string]RepositoryConfig `yaml:"repository"`
+	Storage    StorageConfig               `yaml:"storage"`
+	Service    ServiceConfig               `yaml:"service"`
+}
+
+// GetRepositoryConfig returns the RepositoryConfig for the given remote URL.
+// Returns a zero-value config and false if the remote is not found.
+func (c *Config) GetRepositoryConfig(remote string) (RepositoryConfig, bool) {
+	repo, ok := c.Repository[remote]
+	return repo, ok
 }
 
 // Parse parses the full configuration from the given file path.

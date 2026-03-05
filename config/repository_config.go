@@ -14,9 +14,10 @@
 
 package config
 
-// RepositoryConfig holds configuration for the repository.
+// RepositoryConfig holds configuration for a single repository.
+// In the config file the repository section is a map keyed by the remote URL,
+// so the remote itself is not stored as a field.
 type RepositoryConfig struct {
-	Remote                 string   `yaml:"remote"`
 	DefaultBranch          string   `yaml:"default_branch"`
 	FullHashRepos          []string `yaml:"full_hash_repos"`
 	ExcludedFiles          []string `yaml:"excluded_files"`

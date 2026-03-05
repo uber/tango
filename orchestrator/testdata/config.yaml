@@ -1,15 +1,15 @@
 repository:
-  remote: "testrepo"
-  default_branch: "main"
-  full_hash_repos:
-    - "//"
-    - "//external"
-  excluded_files:
-    - "*.gen.go"
-  exclude_external_targets: true
-  bzlmod_enabled: true
-  query_timeout: 15
-  git_timeout: 15
+  "git@github:uber/tango":
+    default_branch: "main"
+    full_hash_repos:
+      - "//"
+      - "//external"
+    excluded_files:
+      - "*.gen.go"
+    exclude_external_targets: true
+    bzlmod_enabled: true
+    query_timeout: 15
+    git_timeout: 15
 
 service:
   worker_pool_size: 3
