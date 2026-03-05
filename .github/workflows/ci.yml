@@ -30,7 +30,7 @@ jobs:
         echo "=== Test logs ==="
         find . -name "test.log" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No test logs found"
 
-  dependencies-and-gazelle:
+  dependencies-and-lint:
     runs-on: ubuntu-latest
 
     steps:
@@ -47,13 +47,34 @@ jobs:
         go mod tidy
         ./tools/bazel mod tidy
 
+    - name: Verify no uncommitted changes from mod tidy
+      run: |
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "::error::Dependencies are out of date. Please run 'go mod tidy' and 'bazel mod tidy' locally and commit the results."
+          git diff
+          exit 1
+        fi
+
     - name: Run gazelle
       run: make gazelle
 
-    - name: Verify no uncommitted changes
+    - name: Verify no uncommitted changes from gazelle
       run: |
         if [ -n "$(git status --porcelain)" ]; then
-          echo "::error::Generated files are out of date. Please run 'go mod tidy', 'bazel mod tidy', and 'make gazelle' locally and commit the results."
+          echo "::error::BUILD.bazel files are out of date. Please run 'make gazelle' locally and commit the results."
+          git diff
+          exit 1
+        fi
+
+    - name: Run linters
+      run: |
+        gofmt -w .
+        goimports -w .
+
+    - name: Verify no uncommitted changes from linters
+      run: |
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "::error::Code is not formatted. Please run 'gofmt -w .' and 'goimports -w .' locally and commit the results."
           git diff
           exit 1
         fi
@@ -63,7 +84,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build-and-test
-      - dependencies-and-gazelle
+      - dependencies-and-lint
     steps:
       - name: All required checks passed
         run: echo "All required checks passed!" >&2
