@@ -17,6 +17,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 
 	"time"
@@ -72,6 +73,11 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		b.logger.Errorw("getGraph: Error parsing config file", zap.String("configFilePath", b.configFilePath), zap.Error(err))
 		return nil, err
+	}
+	remote := param.Req.BuildDescription.Remote
+	repoCfg, ok := cfg.GetRepositoryConfig(remote)
+	if !ok {
+		return nil, fmt.Errorf("no repository configuration found for remote %q", remote)
 	}
 	ws, err := b.repoManager.Lease(ctx, *param.Req.BuildDescription)
 	if err != nil {
@@ -131,8 +137,8 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 				client, err := bazel.NewBazelClient(bazel.Params{
 					WorkspacePath: ws.Path(),
 					Logger:        b.logger,
-					BazelCommand:  cfg.Repository.BazelCommand,
-					QueryTimeout:  time.Duration(cfg.Repository.QueryTimeout) * time.Second,
+					BazelCommand:  repoCfg.BazelCommand,
+					QueryTimeout:  time.Duration(repoCfg.QueryTimeout) * time.Second,
 				})
 				if err != nil {
 					b.logger.Errorw("getGraph: Error creating bazel client", zap.Error(err))
@@ -142,7 +148,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 				runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
 					BazelClient: client,
 					GitClient:   gitModule,
-					Config:      cfg.Repository,
+					Config:      repoCfg,
 				})
 			}
 			result, err := runner.Compute(ctx, ws)
