@@ -9,7 +9,6 @@ go_library(
     importpath = "github.com/uber/tango/orchestrator",
     visibility = ["//visibility:public"],
     deps = [
-        "//graphrunner",
         "//core/bazel",
         "//core/common",
         "//core/config",
@@ -17,6 +16,7 @@ go_library(
         "//core/repomanager",
         "//core/storage",
         "//core/workspace",
+        "//graphrunner",
         "//tangopb",
         "@org_uber_go_zap//:zap",
     ],
@@ -28,7 +28,6 @@ go_test(
     data = glob(["testdata/**"]),
     embed = [":orchestrator"],
     deps = [
-        "//graphrunner/mock",
         "//core/git",
         "//core/git/gitmock",
         "//core/repomanager/mock",
@@ -36,6 +35,7 @@ go_test(
         "//core/storage/storagemock",
         "//core/targethasher",
         "//core/workspace/workspacemock",
+        "//graphrunner/mock",
         "//tangopb",
         "@com_github_gogo_protobuf//io",
         "@com_github_stretchr_testify//assert",

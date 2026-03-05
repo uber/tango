@@ -21,7 +21,6 @@ import (
 
 	"time"
 
-	"github.com/uber/tango/graphrunner"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/config"
@@ -29,6 +28,7 @@ import (
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/workspace"
+	"github.com/uber/tango/graphrunner"
 	"go.uber.org/zap"
 )
 
