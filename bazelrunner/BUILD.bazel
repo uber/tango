@@ -6,7 +6,7 @@ go_library(
         "graph.go",
         "native.go",
     ],
-    importpath = "github.com/uber/tango/core/bazelrunner",
+    importpath = "github.com/uber/tango/bazelrunner",
     visibility = ["//visibility:public"],
     deps = [
         "//core/bazel",

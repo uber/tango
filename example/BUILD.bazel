@@ -6,8 +6,8 @@ go_library(
     importpath = "github.com/uber/tango/example",
     visibility = ["//visibility:private"],
     deps = [
+        "//controller",
         "//core/config",
-        "//core/controller",
         "//core/git",
         "//core/repomanager",
         "//core/storage",

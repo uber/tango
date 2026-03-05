@@ -20,7 +20,7 @@ import (
 	"os"
 
 	"github.com/uber/tango/core/bazel"
-	"github.com/uber/tango/core/bazelrunner"
+	"github.com/uber/tango/bazelrunner"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/config"
 	"github.com/uber/tango/core/git"

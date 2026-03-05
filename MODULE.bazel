@@ -21,9 +21,6 @@ go_sdk.download(
     version = GO_VERSION,
 )
 
-# Another alternative is to register the Go SDK installed on the host (see the nota bene below).
-go_sdk.host()
-
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_mod = "//:go.mod")
 

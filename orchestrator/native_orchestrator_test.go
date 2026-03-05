@@ -21,7 +21,7 @@ import (
 	"io"
 	"testing"
 
-	graphmock "github.com/uber/tango/core/bazelrunner/mock"
+	graphmock "github.com/uber/tango/bazelrunner/mock"
 	"github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
 	repomanagermock "github.com/uber/tango/core/repomanager/mock"

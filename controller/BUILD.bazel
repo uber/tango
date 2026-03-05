@@ -9,7 +9,7 @@ go_library(
         "getchangedtargets.go",
         "gettargetgraph.go",
     ],
-    importpath = "github.com/uber/tango/core/controller",
+    importpath = "github.com/uber/tango/controller",
     visibility = ["//visibility:public"],
     deps = [
         "//core/common",
