@@ -61,8 +61,8 @@ func run() error {
 	logger.Infof("Using storage type: %s", cfg.Storage.Type)
 
 	// Repo manager and orchestrator
-	repoManagerClonePath := cfg.Repository.RepoManagerClonePath
-	workerRootPath := cfg.Repository.WorkerRootPath
+	repoManagerClonePath := cfg.Service.RepoManagerClonePath
+	workerRootPath := cfg.Service.WorkerRootPath
 	if err := os.MkdirAll(repoManagerClonePath, 0o755); err != nil {
 		return fmt.Errorf("failed to create repo manager clone path: %w", err)
 	}
@@ -77,7 +77,7 @@ func run() error {
 		Logger:               logger,
 		RepoManagerClonePath: repoManagerClonePath,
 		WorkerRootPath:       workerRootPath,
-		PoolSize:             cfg.Repository.WorkspacePoolSize,
+		PoolSize:             cfg.Service.WorkerPoolSize,
 	})
 	orch := orchestrator.NewNativeOrchestrator(orchestrator.Params{
 		Storage:        store,
