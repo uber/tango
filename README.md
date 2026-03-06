@@ -163,3 +163,4 @@ This project uses GitHub Actions for continuous integration. The workflow automa
 The workflow runs on:
 - All pushes to the `main` branch
 - All pull requests (opened, reopened, or synchronized)
+# merge detection test
