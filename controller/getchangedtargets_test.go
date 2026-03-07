@@ -137,7 +137,7 @@ func TestCompareTargetGraphs(t *testing.T) {
 		},
 	}
 
-	response, err := c.compareTargetGraphs(zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1, false)
+	response, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1, false)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 }
@@ -436,7 +436,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(zap.NewNop(), first, second, -1, false)
+	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1, false)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 	cs := res[0].GetChangedTargets()
@@ -508,7 +508,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(zap.NewNop(), first, second, -1, false)
+	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1, false)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -576,7 +576,7 @@ func TestCompareTargetGraphs_IndirectWhenNoSourceDep(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(zap.NewNop(), first, second, -1, false)
+	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1, false)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -641,7 +641,7 @@ func TestCompareTargetGraphs_DirectWhenDependenciesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(zap.NewNop(), first, second, -1, false)
+	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1, false)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -722,7 +722,7 @@ func TestCompareTargetGraphs_DirectWhenAttributesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(zap.NewNop(), first, second, -1, false)
+	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1, false)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -802,7 +802,7 @@ func TestCompareTargetGraphs_DirectWhenNewAttributeAdded(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(zap.NewNop(), first, second, -1, false)
+	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1, false)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1101,7 +1101,7 @@ func TestCompareTargetGraphs_IndirectWhenOnlyHashChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(zap.NewNop(), first, second, -1, false)
+	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1, false)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)

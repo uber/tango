@@ -38,7 +38,9 @@ type job struct {
 	cancel            context.CancelFunc
 }
 
-// GetChangedTargets returns the changed targets between two revisions.
+// GetChangedTargets returns the changed targets between two revisions. If the
+// client disconnects, the stream's context is cancelled and the function
+// returns with context.Canceled.
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets")
 	scope.Counter("calls").Inc(1)
@@ -239,7 +241,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	changedTargetsResponses, err := c.compareTargetGraphs(logger, firstGraph, secondGraph, maxDist, request.GetOutputConfig().GetComputeDistances())
+	changedTargetsResponses, err := c.compareTargetGraphs(ctx, logger, firstGraph, secondGraph, maxDist, request.GetOutputConfig().GetComputeDistances())
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -294,7 +296,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 // requested or when filtering by distance is active. Output IDs are
 // re-mapped into a canonical per-call namespace so the response metadata
 // only carries the names actually referenced.
-func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs")
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
@@ -302,18 +304,41 @@ func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondG
 	// 1) Extract targets and metadata; index by canonical names
 	indexStart := time.Now()
 	firstTargetsByID, firstMetadata := getTargetsAndMetadata(firstGraph)
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	secondTargetsByID, secondMetadata := getTargetsAndMetadata(secondGraph)
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	// Release raw chunk slices — individual target protos are now held by the ID maps.
 	firstGraph = nil
 	secondGraph = nil
 	firstByName := buildNameIndex(firstTargetsByID, firstMetadata)
 	firstTargetsByID = nil // all pointers are now in firstByName; drop the duplicate map
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	secondByName := buildNameIndex(secondTargetsByID, secondMetadata)
 	secondTargetsByID = nil
 	indexDuration := time.Since(indexStart)
 	scope.Timer("index_duration").Record(indexDuration)
 
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	sourceFileRuleTypeID := detectSourceFileID(secondMetadata)
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 
 	changedByName := make(map[string]*pb.ChangedTarget)
 	changedSourceFileTargets := make(map[string]struct{})
@@ -399,6 +424,10 @@ func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondG
 	diffScanDuration := time.Since(diffScanStart)
 	scope.Timer("diff_scan_duration").Record(diffScanDuration)
 
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	// Iterate over the changed targets and check if any of them are DIRECT changes.
 	classifyStart := time.Now()
 	for name, ct := range changedByName {
@@ -436,12 +465,20 @@ func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondG
 	classifyDuration := time.Since(classifyStart)
 	scope.Timer("classify_duration").Record(classifyDuration)
 
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	// Compute BFS distances when filtering is active or the client requested distance output.
 	if maxDist >= 0 || outputDistances {
 		distancesStart := time.Now()
 		computeDistances(c.logger, changedByName, secondByName, secondMetadata, maxDist)
 		distancesDuration := time.Since(distancesStart)
 		scope.Timer("distances_duration").Record(distancesDuration)
+	}
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 
 	// Collect changed targets.
