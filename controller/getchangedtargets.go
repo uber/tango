@@ -37,21 +37,6 @@ type job struct {
 	cancel            context.CancelFunc
 }
 
-// readTreehash fetches the treehash stored at GetTreehashCachePath for the given build description.
-// Returns an empty string on any error or cache miss so callers can treat it as an optional optimistic lookup.
-func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) string {
-	resp, err := st.Get(ctx, storage.DownloadRequest{Key: common.GetTreehashCachePath(buildDescription)})
-	if err != nil || resp == nil || resp.ReadCloser == nil {
-		return ""
-	}
-	defer resp.ReadCloser.Close()
-	b, err := io.ReadAll(resp.ReadCloser)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
 // GetChangedTargets returns the changed targets between two revisions.
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error {
 	ctx := context.Background()
@@ -771,4 +756,19 @@ func getDefaultDistance(outputConfig *pb.OutputConfig, forNewTarget bool) int32 
 		return 0
 	}
 	return -1
+}
+
+// readTreehash fetches the treehash stored at GetTreehashCachePath for the given build description.
+// Returns an empty string on any error or cache miss so callers can treat it as an optional optimistic lookup.
+func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) string {
+	resp, err := st.Get(ctx, storage.DownloadRequest{Key: common.GetTreehashCachePath(buildDescription)})
+	if err != nil || resp == nil || resp.ReadCloser == nil {
+		return ""
+	}
+	defer resp.ReadCloser.Close()
+	b, err := io.ReadAll(resp.ReadCloser)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
