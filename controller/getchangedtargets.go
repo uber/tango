@@ -21,6 +21,7 @@ import (
 	"io"
 
 	"github.com/uber/tango/core/common"
+	"github.com/uber/tango/core/storage"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
@@ -34,6 +35,21 @@ type job struct {
 	completed         bool
 	ctx               context.Context
 	cancel            context.CancelFunc
+}
+
+// readTreehash fetches the treehash stored at GetTreehashCachePath for the given build description.
+// Returns an empty string on any error or cache miss so callers can treat it as an optional optimistic lookup.
+func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) string {
+	resp, err := st.Get(ctx, storage.DownloadRequest{Key: common.GetTreehashCachePath(buildDescription)})
+	if err != nil || resp == nil || resp.ReadCloser == nil {
+		return ""
+	}
+	defer resp.ReadCloser.Close()
+	b, err := io.ReadAll(resp.ReadCloser)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // GetChangedTargets returns the changed targets between two revisions.
@@ -50,6 +66,53 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		zap.String("second_revision_remote", request.GetSecondRevision().GetRemote()),
 		zap.String("second_revision_base_sha", request.GetSecondRevision().GetBaseSha()),
 	)
+
+	// Try to serve from cache first using the stored treehashes for both revisions.
+	// readTreehash returns "" on any miss/error so we silently skip the cache when
+	// either treehash is not yet available.
+	treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
+	treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
+	if treehash1 != "" && treehash2 != "" {
+		cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
+		cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
+		if cacheErr != nil && !storage.IsNotFound(cacheErr) {
+			c.logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
+		} else if cachedReader != nil {
+			// Buffer all responses before sending any. A concurrent goroutine write may have
+			// left a partial blob in storage; buffering lets us detect corruption and fall
+			// through to recompute before we've sent anything to the client.
+			var cached []*pb.GetChangedTargetsResponse
+			var readErr error
+			for {
+				var resp *pb.GetChangedTargetsResponse
+				resp, readErr = cachedReader.Read()
+				if readErr == io.EOF {
+					readErr = nil
+					break
+				}
+				if readErr != nil {
+					break
+				}
+				cached = append(cached, resp)
+			}
+			cachedReader.Close()
+
+			if readErr != nil {
+				// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
+				c.logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
+			} else {
+				c.logger.Info("GetChangedTargets: Cache hit, streaming from storage")
+				for _, resp := range cached {
+					if sendErr := stream.Send(resp); sendErr != nil {
+						c.logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
+						return fmt.Errorf("failed to send cached response: %w", sendErr)
+					}
+				}
+				c.logger.Info("GetChangedTargets: Successfully streamed from cache")
+				return nil
+			}
+		}
+	}
 
 	jobs := make([]*job, 2)
 
@@ -79,7 +142,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 				revision = request.GetSecondRevision()
 			}
 			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig())
-			// something's wrong with getGraph
 			if err != nil || graphReader == nil {
 				results <- graphResult{order: idx, err: err}
 				return
@@ -162,6 +224,21 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		c.logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
 		return fmt.Errorf("failed to compare target graphs: %w", err)
 	}
+
+	// Cache the computed result concurrently so it doesn't block the stream send.
+	// Re-read treehashes inside the goroutine — the orchestrator may have stored them
+	// during computation. Both the goroutine and the send loop below only read
+	// changedTargetsResponses, so concurrent access is safe.
+	go func() {
+		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
+		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
+		if treehash1 != "" && treehash2 != "" {
+			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
+			if writeErr := storage.WriteChangedTargetsStream(ctx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
+				c.logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
+			}
+		}
+	}()
 
 	for _, changedTargetsResponse := range changedTargetsResponses {
 		if err := stream.Send(changedTargetsResponse); err != nil {

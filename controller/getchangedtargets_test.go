@@ -22,6 +22,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
@@ -151,12 +152,65 @@ func TestGetChangedTargets_ValidationError(t *testing.T) {
 	assert.EqualError(t, err, "request cannot be nil")
 }
 
+func TestGetChangedTargets_CacheHit(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+
+	// Build a cached response with one ChangedTargets message and one Metadata message.
+	cachedChanged := &pb.GetChangedTargetsResponse{
+		Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+			ChangedTargets: &pb.ChangedTargets{},
+		},
+	}
+	cachedMeta := &pb.GetChangedTargetsResponse{
+		Item: &pb.GetChangedTargetsResponse_Metadata{
+			Metadata: &pb.Metadata{},
+		},
+	}
+	var buf bytes.Buffer
+	w := gogio.NewDelimitedWriter(&buf)
+	w.WriteMsg(cachedChanged)
+	w.WriteMsg(cachedMeta)
+	cachedBytes := buf.Bytes()
+
+	storagemock := storagemock.NewMockStorage(ctrl)
+	// First two Gets resolve the treehashes, third gets the cached comparison result.
+	gomock.InOrder(
+		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil),
+		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil),
+		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cachedBytes))}, nil),
+	)
+
+	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
+
+	c := NewController(Params{
+		Logger:       zaptest.NewLogger(t),
+		Storage:      storagemock,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+	})
+
+	request := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+	}
+
+	err := c.GetChangedTargets(request, stream)
+	require.NoError(t, err)
+}
+
 func TestGetChangedTargets_GetGraphError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
 	storagemock := storagemock.NewMockStorage(ctrl)
-	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(nil, errors.New("graph error")).Times(2)
+	// First two Gets are treehash pre-reads (both return error -> treated as cache miss, skip
+	// comparison cache check). The next two are the goroutine treehash lookups, which also fail
+	// with a non-NotFound error so getGraph propagates the error for both revisions.
+	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("graph error")).Times(4)
 
 	c := NewController(Params{
 		Logger:       zap.NewNop(),
@@ -185,11 +239,21 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
 	})
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
+		if strings.Contains(req.Key, "compared-targets") {
+			return nil, &storage.NotFoundError{Path: req.Key}
+		}
 		if strings.Contains(req.Key, "th") {
 			return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil
 		}
 		return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("th")))}, nil
 	}).AnyTimes()
+
+	// Put is launched in a goroutine — use a channel to wait for it before the test ends.
+	putDone := make(chan struct{}, 1)
+	storagemock.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
+		putDone <- struct{}{}
+		return nil
+	})
 
 	c := NewController(Params{
 		Logger:       zaptest.NewLogger(t),
@@ -204,6 +268,12 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 
 	err := c.GetChangedTargets(request, stream)
 	assert.Error(t, err)
+
+	select {
+	case <-putDone:
+	case <-time.After(time.Second):
+		assert.Fail(t, "cache write goroutine did not complete in time")
+	}
 }
 
 func TestGetChangedTargets_streamChunks(t *testing.T) {
@@ -264,10 +334,12 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	})
 	graph2Bytes := buf2.Bytes()
 
-	// Each revision needs: treehash lookup + graph lookup
+	// Each revision needs: treehash lookup + graph lookup. Plus one initial cache miss.
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
 			switch {
+			case strings.Contains(req.Key, "compared-targets"):
+				return nil, &storage.NotFoundError{Path: req.Key}
 			case strings.Contains(req.Key, "sha1"):
 				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
 			case strings.Contains(req.Key, "sha2"):
@@ -279,7 +351,14 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 			default:
 				return nil, fmt.Errorf("unexpected key: %s", req.Key)
 			}
-		}).Times(4)
+			// readTreehash (×2 pre) + comparison cache miss (×1) + graph computation (×4) + readTreehash (×2 post) = 9
+		}).Times(9)
+	// Put is launched in a goroutine — use a channel to wait for it before the test ends.
+	putDone := make(chan struct{}, 1)
+	storagemock.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
+		putDone <- struct{}{}
+		return nil
+	})
 
 	c := NewController(Params{
 		Logger:       zaptest.NewLogger(t),
@@ -295,7 +374,12 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	err := c.GetChangedTargets(request, stream)
 	require.NoError(t, err)
 
-	// xactly 2 responses: ChangedTargets + Metadata
+	select {
+	case <-putDone:
+	case <-time.After(time.Second):
+		assert.Fail(t, "cache write goroutine did not complete in time")
+	}
+
 	require.Len(t, sentResponses, 2)
 	changedTargets := sentResponses[0].GetChangedTargets()
 	metadata := sentResponses[1].GetMetadata()

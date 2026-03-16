@@ -47,6 +47,13 @@ func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
 	return filepath.Join(ToShortRemote(buildDescription.Remote), buildDescription.BaseSha, getReqsBase64(buildDescription.Requests)) + "-" + buildDescription.Strategy.String()
 }
 
+// GetComparedTargetsCachePath returns the cache path for a compared target graph result.
+// treehash1 and treehash2 are the resolved treehashes of the first and second revisions.
+// remote is the shared git remote for both revisions.
+func GetComparedTargetsCachePath(remote, treehash1, treehash2 string) string {
+	return filepath.Join("compared-targets", ToShortRemote(remote), treehash1, treehash2)
+}
+
 // getReqsBase64 returns the base64 encoded request URLs.
 func getReqsBase64(requests []*tangopb.Request) string {
 	if len(requests) == 0 {
