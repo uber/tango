@@ -1,2 +1,2 @@
 # Export GitHub Actions workflow files
-exports_files(["build_and_test.yml"])
+exports_files(["ci.yml"])
