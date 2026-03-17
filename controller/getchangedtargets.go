@@ -39,11 +39,11 @@ type job struct {
 
 // GetChangedTargets returns the changed targets between two revisions.
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error {
-	ctx := stream.Context()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
 		c.logger.Error("GetChangedTargets: Invalid request", zap.Error(err))
 		return err
 	}
+	ctx := stream.Context()
 
 	c.logger.Info("GetChangedTargets: Processing request",
 		zap.String("first_revision_remote", request.GetFirstRevision().GetRemote()),

@@ -155,6 +155,7 @@ func TestGetChangedTargets_ValidationError(t *testing.T) {
 func TestGetChangedTargets_CacheHit(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
 
 	// Build a cached response with one ChangedTargets message and one Metadata message.
 	cachedChanged := &pb.GetChangedTargetsResponse{
@@ -204,6 +205,7 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 func TestGetChangedTargets_GetGraphError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
 
 	storagemock := storagemock.NewMockStorage(ctrl)
 	// First two Gets are treehash pre-reads (both return error -> treated as cache miss, skip
@@ -230,6 +232,7 @@ func TestGetChangedTargets_GetGraphError(t *testing.T) {
 func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
 
 	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send error"))
 	storagemock := storagemock.NewMockStorage(ctrl)
@@ -279,6 +282,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 func TestGetChangedTargets_streamChunks(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
 
 	var sentResponses []*pb.GetChangedTargetsResponse
 	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, opts ...interface{}) error {
