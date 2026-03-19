@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/orchestrator"
@@ -95,7 +96,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 	}
 
 	c.logger.Info("getGraph: treehash found", zap.Any("request build description", buildDescription))
-	treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes))
+	treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), strings.TrimSpace(string(treehashBytes)))
 	// Download the target graph based on treehash.
 	graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
 	if err != nil {
