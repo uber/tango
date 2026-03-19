@@ -67,6 +67,6 @@ func NewGraphReader(ctx context.Context, st Storage, key string) (GraphReader, e
 		return nil, nil
 	}
 	return &graphReaderCloser{
-		reader: gogio.NewDelimitedReader(resp.ReadCloser, 32<<20), // 32MB/message limit
+		reader: gogio.NewDelimitedReader(resp.ReadCloser, 512<<20), // 512MB/message limit
 	}, nil
 }
