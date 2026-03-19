@@ -770,5 +770,5 @@ func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(b))
+	return string(b)
 }
