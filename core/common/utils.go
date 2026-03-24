@@ -15,7 +15,8 @@
 package common
 
 import (
-	"encoding/base64"
+	"crypto/md5"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -44,7 +45,7 @@ func GetGraphByTreeHash(remote, treehash string) string {
 
 // GetTreehashCachePath returns the cache path for the treehash.
 func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
-	return filepath.Join(ToShortRemote(buildDescription.Remote), buildDescription.BaseSha, getReqsBase64(buildDescription.Requests)) + "-" + buildDescription.Strategy.String()
+	return filepath.Join(ToShortRemote(buildDescription.Remote), buildDescription.BaseSha, getReqsHash(buildDescription.Requests)) + "-" + buildDescription.Strategy.String()
 }
 
 // GetComparedTargetsCachePath returns the cache path for a compared target graph result.
@@ -54,8 +55,8 @@ func GetComparedTargetsCachePath(remote, treehash1, treehash2 string) string {
 	return filepath.Join("compared-targets", ToShortRemote(remote), treehash1, treehash2)
 }
 
-// getReqsBase64 returns the base64 encoded request URLs.
-func getReqsBase64(requests []*tangopb.Request) string {
+// getReqsHash returns a fixed-length MD5 hash of the sorted request URLs.
+func getReqsHash(requests []*tangopb.Request) string {
 	if len(requests) == 0 {
 		return ""
 	}
@@ -64,7 +65,8 @@ func getReqsBase64(requests []*tangopb.Request) string {
 		urls = append(urls, req.GetUrl())
 	}
 	sort.Strings(urls)
-	return base64.RawURLEncoding.EncodeToString([]byte(strings.Join(urls, "-")))
+	sum := md5.Sum([]byte(strings.Join(urls, "-")))
+	return fmt.Sprintf("%x", sum)
 }
 
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse

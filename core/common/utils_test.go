@@ -15,7 +15,7 @@
 package common
 
 import (
-	"encoding/base64"
+	"crypto/md5"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -81,15 +81,20 @@ func TestGetTreehashCachePath(t *testing.T) {
 		Requests: reqs,
 	}
 	got := GetTreehashCachePath(desc)
-	// Build expected with the same encoding semantics used by the implementation
-	want := filepath.Join("uber/tango", "deadbeef", base64.RawURLEncoding.EncodeToString([]byte("custom://foo/bar-github://org/repo/pull/1"))) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
+	joined := "custom://foo/bar-github://org/repo/pull/1"
+	sum := md5.Sum([]byte(joined))
+	want := filepath.Join("uber/tango", "deadbeef", fmt.Sprintf("%x", sum)) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
 	if got != want {
 		t.Fatalf("GetTreehashCachePath(..) = %q, want %q", got, want)
 	}
 }
 
-func TestGetReqsBase64(t *testing.T) {
+func TestGetReqsHash(t *testing.T) {
 	t.Parallel()
+	md5hex := func(s string) string {
+		sum := md5.Sum([]byte(s))
+		return fmt.Sprintf("%x", sum)
+	}
 	tests := []struct {
 		name string
 		in   []*pb.Request
@@ -103,20 +108,25 @@ func TestGetReqsBase64(t *testing.T) {
 		{
 			name: "single",
 			in:   []*pb.Request{{Url: "github://org/repo/pull/42"}},
-			want: base64.RawURLEncoding.EncodeToString([]byte("github://org/repo/pull/42")),
+			want: md5hex("github://org/repo/pull/42"),
 		},
 		{
 			name: "multiple",
 			in:   []*pb.Request{{Url: "a"}, {Url: "b"}},
-			want: base64.RawURLEncoding.EncodeToString([]byte("a-b")),
+			want: md5hex("a-b"),
+		},
+		{
+			name: "multiple sorted",
+			in:   []*pb.Request{{Url: "b"}, {Url: "a"}},
+			want: md5hex("a-b"),
 		},
 	}
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			got := getReqsBase64(tt.in)
+			got := getReqsHash(tt.in)
 			if got != tt.want {
-				t.Fatalf("getReqsBase64(%v) = %q, want %q", tt.in, got, tt.want)
+				t.Fatalf("getReqsHash(%v) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
