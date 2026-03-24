@@ -56,6 +56,8 @@ func GetComparedTargetsCachePath(remote, treehash1, treehash2 string) string {
 }
 
 // getReqsHash returns a fixed-length MD5 hash of the sorted request URLs.
+// Each URL's bytes are fed into the digest individually (no separator), matching
+// the Java MessageDigest.update(str.getBytes()) per-string behavior.
 func getReqsHash(requests []*tangopb.Request) string {
 	if len(requests) == 0 {
 		return ""
@@ -65,8 +67,11 @@ func getReqsHash(requests []*tangopb.Request) string {
 		urls = append(urls, req.GetUrl())
 	}
 	sort.Strings(urls)
-	sum := md5.Sum([]byte(strings.Join(urls, "-")))
-	return fmt.Sprintf("%x", sum)
+	h := md5.New()
+	for _, url := range urls {
+		h.Write([]byte(url))
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse

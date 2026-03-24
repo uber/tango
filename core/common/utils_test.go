@@ -77,17 +77,22 @@ func TestGetTreehashCachePath(t *testing.T) {
 		Requests: reqs,
 	}
 	got := GetTreehashCachePath(desc)
-	joined := "custom://foo/bar-github://org/repo/pull/1"
-	sum := md5.Sum([]byte(joined))
-	want := filepath.Join("uber/tango", "deadbeef", fmt.Sprintf("%x", sum)) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
+	// URLs are sorted then fed individually into the digest (no separator)
+	h := md5.New()
+	h.Write([]byte("custom://foo/bar"))
+	h.Write([]byte("github://org/repo/pull/1"))
+	want := filepath.Join("uber/tango", "deadbeef", fmt.Sprintf("%x", h.Sum(nil))) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
 	assert.Equal(t, want, got)
 }
 
 func TestGetReqsHash(t *testing.T) {
 	t.Parallel()
-	md5hex := func(s string) string {
-		sum := md5.Sum([]byte(s))
-		return fmt.Sprintf("%x", sum)
+	md5hex := func(strs ...string) string {
+		h := md5.New()
+		for _, s := range strs {
+			h.Write([]byte(s))
+		}
+		return fmt.Sprintf("%x", h.Sum(nil))
 	}
 	tests := []struct {
 		name string
@@ -107,12 +112,12 @@ func TestGetReqsHash(t *testing.T) {
 		{
 			name: "multiple",
 			in:   []*pb.Request{{Url: "a"}, {Url: "b"}},
-			want: md5hex("a-b"),
+			want: md5hex("a", "b"),
 		},
 		{
 			name: "multiple sorted",
 			in:   []*pb.Request{{Url: "b"}, {Url: "a"}},
-			want: md5hex("a-b"),
+			want: md5hex("a", "b"),
 		},
 	}
 	for _, tt := range tests {
