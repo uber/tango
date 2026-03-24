@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
@@ -28,19 +29,26 @@ type Params struct {
 	Logger       *zap.Logger
 	Storage      storage.Storage
 	Orchestrator orchestrator.Orchestrator
+	Scope        tally.Scope `optional:"true"`
 }
 
 type controller struct {
 	logger       *zap.Logger
 	storage      storage.Storage
 	orchestrator orchestrator.Orchestrator
+	scope        tally.Scope
 }
 
 // NewController creates a new controller.
 func NewController(p Params) pb.TangoYARPCServer {
+	scope := p.Scope
+	if scope == nil {
+		scope = tally.NoopScope
+	}
 	return &controller{
 		logger:       p.Logger,
 		storage:      p.Storage,
 		orchestrator: p.Orchestrator,
+		scope:        scope.SubScope("controller"),
 	}
 }

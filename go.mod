@@ -10,6 +10,7 @@ require (
 	github.com/golang/mock v1.7.0-rc.1
 	github.com/google/go-cmp v0.6.0
 	github.com/stretchr/testify v1.10.0
+	github.com/uber-go/tally v3.5.8+incompatible
 	go.uber.org/fx v1.24.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.6.0
@@ -37,7 +38,6 @@ require (
 	github.com/prometheus/procfs v0.6.0 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	github.com/uber-go/mapdecode v1.0.0 // indirect
-	github.com/uber-go/tally v3.5.8+incompatible // indirect
 	github.com/uber/tchannel-go v1.34.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/dig v1.19.0 // indirect

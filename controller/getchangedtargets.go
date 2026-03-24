@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
@@ -44,17 +45,19 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		return err
 	}
 	ctx := stream.Context()
-
-	c.logger.Info("GetChangedTargets: Processing request",
-		zap.String("first_revision_remote", request.GetFirstRevision().GetRemote()),
-		zap.String("first_revision_base_sha", request.GetFirstRevision().GetBaseSha()),
-		zap.String("second_revision_remote", request.GetSecondRevision().GetRemote()),
-		zap.String("second_revision_base_sha", request.GetSecondRevision().GetBaseSha()),
+	start := time.Now()
+	scope := c.scope.SubScope("get_changed_targets")
+	logger := c.logger.With(
+		zap.Any("first_revision", request.GetFirstRevision()),
+		zap.Any("second_revision", request.GetSecondRevision()),
 	)
+
+	logger.Info("GetChangedTargets: Processing request")
 
 	// Try to serve from cache first using the stored treehashes for both revisions.
 	// readTreehash returns "" on any miss/error so we silently skip the cache when
 	// either treehash is not yet available.
+	cacheStart := time.Now()
 	treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
 	treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
 	if treehash1 != "" && treehash2 != "" {
@@ -86,14 +89,22 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 				// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
 				c.logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
 			} else {
-				c.logger.Info("GetChangedTargets: Cache hit, streaming from storage")
+				cacheReadDuration := time.Since(cacheStart)
+				c.logger.Info("GetChangedTargets: Cache hit, streaming from storage",
+					zap.Duration("cache_read_duration", cacheReadDuration),
+				)
+				scope.Timer("cache_read_duration").Record(cacheReadDuration)
 				for _, resp := range cached {
 					if sendErr := stream.Send(resp); sendErr != nil {
 						c.logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
 						return fmt.Errorf("failed to send cached response: %w", sendErr)
 					}
 				}
-				c.logger.Info("GetChangedTargets: Successfully streamed from cache")
+				totalDuration := time.Since(start)
+				c.logger.Info("GetChangedTargets: Successfully streamed from cache",
+					zap.Duration("total_duration", totalDuration),
+				)
+				scope.Timer("total_duration").Record(totalDuration)
 				return nil
 			}
 		}
@@ -116,6 +127,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		err    error
 	}
 	results := make(chan graphResult, len(jobs))
+	graphFetchStart := time.Now()
 
 	for i := 0; i < len(jobs); i++ {
 		i := i
@@ -179,6 +191,12 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		}
 	}
 
+	graphFetchDuration := time.Since(graphFetchStart)
+	c.logger.Info("GetChangedTargets: Both graphs fetched",
+		zap.Duration("graph_fetch_duration", graphFetchDuration),
+	)
+	scope.Timer("graph_fetch_duration").Record(graphFetchDuration)
+
 	if ctx.Err() != nil {
 		// If the context was cancelled by the upstream, just return the original error without additional augmentation
 		return ctx.Err()
@@ -204,11 +222,17 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	firstGraph := jobs[0].graphStreamChunks
 	secondGraph := jobs[1].graphStreamChunks
 
+	compareStart := time.Now()
 	changedTargetsResponses, err := c.compareTargetGraphs(ctx, firstGraph, secondGraph, request.GetOutputConfig())
 	if err != nil {
 		c.logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
 		return fmt.Errorf("failed to compare target graphs: %w", err)
 	}
+	compareDuration := time.Since(compareStart)
+	c.logger.Info("GetChangedTargets: Target graphs compared",
+		zap.Duration("compare_duration", compareDuration),
+	)
+	scope.Timer("compare_duration").Record(compareDuration)
 
 	// Cache the computed result concurrently so it doesn't block the stream send.
 	// Re-read treehashes inside the goroutine — the orchestrator may have stored them
@@ -232,18 +256,27 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		}
 	}
 
-	c.logger.Info("GetChangedTargets: Successfully processed request")
+	totalDuration := time.Since(start)
+	c.logger.Info("GetChangedTargets: Successfully processed request",
+		zap.Duration("total_duration", totalDuration),
+	)
+	scope.Timer("total_duration").Record(totalDuration)
 	return nil
 }
 
 func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, secondGraph []*pb.GetTargetGraphResponse, outputConfig *pb.OutputConfig) ([]*pb.GetChangedTargetsResponse, error) {
+	start := time.Now()
+	scope := c.scope.SubScope("compare_target_graphs")
 	c.logger.Info("compareTargetGraphs: Computing differences between target graphs")
 
 	// 1) Extract targets and metadata; index by canonical names
+	indexStart := time.Now()
 	firstTargetsByID, firstMetadata := getTargetsAndMetadata(firstGraph)
 	secondTargetsByID, secondMetadata := getTargetsAndMetadata(secondGraph)
 	firstByName := buildNameIndex(firstTargetsByID, firstMetadata)
 	secondByName := buildNameIndex(secondTargetsByID, secondMetadata)
+	indexDuration := time.Since(indexStart)
+	scope.Timer("index_duration").Record(indexDuration)
 
 	sourceFileRuleTypeID := detectSourceFileID(secondMetadata)
 
@@ -270,6 +303,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 	getAttrValId := func(name string) int32 { return attrValMapper.ID(name) }
 
 	// Identify changed targets and collect changed source files
+	diffScanStart := time.Now()
 	for name, newT := range secondByName {
 		oldT, exists := firstByName[name]
 		if !exists {
@@ -332,8 +366,11 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			Distance:   getDefaultDistance(outputConfig, false),
 		}
 	}
+	diffScanDuration := time.Since(diffScanStart)
+	scope.Timer("diff_scan_duration").Record(diffScanDuration)
 
 	// Iterate over the changed targets and check if any of them are DIRECT changes.
+	classifyStart := time.Now()
 	for name, ct := range changedByName {
 		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
 			// Already marked as direct or new
@@ -366,10 +403,15 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
 		}
 	}
+	classifyDuration := time.Since(classifyStart)
+	scope.Timer("classify_duration").Record(classifyDuration)
 
 	// Compute BFS distances from CHANGE_TYPE_DIRECT targets through the dependency graph.
 	if outputConfig.GetComputeDistances() {
+		distancesStart := time.Now()
 		computeDistances(c.logger, changedByName, secondByName, secondMetadata)
+		distancesDuration := time.Since(distancesStart)
+		scope.Timer("distances_duration").Record(distancesDuration)
 	}
 
 	// TODO: https://github.com/uber/tango/issues/34
@@ -404,6 +446,11 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 			Metadata: meta,
 		},
 	})
+	totalDuration := time.Since(start)
+	c.logger.Info("compareTargetGraphs: Done",
+		zap.Duration("total_duration", totalDuration),
+	)
+	scope.Timer("total_duration").Record(totalDuration)
 	return results, nil
 }
 
