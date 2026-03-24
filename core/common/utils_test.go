@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/targethasher"
 	pb "github.com/uber/tango/tangopb"
 )
@@ -50,10 +52,7 @@ func TestToShortRemote(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			got := ToShortRemote(tt.remote)
-			if got != tt.want {
-				t.Fatalf("ToShortRemote(%q) = %q, want %q", tt.remote, got, tt.want)
-			}
+			assert.Equal(t, tt.want, ToShortRemote(tt.remote))
 		})
 	}
 }
@@ -63,10 +62,7 @@ func TestGetGraphByTreeHash(t *testing.T) {
 	remote := "git@github:uber/tango"
 	treehash := "abcd1234"
 	got := GetGraphByTreeHash(remote, treehash)
-	want := filepath.Join("uber/tango", treehash)
-	if got != want {
-		t.Fatalf("GetGraphByTreeHash(%q,%q) = %q, want %q", remote, treehash, got, want)
-	}
+	assert.Equal(t, filepath.Join("uber/tango", treehash), got)
 }
 
 func TestGetTreehashCachePath(t *testing.T) {
@@ -84,9 +80,7 @@ func TestGetTreehashCachePath(t *testing.T) {
 	joined := "custom://foo/bar-github://org/repo/pull/1"
 	sum := md5.Sum([]byte(joined))
 	want := filepath.Join("uber/tango", "deadbeef", fmt.Sprintf("%x", sum)) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
-	if got != want {
-		t.Fatalf("GetTreehashCachePath(..) = %q, want %q", got, want)
-	}
+	assert.Equal(t, want, got)
 }
 
 func TestGetReqsHash(t *testing.T) {
@@ -124,10 +118,7 @@ func TestGetReqsHash(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			got := getReqsHash(tt.in)
-			if got != tt.want {
-				t.Fatalf("getReqsHash(%v) = %q, want %q", tt.in, got, tt.want)
-			}
+			assert.Equal(t, tt.want, getReqsHash(tt.in))
 		})
 	}
 }
@@ -143,24 +134,18 @@ func TestChunkTargets(t *testing.T) {
 
 	responses := chunkTargets(targets, 100)
 
-	if len(responses) != 3 {
-		t.Fatalf("got %d chunks, want 3", len(responses))
-	}
+	require.Len(t, responses, 3)
 
 	// Verify total count and order preserved
 	var total int
 	for _, resp := range responses {
 		item := resp.Item.(*pb.GetTargetGraphResponse_Targets)
 		for _, target := range item.Targets.Targets {
-			if target.Id != int32(total) {
-				t.Fatalf("target order not preserved at index %d", total)
-			}
+			assert.Equal(t, int32(total), target.Id)
 			total++
 		}
 	}
-	if total != 250 {
-		t.Fatalf("total targets = %d, want 250", total)
-	}
+	assert.Equal(t, 250, total)
 }
 
 func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
@@ -179,17 +164,12 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 	}
 
 	responses, err := ResultToGetTargetGraphResponse(result)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Expect 2 target chunks + 1 metadata = 3 responses
-	if len(responses) != 3 {
-		t.Fatalf("got %d responses, want 3", len(responses))
-	}
+	require.Len(t, responses, 3)
 
 	// Last should be metadata
-	if _, ok := responses[2].Item.(*pb.GetTargetGraphResponse_Metadata); !ok {
-		t.Fatal("last response should be Metadata")
-	}
+	_, ok := responses[2].Item.(*pb.GetTargetGraphResponse_Metadata)
+	assert.True(t, ok, "last response should be Metadata")
 }
