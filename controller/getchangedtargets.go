@@ -94,11 +94,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 					zap.Duration("cache_read_duration", cacheReadDuration),
 				)
 				scope.Timer("cache_read_duration").Record(cacheReadDuration)
-				for _, resp := range cached {
-					if sendErr := stream.Send(resp); sendErr != nil {
-						c.logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
-						return fmt.Errorf("failed to send cached response: %w", sendErr)
-					}
+				if sendErr := sendWithDistanceFilter(stream, cached, request.GetOutputConfig()); sendErr != nil {
+					c.logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
+					return fmt.Errorf("failed to send cached response: %w", sendErr)
 				}
 				totalDuration := time.Since(start)
 				c.logger.Info("GetChangedTargets: Successfully streamed from cache",
@@ -179,7 +177,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			// one of the computations failed, if the other one has not
 			// completed yet, cancel it and wait for the result to come in,
 			// which would be a context cancelled result then
-			if res.err != nil {
+			if jobs[res.order].err != nil {
 				other := (res.order + 1) % 2
 				if !jobs[other].completed {
 					jobs[other].cancel()
@@ -249,11 +247,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		}
 	}()
 
-	for _, changedTargetsResponse := range changedTargetsResponses {
-		if err := stream.Send(changedTargetsResponse); err != nil {
-			c.logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
-			return fmt.Errorf("failed to send response: %w", err)
-		}
+	if err := sendWithDistanceFilter(stream, changedTargetsResponses, request.GetOutputConfig()); err != nil {
+		c.logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
+		return fmt.Errorf("failed to send response: %w", err)
 	}
 
 	totalDuration := time.Since(start)
@@ -407,15 +403,13 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 	scope.Timer("classify_duration").Record(classifyDuration)
 
 	// Compute BFS distances from CHANGE_TYPE_DIRECT targets through the dependency graph.
+	// max_distance is only considered when compute_distances is true.
 	if outputConfig.GetComputeDistances() {
 		distancesStart := time.Now()
-		computeDistances(c.logger, changedByName, secondByName, secondMetadata)
+		computeDistances(c.logger, changedByName, secondByName, secondMetadata, outputConfig.GetMaxDistance())
 		distancesDuration := time.Since(distancesStart)
 		scope.Timer("distances_duration").Record(distancesDuration)
 	}
-
-	// TODO: https://github.com/uber/tango/issues/34
-	// only return changed targets changed within x distance from a direct target
 
 	// Collect changed targets.
 	changed := make([]*pb.ChangedTarget, 0, len(changedByName))
@@ -698,9 +692,45 @@ func transposeOptimizedTarget(
 // computeDistances computes the shortest distance from any CHANGE_TYPE_DIRECT
 // target to each changed target via the reverse dependency graph using BFS.
 // DIRECT targets get distance 0, their reverse dependants get 1, and so on.
+// When maxDistance > 0, the BFS is pruned: targets at distance > maxDistance are never
+// enqueued, so they keep their initial distance of -1 (out-of-range). 0 means no limit.
 //
-// Targets unreachable from any DIRECT target keep the initial distance of -1, this should not happen.
-func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTarget, targetsByName map[string]*pb.OptimizedTarget, meta *pb.Metadata) {
+// Targets unreachable from any DIRECT target keep the initial distance of -1.
+// sendWithDistanceFilter streams responses to the client, filtering changed targets to those
+// within outputConfig.MaxDistance from any CHANGE_TYPE_DIRECT target when compute_distances is true
+// and max_distance > 0. Metadata and other non-target responses are always forwarded.
+// Filtering and sending are combined into a single pass to avoid an intermediate allocation.
+func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, outputConfig *pb.OutputConfig) error {
+	maxDist := int32(0)
+	if outputConfig.GetComputeDistances() {
+		maxDist = outputConfig.GetMaxDistance()
+	}
+	for _, resp := range responses {
+		toSend := resp
+		if maxDist > 0 {
+			if ct, ok := resp.GetItem().(*pb.GetChangedTargetsResponse_ChangedTargets); ok {
+				targets := ct.ChangedTargets.GetChangedTargets()
+				kept := make([]*pb.ChangedTarget, 0, len(targets))
+				for _, t := range targets {
+					if d := t.GetDistance(); d >= 0 && d <= maxDist {
+						kept = append(kept, t)
+					}
+				}
+				toSend = &pb.GetChangedTargetsResponse{
+					Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+						ChangedTargets: &pb.ChangedTargets{ChangedTargets: kept},
+					},
+				}
+			}
+		}
+		if err := stream.Send(toSend); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTarget, targetsByName map[string]*pb.OptimizedTarget, meta *pb.Metadata, maxDistance int32) {
 	if meta == nil {
 		return
 	}
@@ -742,11 +772,16 @@ func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTa
 			if _, seen := visited[revDep]; seen {
 				continue
 			}
+			nextDist := currentDist + 1
+			// Prune: if a maxDistance is set and the next distance exceeds it, skip.
+			if maxDistance > 0 && nextDist > maxDistance {
+				continue
+			}
 			visited[revDep] = struct{}{}
 			queue = append(queue, revDep)
 
 			if ct, ok := changedByName[revDep]; ok {
-				ct.Distance = currentDist + 1
+				ct.Distance = nextDist
 			}
 		}
 	}

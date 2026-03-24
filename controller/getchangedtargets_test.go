@@ -842,7 +842,7 @@ func TestComputeDistances(t *testing.T) {
 		"E": {ChangeType: pb.CHANGE_TYPE_INDIRECT},
 	}
 
-	computeDistances(zap.NewNop(), changedByName, targetsByName, meta)
+	computeDistances(zap.NewNop(), changedByName, targetsByName, meta, -1)
 
 	assert.Equal(t, int32(0), changedByName["A"].GetDistance(), "DIRECT target A should have distance 0")
 	assert.Equal(t, int32(1), changedByName["B"].GetDistance(), "B depends on DIRECT A, distance should be 1")
@@ -851,11 +851,252 @@ func TestComputeDistances(t *testing.T) {
 	assert.Equal(t, int32(-1), changedByName["E"].GetDistance(), "E has no path to any DIRECT target, distance should be -1")
 }
 
+func TestSendWithDistanceFilter_NilFilter(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+
+	responses := []*pb.GetChangedTargetsResponse{
+		{
+			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+				ChangedTargets: &pb.ChangedTargets{
+					ChangedTargets: []*pb.ChangedTarget{
+						{Distance: 0, ChangeType: pb.CHANGE_TYPE_DIRECT},
+						{Distance: 2, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+						{Distance: -1, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetChangedTargetsResponse_Metadata{Metadata: &pb.Metadata{}},
+		},
+	}
+
+	var sent []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsResponse, _ ...any) error {
+		sent = append(sent, r)
+		return nil
+	}).Times(2)
+
+	require.NoError(t, sendWithDistanceFilter(stream, responses, &pb.OutputConfig{}))
+
+	// All targets pass through unchanged (no compute_distances set)
+	require.Len(t, sent[0].GetChangedTargets().GetChangedTargets(), 3)
+}
+
+func TestSendWithDistanceFilter_DistanceZero(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+
+	targets := []*pb.ChangedTarget{
+		{Distance: 0, ChangeType: pb.CHANGE_TYPE_DIRECT},
+		{Distance: 1, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+		{Distance: 2, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+		{Distance: -1, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+	}
+	responses := []*pb.GetChangedTargetsResponse{
+		{
+			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+				ChangedTargets: &pb.ChangedTargets{ChangedTargets: targets},
+			},
+		},
+	}
+
+	var sent []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsResponse, _ ...any) error {
+		sent = append(sent, r)
+		return nil
+	}).Times(1)
+
+	// max_distance=0 means no limit; all targets pass through as-is
+	require.NoError(t, sendWithDistanceFilter(stream, responses, &pb.OutputConfig{ComputeDistances: true, MaxDistance: 0}))
+
+	kept := sent[0].GetChangedTargets().GetChangedTargets()
+	require.Len(t, kept, 4, "max_distance=0 means no limit, all targets should be kept")
+}
+
+func TestSendWithDistanceFilter_DistanceOne(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+
+	targets := []*pb.ChangedTarget{
+		{Distance: 0, ChangeType: pb.CHANGE_TYPE_DIRECT},
+		{Distance: 1, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+		{Distance: 2, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+		{Distance: -1, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+	}
+	responses := []*pb.GetChangedTargetsResponse{
+		{
+			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+				ChangedTargets: &pb.ChangedTargets{ChangedTargets: targets},
+			},
+		},
+	}
+
+	var sent []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsResponse, _ ...any) error {
+		sent = append(sent, r)
+		return nil
+	}).Times(1)
+
+	require.NoError(t, sendWithDistanceFilter(stream, responses, &pb.OutputConfig{ComputeDistances: true, MaxDistance: 1}))
+
+	kept := sent[0].GetChangedTargets().GetChangedTargets()
+	require.Len(t, kept, 2, "distance 0 and 1 should be kept; distance 2 and -1 filtered out")
+	for _, ct := range kept {
+		assert.True(t, ct.GetDistance() >= 0 && ct.GetDistance() <= 1,
+			"unexpected distance %d", ct.GetDistance())
+	}
+}
+
+func TestSendWithDistanceFilter_NegativeDistanceAlwaysFiltered(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+
+	responses := []*pb.GetChangedTargetsResponse{
+		{
+			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+				ChangedTargets: &pb.ChangedTargets{
+					ChangedTargets: []*pb.ChangedTarget{
+						{Distance: -1, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+					},
+				},
+			},
+		},
+	}
+
+	var sent []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsResponse, _ ...any) error {
+		sent = append(sent, r)
+		return nil
+	}).Times(1)
+
+	require.NoError(t, sendWithDistanceFilter(stream, responses, &pb.OutputConfig{ComputeDistances: true, MaxDistance: 100}))
+
+	assert.Empty(t, sent[0].GetChangedTargets().GetChangedTargets(), "distance -1 target should always be filtered")
+}
+
+func TestSendWithDistanceFilter_MetadataAlwaysForwarded(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+
+	meta := &pb.Metadata{TargetIdMapping: map[int32]string{1: "//app:T"}}
+	responses := []*pb.GetChangedTargetsResponse{
+		{
+			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+				ChangedTargets: &pb.ChangedTargets{
+					ChangedTargets: []*pb.ChangedTarget{
+						{Distance: 5, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetChangedTargetsResponse_Metadata{Metadata: meta},
+		},
+	}
+
+	var sent []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsResponse, _ ...any) error {
+		sent = append(sent, r)
+		return nil
+	}).Times(2)
+
+	require.NoError(t, sendWithDistanceFilter(stream, responses, &pb.OutputConfig{ComputeDistances: true, MaxDistance: 1}))
+
+	// First response: target filtered out (distance 5 > maxDist 1)
+	assert.Empty(t, sent[0].GetChangedTargets().GetChangedTargets())
+	// Second response: metadata always forwarded
+	assert.Equal(t, meta, sent[1].GetMetadata())
+}
+
+func TestSendWithDistanceFilter_SendError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+
+	responses := []*pb.GetChangedTargetsResponse{
+		{
+			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+				ChangedTargets: &pb.ChangedTargets{},
+			},
+		},
+	}
+
+	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send error"))
+
+	err := sendWithDistanceFilter(stream, responses, &pb.OutputConfig{})
+	assert.EqualError(t, err, "send error")
+}
+
+func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+
+	// Cached response: two targets at distances 0 and 2, plus metadata.
+	cachedChanged := &pb.GetChangedTargetsResponse{
+		Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+			ChangedTargets: &pb.ChangedTargets{
+				ChangedTargets: []*pb.ChangedTarget{
+					{Distance: 0, ChangeType: pb.CHANGE_TYPE_DIRECT},
+					{Distance: 2, ChangeType: pb.CHANGE_TYPE_INDIRECT},
+				},
+			},
+		},
+	}
+	cachedMeta := &pb.GetChangedTargetsResponse{
+		Item: &pb.GetChangedTargetsResponse_Metadata{Metadata: &pb.Metadata{}},
+	}
+	var buf bytes.Buffer
+	w := gogio.NewDelimitedWriter(&buf)
+	w.WriteMsg(cachedChanged)
+	w.WriteMsg(cachedMeta)
+	cachedBytes := buf.Bytes()
+
+	storagemock := storagemock.NewMockStorage(ctrl)
+	gomock.InOrder(
+		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil),
+		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil),
+		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cachedBytes))}, nil),
+	)
+
+	var sent []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsResponse, _ ...any) error {
+		sent = append(sent, r)
+		return nil
+	}).Times(2)
+
+	c := NewController(Params{
+		Logger:       zaptest.NewLogger(t),
+		Storage:      storagemock,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+	})
+
+	request := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		OutputConfig:   &pb.OutputConfig{ComputeDistances: true, MaxDistance: 1},
+	}
+
+	err := c.GetChangedTargets(request, stream)
+	require.NoError(t, err)
+
+	require.Len(t, sent, 2)
+	kept := sent[0].GetChangedTargets().GetChangedTargets()
+	require.Len(t, kept, 1, "only the distance-0 target should survive the filter")
+	assert.Equal(t, int32(0), kept[0].GetDistance())
+	// Metadata always forwarded
+	assert.NotNil(t, sent[1].GetMetadata())
+}
+
 func TestComputeDistances_NilMetadata(t *testing.T) {
 	changedByName := map[string]*pb.ChangedTarget{
 		"A": {ChangeType: pb.CHANGE_TYPE_DIRECT},
 	}
-	computeDistances(zap.NewNop(), changedByName, nil, nil)
+	computeDistances(zap.NewNop(), changedByName, nil, nil, -1)
 	assert.Equal(t, int32(0), changedByName["A"].GetDistance())
 }
 
