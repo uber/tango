@@ -59,13 +59,12 @@ func getReqsBase64(requests []*tangopb.Request) string {
 	if len(requests) == 0 {
 		return ""
 	}
-	encodedURLs := make([]string, 0, len(requests))
+	urls := make([]string, 0, len(requests))
 	for _, req := range requests {
-		encoded := base64.RawURLEncoding.EncodeToString([]byte(req.GetUrl()))
-		encodedURLs = append(encodedURLs, encoded)
+		urls = append(urls, req.GetUrl())
 	}
-	sort.Strings(encodedURLs)
-	return strings.Join(encodedURLs, "-")
+	sort.Strings(urls)
+	return base64.RawURLEncoding.EncodeToString([]byte(strings.Join(urls, "-")))
 }
 
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse

@@ -18,7 +18,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"testing"
 
 	"github.com/uber/tango/core/targethasher"
@@ -83,12 +82,7 @@ func TestGetTreehashCachePath(t *testing.T) {
 	}
 	got := GetTreehashCachePath(desc)
 	// Build expected with the same encoding semantics used by the implementation
-	encoded := []string{
-		base64.RawURLEncoding.EncodeToString([]byte(reqs[0].Url)),
-		base64.RawURLEncoding.EncodeToString([]byte(reqs[1].Url)),
-	}
-	sort.Strings(encoded)
-	want := filepath.Join("uber/tango", "deadbeef", encoded[0]+"-"+encoded[1]) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
+	want := filepath.Join("uber/tango", "deadbeef", base64.RawURLEncoding.EncodeToString([]byte("custom://foo/bar-github://org/repo/pull/1"))) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
 	if got != want {
 		t.Fatalf("GetTreehashCachePath(..) = %q, want %q", got, want)
 	}
@@ -114,7 +108,7 @@ func TestGetReqsBase64(t *testing.T) {
 		{
 			name: "multiple",
 			in:   []*pb.Request{{Url: "a"}, {Url: "b"}},
-			want: base64.RawURLEncoding.EncodeToString([]byte("a")) + "-" + base64.RawURLEncoding.EncodeToString([]byte("b")),
+			want: base64.RawURLEncoding.EncodeToString([]byte("a-b")),
 		},
 	}
 	for _, tt := range tests {
