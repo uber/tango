@@ -689,13 +689,6 @@ func transposeOptimizedTarget(
 	return dst
 }
 
-// computeDistances computes the shortest distance from any CHANGE_TYPE_DIRECT
-// target to each changed target via the reverse dependency graph using BFS.
-// DIRECT targets get distance 0, their reverse dependants get 1, and so on.
-// When maxDistance > 0, the BFS is pruned: targets at distance > maxDistance are never
-// enqueued, so they keep their initial distance of -1 (out-of-range). 0 means no limit.
-//
-// Targets unreachable from any DIRECT target keep the initial distance of -1.
 // sendWithDistanceFilter streams responses to the client, filtering changed targets to those
 // within outputConfig.MaxDistance from any CHANGE_TYPE_DIRECT target when compute_distances is true
 // and max_distance > 0. Metadata and other non-target responses are always forwarded.
@@ -730,6 +723,13 @@ func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, 
 	return nil
 }
 
+// computeDistances computes the shortest distance from any CHANGE_TYPE_DIRECT
+// target to each changed target via the reverse dependency graph using BFS.
+// DIRECT targets get distance 0, their reverse dependants get 1, and so on.
+// When maxDistance > 0, the BFS is pruned: targets at distance > maxDistance are never
+// enqueued, so they keep their initial distance of -1 (out-of-range). 0 means no limit.
+//
+// Targets unreachable from any DIRECT target keep the initial distance of -1.
 func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTarget, targetsByName map[string]*pb.OptimizedTarget, meta *pb.Metadata, maxDistance int32) {
 	if meta == nil {
 		return
