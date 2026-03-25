@@ -16,6 +16,7 @@ package common
 
 import (
 	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -110,7 +111,7 @@ func ResultToGetTargetGraphResponse(result targethasher.Result) ([]*tangopb.GetT
 
 		ot := &tangopb.OptimizedTarget{
 			Id:                 nameID,
-			Hash:               string(t.Hash),
+			Hash:               hex.EncodeToString(t.Hash),
 			DirectDependencies: depIDs,
 		}
 
