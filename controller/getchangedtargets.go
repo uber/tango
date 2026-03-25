@@ -177,7 +177,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			// one of the computations failed, if the other one has not
 			// completed yet, cancel it and wait for the result to come in,
 			// which would be a context cancelled result then
-			if jobs[res.order].err != nil {
+			if res.err != nil {
 				other := (res.order + 1) % 2
 				if !jobs[other].completed {
 					jobs[other].cancel()
