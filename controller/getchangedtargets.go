@@ -691,16 +691,16 @@ func transposeOptimizedTarget(
 
 // sendWithDistanceFilter streams responses to the client, filtering changed targets to those
 // within outputConfig.MaxDistance from any CHANGE_TYPE_DIRECT target when compute_distances is true
-// and max_distance > 0. Metadata and other non-target responses are always forwarded.
+// and max_distance >= 0. Metadata and other non-target responses are always forwarded.
 // Filtering and sending are combined into a single pass to avoid an intermediate allocation.
 func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, outputConfig *pb.OutputConfig) error {
-	maxDist := int32(0)
+	maxDist := int32(-1)
 	if outputConfig.GetComputeDistances() {
 		maxDist = outputConfig.GetMaxDistance()
 	}
 	for _, resp := range responses {
 		toSend := resp
-		if maxDist > 0 {
+		if maxDist >= 0 {
 			if ct, ok := resp.GetItem().(*pb.GetChangedTargetsResponse_ChangedTargets); ok {
 				targets := ct.ChangedTargets.GetChangedTargets()
 				kept := make([]*pb.ChangedTarget, 0, len(targets))
@@ -726,7 +726,7 @@ func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, 
 // computeDistances computes the shortest distance from any CHANGE_TYPE_DIRECT
 // target to each changed target via the reverse dependency graph using BFS.
 // DIRECT targets get distance 0, their reverse dependants get 1, and so on.
-// When maxDistance > 0, the BFS is pruned: targets at distance > maxDistance are never
+// When maxDistance >= 0, the BFS is pruned: targets at distance > maxDistance are never
 // enqueued, so they keep their initial distance of -1 (out-of-range). 0 means no limit.
 //
 // Targets unreachable from any DIRECT target keep the initial distance of -1.
@@ -774,7 +774,7 @@ func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTa
 			}
 			nextDist := currentDist + 1
 			// Prune: if a maxDistance is set and the next distance exceeds it, skip.
-			if maxDistance > 0 && nextDist > maxDistance {
+			if maxDistance >= 0 && nextDist > maxDistance {
 				continue
 			}
 			visited[revDep] = struct{}{}

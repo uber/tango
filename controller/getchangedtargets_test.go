@@ -908,11 +908,12 @@ func TestSendWithDistanceFilter_DistanceZero(t *testing.T) {
 		return nil
 	}).Times(1)
 
-	// max_distance=0 means no limit; all targets pass through as-is
+	// max_distance=0 means only DIRECT targets (distance 0); distance 1, 2, and -1 are filtered out
 	require.NoError(t, sendWithDistanceFilter(stream, responses, &pb.OutputConfig{ComputeDistances: true, MaxDistance: 0}))
 
 	kept := sent[0].GetChangedTargets().GetChangedTargets()
-	require.Len(t, kept, 4, "max_distance=0 means no limit, all targets should be kept")
+	require.Len(t, kept, 1, "max_distance=0 means only distance-0 targets should be kept")
+	assert.Equal(t, int32(0), kept[0].GetDistance())
 }
 
 func TestSendWithDistanceFilter_DistanceOne(t *testing.T) {
