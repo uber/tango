@@ -1002,6 +1002,7 @@ func TestSendWithDistanceFilter_MetadataAlwaysForwarded(t *testing.T) {
 		return nil
 	}).Times(2)
 
+	// max_distance=1 filters out the distance-5 target, metadata always forwarded
 	require.NoError(t, sendWithDistanceFilter(stream, responses, &pb.OutputConfig{ComputeDistances: true, MaxDistance: 1}))
 
 	// First response: target filtered out (distance 5 > maxDist 1)

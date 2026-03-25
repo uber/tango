@@ -43,13 +43,6 @@ enum ComputationStrategy {
     COMPUTATION_STRATEGY_NATIVE = 3;
 }
 
-// DistanceFilter constrains results to targets within a maximum BFS distance
-// from any CHANGE_TYPE_DIRECT target. When absent no distance filtering is applied.
-message DistanceFilter {
-    // Maximum BFS distance from a CHANGE_TYPE_DIRECT target to include.
-    // 0 means only DIRECT targets, 1 also includes their immediate reverse dependants, etc.
-    int32 max_distance = 1;
-}
 
 // OutputConfig controls what payload details are included in responses.
 // Some flags may be ignored depending on the specific API.
@@ -64,10 +57,9 @@ message OutputConfig {
     bool roots_only = 4;
     // Indicates if BFS distances from CHANGE_TYPE_DIRECT targets should be computed for each ChangedTarget
     bool compute_distances = 5;
-    // If set, only changed targets within max_distance from a CHANGE_TYPE_DIRECT target are returned.
-    // BFS distances are computed automatically when this field is set, even if compute_distances is false.
-    // Distance 0 means only DIRECT targets, 1 also includes targets that directly depend on a DIRECT target, etc.
-    DistanceFilter target_distances = 6;
+    // Maximum BFS distance from a CHANGE_TYPE_DIRECT target to include. Only considered when compute_distances is true.
+    // 0 (default) means no limit. Positive values limit BFS: 1 = only DIRECT + immediate reverse deps, etc.
+    int32 max_distance = 6;
 }
 
 // OptimizedTarget represents a build target in a compact format with stable numeric identifiers for
