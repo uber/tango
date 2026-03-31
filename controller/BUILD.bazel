@@ -4,9 +4,9 @@ go_library(
     name = "controller",
     srcs = [
         "controller.go",
-        "getchangedservices.go",
         "getchangedtargetgraph.go",
         "getchangedtargets.go",
+        "getchangedtargetsandedges.go",
         "gettargetgraph.go",
     ],
     importpath = "github.com/uber/tango/controller",
