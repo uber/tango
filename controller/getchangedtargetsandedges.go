@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/uber/tango/core/common"
+	"github.com/uber/tango/core/storage"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
@@ -45,6 +46,56 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	)
 
 	logger.Info("GetChangedTargetsAndEdges: Processing request")
+
+	// Try to serve from cache first.
+	cacheStart := time.Now()
+	treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
+	treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
+	if treehash1 != "" && treehash2 != "" {
+		cacheKey := common.GetComparedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
+		cachedReader, cacheErr := storage.NewChangedTargetsAndEdgesReader(ctx, c.storage, cacheKey)
+		if cacheErr != nil && !storage.IsNotFound(cacheErr) {
+			c.logger.Warn("GetChangedTargetsAndEdges: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
+		} else if cachedReader != nil {
+			var cached []*pb.GetChangedTargetsAndEdgesResponse
+			var readErr error
+			for {
+				var resp *pb.GetChangedTargetsAndEdgesResponse
+				resp, readErr = cachedReader.Read()
+				if readErr == io.EOF {
+					readErr = nil
+					break
+				}
+				if readErr != nil {
+					break
+				}
+				cached = append(cached, resp)
+			}
+			cachedReader.Close()
+
+			if readErr != nil {
+				c.logger.Warn("GetChangedTargetsAndEdges: Cached result is incomplete, recomputing", zap.Error(readErr))
+			} else {
+				cacheReadDuration := time.Since(cacheStart)
+				c.logger.Info("GetChangedTargetsAndEdges: Cache hit, streaming from storage",
+					zap.Duration("cache_read_duration", cacheReadDuration),
+				)
+				scope.Timer("cache_read_duration").Record(cacheReadDuration)
+				for _, resp := range cached {
+					if err := stream.Send(resp); err != nil {
+						c.logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
+						return fmt.Errorf("failed to send cached response: %w", err)
+					}
+				}
+				totalDuration := time.Since(start)
+				c.logger.Info("GetChangedTargetsAndEdges: Successfully streamed from cache",
+					zap.Duration("total_duration", totalDuration),
+				)
+				scope.Timer("total_duration").Record(totalDuration)
+				return nil
+			}
+		}
+	}
 
 	jobs := make([]*job, 2)
 	for i := 0; i < 2; i++ {
@@ -152,6 +203,18 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 		zap.Duration("compare_duration", compareDuration),
 	)
 	scope.Timer("compare_duration").Record(compareDuration)
+
+	// Cache the computed result concurrently so it doesn't block the stream send.
+	go func() {
+		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
+		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
+		if treehash1 != "" && treehash2 != "" {
+			cacheKey := common.GetComparedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
+			if writeErr := storage.WriteChangedTargetsAndEdgesStream(ctx, c.storage, cacheKey, responses); writeErr != nil {
+				c.logger.Warn("GetChangedTargetsAndEdges: Failed to cache result", zap.Error(writeErr))
+			}
+		}
+	}()
 
 	for _, resp := range responses {
 		if err := stream.Send(resp); err != nil {
