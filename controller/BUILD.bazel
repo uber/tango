@@ -27,6 +27,7 @@ go_test(
     name = "controller_test",
     srcs = [
         "getchangedtargets_test.go",
+        "getchangedtargetsandedges_test.go",
         "gettargetgraph_test.go",
     ],
     embed = [":controller"],

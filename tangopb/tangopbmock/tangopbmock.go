@@ -75,6 +75,63 @@ func (mr *MockTangoServiceGetChangedServicesYARPCServerMockRecorder) Send(arg0 a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Send", reflect.TypeOf((*MockTangoServiceGetChangedServicesYARPCServer)(nil).Send), varargs...)
 }
 
+// MockTangoServiceGetChangedTargetsAndEdgesYARPCServer is a mock of TangoServiceGetChangedTargetsAndEdgesYARPCServer interface.
+type MockTangoServiceGetChangedTargetsAndEdgesYARPCServer struct {
+	ctrl     *gomock.Controller
+	recorder *MockTangoServiceGetChangedTargetsAndEdgesYARPCServerMockRecorder
+	isgomock struct{}
+}
+
+// MockTangoServiceGetChangedTargetsAndEdgesYARPCServerMockRecorder is the mock recorder for MockTangoServiceGetChangedTargetsAndEdgesYARPCServer.
+type MockTangoServiceGetChangedTargetsAndEdgesYARPCServerMockRecorder struct {
+	mock *MockTangoServiceGetChangedTargetsAndEdgesYARPCServer
+}
+
+// NewMockTangoServiceGetChangedTargetsAndEdgesYARPCServer creates a new mock instance.
+func NewMockTangoServiceGetChangedTargetsAndEdgesYARPCServer(ctrl *gomock.Controller) *MockTangoServiceGetChangedTargetsAndEdgesYARPCServer {
+	mock := &MockTangoServiceGetChangedTargetsAndEdgesYARPCServer{ctrl: ctrl}
+	mock.recorder = &MockTangoServiceGetChangedTargetsAndEdgesYARPCServerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockTangoServiceGetChangedTargetsAndEdgesYARPCServer) EXPECT() *MockTangoServiceGetChangedTargetsAndEdgesYARPCServerMockRecorder {
+	return m.recorder
+}
+
+// Context mocks base method.
+func (m *MockTangoServiceGetChangedTargetsAndEdgesYARPCServer) Context() context.Context {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Context")
+	ret0, _ := ret[0].(context.Context)
+	return ret0
+}
+
+// Context indicates an expected call of Context.
+func (mr *MockTangoServiceGetChangedTargetsAndEdgesYARPCServerMockRecorder) Context() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Context", reflect.TypeOf((*MockTangoServiceGetChangedTargetsAndEdgesYARPCServer)(nil).Context))
+}
+
+// Send mocks base method.
+func (m *MockTangoServiceGetChangedTargetsAndEdgesYARPCServer) Send(arg0 *tangopb.GetChangedTargetsAndEdgesResponse, arg1 ...yarpc.StreamOption) error {
+	m.ctrl.T.Helper()
+	varargs := []any{arg0}
+	for _, a := range arg1 {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Send", varargs...)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Send indicates an expected call of Send.
+func (mr *MockTangoServiceGetChangedTargetsAndEdgesYARPCServerMockRecorder) Send(arg0 any, arg1 ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{arg0}, arg1...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Send", reflect.TypeOf((*MockTangoServiceGetChangedTargetsAndEdgesYARPCServer)(nil).Send), varargs...)
+}
+
 // MockTangoServiceGetChangedTargetGraphYARPCServer is a mock of TangoServiceGetChangedTargetGraphYARPCServer interface.
 type MockTangoServiceGetChangedTargetGraphYARPCServer struct {
 	ctrl     *gomock.Controller

@@ -1,9 +1,429 @@
+// Copyright (c) 2025 Uber Technologies, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package controller
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"time"
+
+	"github.com/uber/tango/core/common"
 	pb "github.com/uber/tango/tangopb"
+	"go.uber.org/multierr"
+	"go.uber.org/zap"
 )
 
+// edgeKey identifies an edge by source and dependency target names.
+type edgeKey struct{ source, dep string }
+
+// GetChangedTargetsAndEdges returns the changed targets and edges between two revisions.
 func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndEdgesRequest, stream pb.TangoServiceGetChangedTargetsAndEdgesYARPCServer) error {
+	if err := validateGetChangedTargetsAndEdgesRequest(request); err != nil {
+		c.logger.Error("GetChangedTargetsAndEdges: Invalid request", zap.Error(err))
+		return err
+	}
+	ctx := stream.Context()
+	start := time.Now()
+	scope := c.scope.SubScope("get_changed_targets_and_edges")
+	logger := c.logger.With(
+		zap.Any("first_revision", request.GetFirstRevision()),
+		zap.Any("second_revision", request.GetSecondRevision()),
+	)
+
+	logger.Info("GetChangedTargetsAndEdges: Processing request")
+
+	jobs := make([]*job, 2)
+	for i := 0; i < 2; i++ {
+		ctxNew, cancelNew := context.WithCancel(ctx)
+		defer cancelNew()
+		jobs[i] = &job{ctx: ctxNew, cancel: cancelNew}
+	}
+
+	type graphResult struct {
+		order  int
+		chunks []*pb.GetTargetGraphResponse
+		err    error
+	}
+	results := make(chan graphResult, len(jobs))
+	graphFetchStart := time.Now()
+
+	for i := 0; i < len(jobs); i++ {
+		i := i
+		go func(idx int) {
+			var revision *pb.BuildDescription
+			if idx == 0 {
+				revision = request.GetFirstRevision()
+			} else {
+				revision = request.GetSecondRevision()
+			}
+			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig())
+			if err != nil || graphReader == nil {
+				results <- graphResult{order: idx, err: err}
+				return
+			}
+			defer graphReader.Close()
+
+			var chunks []*pb.GetTargetGraphResponse
+			for {
+				chunk, err := graphReader.Read()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					results <- graphResult{order: idx, err: err}
+					return
+				}
+				chunks = append(chunks, chunk)
+			}
+			results <- graphResult{order: idx, chunks: chunks}
+		}(i)
+	}
+
+	for range jobs {
+		select {
+		case res := <-results:
+			jobs[res.order].graphStreamChunks = res.chunks
+			jobs[res.order].completed = true
+			jobs[res.order].err = res.err
+			if res.err == io.EOF {
+				jobs[res.order].err = nil
+			}
+			if res.chunks == nil && res.err == nil {
+				jobs[res.order].err = errors.New("no chunks returned")
+			}
+			if res.err != nil {
+				other := (res.order + 1) % 2
+				if !jobs[other].completed {
+					jobs[other].cancel()
+					jobs[other].cancelled = true
+				}
+			}
+		}
+	}
+
+	graphFetchDuration := time.Since(graphFetchStart)
+	c.logger.Info("GetChangedTargetsAndEdges: Both graphs fetched",
+		zap.Duration("graph_fetch_duration", graphFetchDuration),
+	)
+	scope.Timer("graph_fetch_duration").Record(graphFetchDuration)
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	var err error
+	for i, j := range jobs {
+		if j.err != nil {
+			if j.cancelled {
+				continue
+			}
+			err = multierr.Append(err, fmt.Errorf("failed to get target graph #%d: %w", i+1, j.err))
+		}
+	}
+	if err != nil {
+		return err
+	}
+
+	firstGraph := jobs[0].graphStreamChunks
+	secondGraph := jobs[1].graphStreamChunks
+
+	compareStart := time.Now()
+	responses, err := c.compareTargetGraphsAndEdges(ctx, firstGraph, secondGraph, request.GetOutputConfig())
+	if err != nil {
+		c.logger.Error("GetChangedTargetsAndEdges: Failed to compare target graphs", zap.Error(err))
+		return fmt.Errorf("failed to compare target graphs: %w", err)
+	}
+	compareDuration := time.Since(compareStart)
+	c.logger.Info("GetChangedTargetsAndEdges: Target graphs compared",
+		zap.Duration("compare_duration", compareDuration),
+	)
+	scope.Timer("compare_duration").Record(compareDuration)
+
+	for _, resp := range responses {
+		if err := stream.Send(resp); err != nil {
+			c.logger.Error("GetChangedTargetsAndEdges: Failed to send response", zap.Error(err))
+			return fmt.Errorf("failed to send response: %w", err)
+		}
+	}
+
+	totalDuration := time.Since(start)
+	c.logger.Info("GetChangedTargetsAndEdges: Successfully processed request",
+		zap.Duration("total_duration", totalDuration),
+	)
+	scope.Timer("total_duration").Record(totalDuration)
+	return nil
+}
+
+func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph, secondGraph []*pb.GetTargetGraphResponse, outputConfig *pb.OutputConfig) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
+	start := time.Now()
+	scope := c.scope.SubScope("compare_target_graphs_and_edges")
+	c.logger.Info("compareTargetGraphsAndEdges: Computing differences between target graphs")
+
+	// 1) Extract targets and metadata; index by canonical names.
+	firstTargetsByID, firstMetadata := getTargetsAndMetadata(firstGraph)
+	secondTargetsByID, secondMetadata := getTargetsAndMetadata(secondGraph)
+	firstByName := buildNameIndex(firstTargetsByID, firstMetadata)
+	secondByName := buildNameIndex(secondTargetsByID, secondMetadata)
+
+	sourceFileRuleTypeID := detectSourceFileID(secondMetadata)
+
+	// 2) Create canonical ID mappers shared across all output fields.
+	targetMapper := common.NewNameIDMapper()
+	ruleTypeMapper := common.NewNameIDMapper()
+	tagMapper := common.NewNameIDMapper()
+	attrNameMapper := common.NewNameIDMapper()
+	attrValMapper := common.NewNameIDMapper()
+	getTargetId := func(name string) int32 { return targetMapper.ID(name) }
+	getRuleTypeId := func(name string) int32 { return ruleTypeMapper.ID(name) }
+	getTagId := func(name string) int32 { return tagMapper.ID(name) }
+	getAttrNameId := func(name string) int32 { return attrNameMapper.ID(name) }
+	getAttrValId := func(name string) int32 { return attrValMapper.ID(name) }
+
+	changedByName := make(map[string]*pb.ChangedTarget)
+	changedSourceFileTargets := make(map[string]struct{})
+
+	// 3) Identify changed and added targets by iterating the second graph.
+	for name, newT := range secondByName {
+		oldT, exists := firstByName[name]
+		if !exists {
+			changedByName[name] = &pb.ChangedTarget{
+				ChangeType: pb.CHANGE_TYPE_NEW,
+				NewTarget: transposeOptimizedTarget(
+					newT,
+					secondMetadata.GetTargetIdMapping(),
+					secondMetadata.GetRuleTypeMapping(),
+					secondMetadata.GetTagMapping(),
+					secondMetadata.GetAttributeNameMapping(),
+					secondMetadata.GetAttributeStringValueMapping(),
+					getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+				),
+				Distance: getDefaultDistance(outputConfig, true),
+			}
+			continue
+		}
+		if oldT.GetHash() == newT.GetHash() {
+			continue
+		}
+		initial := pb.CHANGE_TYPE_INDIRECT
+		isSource := newT.GetRuleType() == sourceFileRuleTypeID && sourceFileRuleTypeID != -1
+		if isSource {
+			initial = pb.CHANGE_TYPE_DIRECT
+			changedSourceFileTargets[name] = struct{}{}
+		}
+		newTarget := transposeOptimizedTarget(
+			newT,
+			secondMetadata.GetTargetIdMapping(),
+			secondMetadata.GetRuleTypeMapping(),
+			secondMetadata.GetTagMapping(),
+			secondMetadata.GetAttributeNameMapping(),
+			secondMetadata.GetAttributeStringValueMapping(),
+			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+		)
+		oldTarget := transposeOptimizedTarget(
+			oldT,
+			firstMetadata.GetTargetIdMapping(),
+			firstMetadata.GetRuleTypeMapping(),
+			firstMetadata.GetTagMapping(),
+			firstMetadata.GetAttributeNameMapping(),
+			firstMetadata.GetAttributeStringValueMapping(),
+			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+		)
+		changedByName[name] = &pb.ChangedTarget{
+			ChangeType: initial,
+			OldTarget:  oldTarget,
+			NewTarget:  newTarget,
+			Distance:   getDefaultDistance(outputConfig, false),
+		}
+	}
+
+	// 4) Classify INDIRECT changes as DIRECT where appropriate.
+	for name, ct := range changedByName {
+		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
+			continue
+		}
+		newT := secondByName[name]
+		oldT := firstByName[name]
+
+		if hasDepInChangedSourceFileTargets(newT.GetDirectDependencies(), secondMetadata, changedSourceFileTargets) {
+			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
+			continue
+		}
+		depsChanged, err := dependenciesChanged(oldT, firstMetadata, newT, secondMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check dependencies changed: %w", err)
+		}
+		if depsChanged {
+			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
+			continue
+		}
+		attrsChanged, err := attributesChanged(oldT, firstMetadata, newT, secondMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check attributes changed: %w", err)
+		}
+		if attrsChanged {
+			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
+		}
+	}
+
+	// 5) Compute BFS distances if requested.
+	if outputConfig.GetComputeDistances() {
+		computeDistances(c.logger, changedByName, secondByName, secondMetadata, outputConfig.GetMaxDistance())
+	}
+
+	// 6) Collect changed targets.
+	changed := make([]*pb.ChangedTarget, 0, len(changedByName))
+	for _, ct := range changedByName {
+		changed = append(changed, ct)
+	}
+
+	// 7) Collect added targets (present in second but not first).
+	var addedTargets []*pb.OptimizedTarget
+	for name, newT := range secondByName {
+		if _, exists := firstByName[name]; !exists {
+			addedTargets = append(addedTargets, transposeOptimizedTarget(
+				newT,
+				secondMetadata.GetTargetIdMapping(),
+				secondMetadata.GetRuleTypeMapping(),
+				secondMetadata.GetTagMapping(),
+				secondMetadata.GetAttributeNameMapping(),
+				secondMetadata.GetAttributeStringValueMapping(),
+				getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+			))
+		}
+	}
+
+	// 8) Collect removed targets (present in first but not second).
+	var removedTargets []*pb.OptimizedTarget
+	for name, oldT := range firstByName {
+		if _, exists := secondByName[name]; !exists {
+			removedTargets = append(removedTargets, transposeOptimizedTarget(
+				oldT,
+				firstMetadata.GetTargetIdMapping(),
+				firstMetadata.GetRuleTypeMapping(),
+				firstMetadata.GetTagMapping(),
+				firstMetadata.GetAttributeNameMapping(),
+				firstMetadata.GetAttributeStringValueMapping(),
+				getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+			))
+		}
+	}
+
+	// 9) Compute new and removed edges.
+	firstEdges := buildEdgeSet(firstByName, firstMetadata)
+	secondEdges := buildEdgeSet(secondByName, secondMetadata)
+
+	var newEdges []*pb.Edge
+	for e := range secondEdges {
+		if _, exists := firstEdges[e]; !exists {
+			newEdges = append(newEdges, &pb.Edge{
+				SourceId: getTargetId(e.source),
+				TargetId: getTargetId(e.dep),
+			})
+		}
+	}
+	var removedEdges []*pb.Edge
+	for e := range firstEdges {
+		if _, exists := secondEdges[e]; !exists {
+			removedEdges = append(removedEdges, &pb.Edge{
+				SourceId: getTargetId(e.source),
+				TargetId: getTargetId(e.dep),
+			})
+		}
+	}
+
+	// 10) Build canonical metadata.
+	meta := &pb.Metadata{
+		TargetIdMapping:             targetMapper.Invert(),
+		RuleTypeMapping:             ruleTypeMapper.Invert(),
+		TagMapping:                  tagMapper.Invert(),
+		AttributeNameMapping:        attrNameMapper.Invert(),
+		AttributeStringValueMapping: attrValMapper.Invert(),
+	}
+
+	totalDuration := time.Since(start)
+	c.logger.Info("compareTargetGraphsAndEdges: Done",
+		zap.Duration("total_duration", totalDuration),
+	)
+	scope.Timer("total_duration").Record(totalDuration)
+
+	return []*pb.GetChangedTargetsAndEdgesResponse{
+		{
+			Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
+				ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{
+					ChangedTargets: changed,
+					AddedTargets:   addedTargets,
+					RemovedTargets: removedTargets,
+					NewEdges:       newEdges,
+					RemovedEdges:   removedEdges,
+				},
+			},
+		},
+		{
+			Item: &pb.GetChangedTargetsAndEdgesResponse_Metadata{
+				Metadata: meta,
+			},
+		},
+	}, nil
+}
+
+// buildEdgeSet constructs a set of (source, dep) name pairs from all direct dependencies in the graph.
+func buildEdgeSet(byName map[string]*pb.OptimizedTarget, meta *pb.Metadata) map[edgeKey]struct{} {
+	if meta == nil {
+		return nil
+	}
+	idMapping := meta.GetTargetIdMapping()
+	edges := make(map[edgeKey]struct{})
+	for source, t := range byName {
+		for _, depID := range t.GetDirectDependencies() {
+			depName := idMapping[depID]
+			if depName != "" {
+				edges[edgeKey{source: source, dep: depName}] = struct{}{}
+			}
+		}
+	}
+	return edges
+}
+
+func validateGetChangedTargetsAndEdgesRequest(request *pb.GetChangedTargetsAndEdgesRequest) error {
+	if request == nil {
+		return errors.New("request cannot be nil")
+	}
+	if request.GetFirstRevision() == nil {
+		return errors.New("first revision is required")
+	}
+	if request.GetSecondRevision() == nil {
+		return errors.New("second revision is required")
+	}
+	firstRevision := request.GetFirstRevision()
+	if firstRevision.GetRemote() == "" {
+		return errors.New("first revision remote is required")
+	}
+	if firstRevision.GetBaseSha() == "" {
+		return errors.New("first revision base_sha is required")
+	}
+	secondRevision := request.GetSecondRevision()
+	if secondRevision.GetRemote() == "" {
+		return errors.New("second revision remote is required")
+	}
+	if secondRevision.GetBaseSha() == "" {
+		return errors.New("second revision base_sha is required")
+	}
+	if firstRevision.GetRemote() != secondRevision.GetRemote() {
+		return errors.New("first and second revision must have the same remote")
+	}
 	return nil
 }
