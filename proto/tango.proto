@@ -238,6 +238,7 @@ message ChangedTargetsAndEdges {
     repeated OptimizedTarget added_targets = 2;
     repeated OptimizedTarget removed_targets = 3;
     repeated Edge new_edges = 4;
+    repeated Edge removed_edges = 5;
 }
 
 // Tango is the service for analyzing build target graphs and services. It is an abstraction over the underlying build system like Bazel,
