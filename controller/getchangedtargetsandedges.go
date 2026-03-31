@@ -195,24 +195,37 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 
 	changedByName := make(map[string]*pb.ChangedTarget)
 	changedSourceFileTargets := make(map[string]struct{})
+	var addedTargets []*pb.OptimizedTarget
+	secondIDMapping := secondMetadata.GetTargetIdMapping()
+	secondEdges := make(map[edgeKey]struct{})
 
-	// 3) Identify changed and added targets by iterating the second graph.
+	// 3) Single pass over second graph: identify changed/new/added targets and build second edge set.
 	for name, newT := range secondByName {
+		// Build second edge set inline to avoid a separate iteration.
+		for _, depID := range newT.GetDirectDependencies() {
+			if depName := secondIDMapping[depID]; depName != "" {
+				secondEdges[edgeKey{source: name, dep: depName}] = struct{}{}
+			}
+		}
+
 		oldT, exists := firstByName[name]
 		if !exists {
+			// Transpose once; share the pointer between changedByName and addedTargets.
+			transposed := transposeOptimizedTarget(
+				newT,
+				secondIDMapping,
+				secondMetadata.GetRuleTypeMapping(),
+				secondMetadata.GetTagMapping(),
+				secondMetadata.GetAttributeNameMapping(),
+				secondMetadata.GetAttributeStringValueMapping(),
+				getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+			)
 			changedByName[name] = &pb.ChangedTarget{
 				ChangeType: pb.CHANGE_TYPE_NEW,
-				NewTarget: transposeOptimizedTarget(
-					newT,
-					secondMetadata.GetTargetIdMapping(),
-					secondMetadata.GetRuleTypeMapping(),
-					secondMetadata.GetTagMapping(),
-					secondMetadata.GetAttributeNameMapping(),
-					secondMetadata.GetAttributeStringValueMapping(),
-					getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
-				),
-				Distance: getDefaultDistance(outputConfig, true),
+				NewTarget:  transposed,
+				Distance:   getDefaultDistance(outputConfig, true),
 			}
+			addedTargets = append(addedTargets, transposed)
 			continue
 		}
 		if oldT.GetHash() == newT.GetHash() {
@@ -226,7 +239,7 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 		}
 		newTarget := transposeOptimizedTarget(
 			newT,
-			secondMetadata.GetTargetIdMapping(),
+			secondIDMapping,
 			secondMetadata.GetRuleTypeMapping(),
 			secondMetadata.GetTagMapping(),
 			secondMetadata.GetAttributeNameMapping(),
@@ -290,29 +303,21 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 		changed = append(changed, ct)
 	}
 
-	// 7) Collect added targets (present in second but not first).
-	var addedTargets []*pb.OptimizedTarget
-	for name, newT := range secondByName {
-		if _, exists := firstByName[name]; !exists {
-			addedTargets = append(addedTargets, transposeOptimizedTarget(
-				newT,
-				secondMetadata.GetTargetIdMapping(),
-				secondMetadata.GetRuleTypeMapping(),
-				secondMetadata.GetTagMapping(),
-				secondMetadata.GetAttributeNameMapping(),
-				secondMetadata.GetAttributeStringValueMapping(),
-				getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
-			))
-		}
-	}
-
-	// 8) Collect removed targets (present in first but not second).
+	// 7) Single pass over first graph: collect removed targets and build first edge set.
+	firstIDMapping := firstMetadata.GetTargetIdMapping()
+	firstEdges := make(map[edgeKey]struct{})
 	var removedTargets []*pb.OptimizedTarget
 	for name, oldT := range firstByName {
+		// Build first edge set inline to avoid a separate iteration.
+		for _, depID := range oldT.GetDirectDependencies() {
+			if depName := firstIDMapping[depID]; depName != "" {
+				firstEdges[edgeKey{source: name, dep: depName}] = struct{}{}
+			}
+		}
 		if _, exists := secondByName[name]; !exists {
 			removedTargets = append(removedTargets, transposeOptimizedTarget(
 				oldT,
-				firstMetadata.GetTargetIdMapping(),
+				firstIDMapping,
 				firstMetadata.GetRuleTypeMapping(),
 				firstMetadata.GetTagMapping(),
 				firstMetadata.GetAttributeNameMapping(),
@@ -322,10 +327,7 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 		}
 	}
 
-	// 9) Compute new and removed edges.
-	firstEdges := buildEdgeSet(firstByName, firstMetadata)
-	secondEdges := buildEdgeSet(secondByName, secondMetadata)
-
+	// 8) Compute new and removed edges from the sets built above.
 	var newEdges []*pb.Edge
 	for e := range secondEdges {
 		if _, exists := firstEdges[e]; !exists {
