@@ -19,10 +19,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
-
-	"io"
+	"time"
 
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
@@ -140,8 +140,9 @@ func TestGetChangedTargetsAndEdges_GetGraphError(t *testing.T) {
 	stream.EXPECT().Context().Return(context.Background())
 
 	store := storagemock.NewMockStorage(ctrl)
+	// 2 treehash pre-reads (cache bypass check) + 2 getGraph treehash lookups = 4 total.
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).
-		Return(nil, errors.New("storage error")).Times(2)
+		Return(nil, errors.New("storage error")).Times(4)
 
 	c := NewController(Params{
 		Logger:       zap.NewNop(),
@@ -169,11 +170,21 @@ func TestGetChangedTargetsAndEdges_StreamSendError(t *testing.T) {
 			gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
 				Item: &pb.GetTargetGraphResponse_Metadata{Metadata: &pb.Metadata{}},
 			})
-			if strings.Contains(req.Key, "sha1") || strings.Contains(req.Key, "sha2") {
+			switch {
+			case strings.Contains(req.Key, "compared-targets-and-edges"):
+				return nil, &storage.NotFoundError{Path: req.Key}
+			case strings.Contains(req.Key, "sha1") || strings.Contains(req.Key, "sha2"):
 				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("th")))}, nil
+			default:
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil
 			}
-			return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil
 		}).AnyTimes()
+
+	putDone := make(chan struct{}, 1)
+	store.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
+		putDone <- struct{}{}
+		return nil
+	})
 
 	c := NewController(Params{
 		Logger:       zaptest.NewLogger(t),
@@ -186,6 +197,12 @@ func TestGetChangedTargetsAndEdges_StreamSendError(t *testing.T) {
 		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
 	}, stream)
 	assert.Error(t, err)
+
+	select {
+	case <-putDone:
+	case <-time.After(time.Second):
+		assert.Fail(t, "cache write goroutine did not complete in time")
+	}
 }
 
 // --- compareTargetGraphsAndEdges tests ---
@@ -712,9 +729,12 @@ func TestGetChangedTargetsAndEdges_EndToEnd(t *testing.T) {
 	})
 	graph2Bytes := buf2.Bytes()
 
+	putDone := make(chan struct{}, 1)
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
 			switch {
+			case strings.Contains(req.Key, "compared-targets-and-edges"):
+				return nil, &storage.NotFoundError{Path: req.Key}
 			case strings.Contains(req.Key, "sha1"):
 				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
 			case strings.Contains(req.Key, "sha2"):
@@ -726,7 +746,12 @@ func TestGetChangedTargetsAndEdges_EndToEnd(t *testing.T) {
 			default:
 				return nil, fmt.Errorf("unexpected key: %s", req.Key)
 			}
-		}).Times(4)
+		}).AnyTimes()
+	store.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ storage.UploadRequest) error {
+			putDone <- struct{}{}
+			return nil
+		})
 
 	c := NewController(Params{
 		Logger:       zaptest.NewLogger(t),
@@ -739,6 +764,12 @@ func TestGetChangedTargetsAndEdges_EndToEnd(t *testing.T) {
 		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
 	}, stream)
 	require.NoError(t, err)
+
+	select {
+	case <-putDone:
+	case <-time.After(time.Second):
+		assert.Fail(t, "timed out waiting for cache write")
+	}
 
 	require.Len(t, sentResponses, 2)
 	cte := sentResponses[0].GetChangedTargetsAndEdges()
@@ -780,4 +811,227 @@ func edgesByName(edges []*pb.Edge, meta *pb.Metadata) [][2]string {
 		})
 	}
 	return out
+}
+
+// --- Cache tests ---
+
+func TestGetChangedTargetsAndEdges_CacheHit(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsAndEdgesYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+
+	// Build a cached response with one ChangedTargetsAndEdges message and one Metadata message.
+	cachedCTE := &pb.GetChangedTargetsAndEdgesResponse{
+		Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
+			ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{},
+		},
+	}
+	cachedMeta := &pb.GetChangedTargetsAndEdgesResponse{
+		Item: &pb.GetChangedTargetsAndEdgesResponse_Metadata{
+			Metadata: &pb.Metadata{},
+		},
+	}
+	var buf bytes.Buffer
+	w := gogio.NewDelimitedWriter(&buf)
+	w.WriteMsg(cachedCTE)
+	w.WriteMsg(cachedMeta)
+	cachedBytes := buf.Bytes()
+
+	store := storagemock.NewMockStorage(ctrl)
+	// First two Gets resolve treehashes; third fetches the cached comparison result.
+	gomock.InOrder(
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cachedBytes))}, nil),
+	)
+
+	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
+
+	c := NewController(Params{
+		Logger:       zaptest.NewLogger(t),
+		Storage:      store,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+	})
+
+	err := c.GetChangedTargetsAndEdges(&pb.GetChangedTargetsAndEdgesRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+	}, stream)
+	require.NoError(t, err)
+}
+
+func TestGetChangedTargetsAndEdges_CacheCorrupt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsAndEdgesYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+
+	// Build two valid per-revision graphs (empty metadata) for the fallthrough compute.
+	var emptyGraph bytes.Buffer
+	gogio.NewDelimitedWriter(&emptyGraph).WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{Metadata: &pb.Metadata{}},
+	})
+	emptyGraphBytes := emptyGraph.Bytes()
+
+	// Corrupt cache blob: a valid varint length followed by truncated body.
+	// This causes gogio.ReadMsg to return a non-EOF error mid-read.
+	corruptBytes := []byte{0x80, 0x80, 0x80, 0x80, 0x80} // oversized varint → read error
+
+	store := storagemock.NewMockStorage(ctrl)
+	store.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
+			switch {
+			case strings.Contains(req.Key, "compared-targets-and-edges"):
+				// Return corrupt data so the cache falls through to compute.
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(corruptBytes))}, nil
+			case strings.Contains(req.Key, "sha1") || strings.Contains(req.Key, "sha2"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("th")))}, nil
+			default:
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(emptyGraphBytes))}, nil
+			}
+		}).AnyTimes()
+
+	// After recompute, cache write is attempted in a goroutine.
+	putDone := make(chan struct{}, 1)
+	store.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
+		putDone <- struct{}{}
+		return nil
+	})
+
+	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
+
+	c := NewController(Params{
+		Logger:       zaptest.NewLogger(t),
+		Storage:      store,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+	})
+
+	err := c.GetChangedTargetsAndEdges(&pb.GetChangedTargetsAndEdgesRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+	}, stream)
+	require.NoError(t, err)
+
+	select {
+	case <-putDone:
+	case <-time.After(time.Second):
+		assert.Fail(t, "cache write goroutine did not complete in time")
+	}
+}
+
+func TestGetChangedTargetsAndEdges_CacheWriteAfterCompute(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsAndEdgesYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+
+	var sentResponses []*pb.GetChangedTargetsAndEdgesResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsAndEdgesResponse, _ ...any) error {
+		sentResponses = append(sentResponses, resp)
+		return nil
+	}).Times(2)
+
+	// Build first revision graph: A and B with A->B edge.
+	var buf1 bytes.Buffer
+	w1 := gogio.NewDelimitedWriter(&buf1)
+	w1.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{
+			Targets: &pb.OptimizedTargets{
+				Targets: []*pb.OptimizedTarget{
+					{Id: 1, Hash: "h1", DirectDependencies: []int32{2}},
+					{Id: 2, Hash: "h2"},
+				},
+			},
+		},
+	})
+	w1.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{
+			Metadata: &pb.Metadata{
+				TargetIdMapping: map[int32]string{1: "//app:A", 2: "//app:B"},
+			},
+		},
+	})
+	graph1Bytes := buf1.Bytes()
+
+	// Build second revision graph: A hash changed, B->C edge added.
+	var buf2 bytes.Buffer
+	w2 := gogio.NewDelimitedWriter(&buf2)
+	w2.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{
+			Targets: &pb.OptimizedTargets{
+				Targets: []*pb.OptimizedTarget{
+					{Id: 10, Hash: "h1-new", DirectDependencies: []int32{20}},
+					{Id: 20, Hash: "h2"},
+				},
+			},
+		},
+	})
+	w2.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{
+			Metadata: &pb.Metadata{
+				TargetIdMapping: map[int32]string{10: "//app:A", 20: "//app:B"},
+			},
+		},
+	})
+	graph2Bytes := buf2.Bytes()
+
+	store := storagemock.NewMockStorage(ctrl)
+	store.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
+			switch {
+			case strings.Contains(req.Key, "compared-targets-and-edges"):
+				return nil, &storage.NotFoundError{Path: req.Key}
+			case strings.Contains(req.Key, "sha1"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
+			case strings.Contains(req.Key, "sha2"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
+			case strings.Contains(req.Key, "treehash1"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph1Bytes))}, nil
+			case strings.Contains(req.Key, "treehash2"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph2Bytes))}, nil
+			default:
+				return nil, fmt.Errorf("unexpected key: %s", req.Key)
+			}
+		}).AnyTimes()
+
+	putDone := make(chan struct{}, 1)
+	store.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
+		putDone <- struct{}{}
+		return nil
+	})
+
+	c := NewController(Params{
+		Logger:       zaptest.NewLogger(t),
+		Storage:      store,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+	})
+
+	err := c.GetChangedTargetsAndEdges(&pb.GetChangedTargetsAndEdgesRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+	}, stream)
+	require.NoError(t, err)
+
+	select {
+	case <-putDone:
+	case <-time.After(time.Second):
+		assert.Fail(t, "cache write goroutine did not complete in time")
+	}
+
+	require.Len(t, sentResponses, 2)
+	cte := sentResponses[0].GetChangedTargetsAndEdges()
+	meta := sentResponses[1].GetMetadata()
+	require.NotNil(t, cte)
+	require.NotNil(t, meta)
+
+	// A's hash changed but dep names are the same (still //app:B) and no attrs → INDIRECT
+	var foundA bool
+	for _, ct := range cte.GetChangedTargets() {
+		if meta.GetTargetIdMapping()[ct.GetNewTarget().GetId()] == "//app:A" {
+			foundA = true
+			assert.Equal(t, pb.CHANGE_TYPE_INDIRECT, ct.GetChangeType())
+		}
+	}
+	assert.True(t, foundA, "A must appear in changed_targets")
 }
