@@ -33,7 +33,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8081", "server address (gRPC inbound)")
-	method := flag.String("method", "get-target-graph", "method to call: get-target-graph, get-changed-targets")
+	method := flag.String("method", "get-target-graph", "method to call: get-target-graph, get-changed-targets, get-changed-targets-and-edges")
 	remote := flag.String("remote", "", "build description remote")
 	baseSHA := flag.String("base-sha", "", "build description base sha")
 	reqURLs := flag.String("request-urls", "", "comma-separated change request URLs")
@@ -131,6 +131,47 @@ func main() {
 			logger.Errorf("Error: %v", err)
 			os.Exit(1)
 		}
+	case "get-changed-targets-and-edges":
+		if *baseSHA == "" && *newBaseSHA == "" {
+			logger.Errorf("Error: both baseSHA and newBaseSHA cannot be empty")
+			os.Exit(1)
+		}
+		var requests []*pb.Request
+		if trimmed := strings.TrimSpace(*reqURLs); trimmed != "" {
+			for _, u := range strings.Split(trimmed, ",") {
+				if v := strings.TrimSpace(u); v != "" {
+					requests = append(requests, &pb.Request{Url: v})
+				}
+			}
+		}
+		var newRequests []*pb.Request
+		if trimmed := strings.TrimSpace(*newRequestURLs); trimmed != "" {
+			for _, u := range strings.Split(trimmed, ",") {
+				if v := strings.TrimSpace(u); v != "" {
+					newRequests = append(newRequests, &pb.Request{Url: v})
+				}
+			}
+		}
+		req := &pb.GetChangedTargetsAndEdgesRequest{
+			FirstRevision: &pb.BuildDescription{
+				Remote:   *remote,
+				BaseSha:  *baseSHA,
+				Requests: requests,
+			},
+			SecondRevision: &pb.BuildDescription{
+				Remote:   *remote,
+				BaseSha:  *newBaseSHA,
+				Requests: newRequests,
+			},
+			OutputConfig: &pb.OutputConfig{
+				ComputeDistances: *computeDistances,
+				MaxDistance:      int32(*maxDistance),
+			},
+		}
+		if err := callGetChangedTargetsAndEdges(ctx, client, logger, req); err != nil {
+			logger.Errorf("Error: %v", err)
+			os.Exit(1)
+		}
 	default:
 		logger.Errorf("unsupported method: %s", *method)
 		os.Exit(1)
@@ -215,6 +256,52 @@ func callGetChangedTargets(ctx context.Context, client pb.TangoYARPCClient, logg
 			}
 			fmt.Println(string(j))
 		case *pb.GetChangedTargetsResponse_Metadata:
+			logger.Info("Metadata:")
+			j, err := json.Marshal(x.Metadata)
+			if err != nil {
+				return fmt.Errorf("marshal metadata: %w", err)
+			}
+			fmt.Println(string(j))
+		}
+	}
+	return nil
+}
+
+func callGetChangedTargetsAndEdges(ctx context.Context, client pb.TangoYARPCClient, logger *zap.SugaredLogger, req *pb.GetChangedTargetsAndEdgesRequest) error {
+	stream, err := client.GetChangedTargetsAndEdges(ctx, req)
+	if err != nil {
+		return fmt.Errorf("GetChangedTargetsAndEdges: %w", err)
+	}
+	defer stream.CloseSend()
+
+	for {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("recv: %w", err)
+		}
+		if msg == nil {
+			logger.Warn("Received empty message")
+			return nil
+		}
+		if msg.Item == nil {
+			logger.Warn("Received empty item")
+			return nil
+		}
+		switch x := msg.Item.(type) {
+		case *pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges:
+			cte := x.ChangedTargetsAndEdges
+			logger.Infof("Received changed targets and edges: %d changed, %d added, %d removed targets, %d new edges, %d removed edges",
+				len(cte.GetChangedTargets()), len(cte.GetAddedTargets()), len(cte.GetRemovedTargets()),
+				len(cte.GetNewEdges()), len(cte.GetRemovedEdges()))
+			j, err := json.Marshal(cte)
+			if err != nil {
+				return fmt.Errorf("marshal changed targets and edges: %w", err)
+			}
+			fmt.Println(string(j))
+		case *pb.GetChangedTargetsAndEdgesResponse_Metadata:
 			logger.Info("Metadata:")
 			j, err := json.Marshal(x.Metadata)
 			if err != nil {
