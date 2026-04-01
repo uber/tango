@@ -81,7 +81,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 					zap.Duration("cache_read_duration", cacheReadDuration),
 				)
 				scope.Counter("cache_hit").Inc(1)
-			scope.Timer("cache_read_duration").Record(cacheReadDuration)
+				scope.Timer("cache_read_duration").Record(cacheReadDuration)
 				for _, resp := range cached {
 					if err := stream.Send(resp); err != nil {
 						c.logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
