@@ -134,9 +134,9 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 	assert.Equal(t, filepath.Join("compared-targets", "uber/tango", "abc", "def"), got)
 }
 
-func TestGetComparedTargetsAndEdgesCachePath(t *testing.T) {
+func TestGetChangedTargetsAndEdgesCachePath(t *testing.T) {
 	t.Parallel()
-	got := GetComparedTargetsAndEdgesCachePath("git@github:uber/tango", "abc", "def")
+	got := GetChangedTargetsAndEdgesCachePath("git@github:uber/tango", "abc", "def")
 	assert.Equal(t, filepath.Join("compared-targets-and-edges", "uber/tango", "abc", "def"), got)
 
 	// Must be distinct from the GetChangedTargets cache path.
