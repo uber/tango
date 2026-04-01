@@ -20,9 +20,13 @@ go_library(
 
 go_test(
     name = "storage_test",
-    srcs = ["storage_test.go"],
+    srcs = [
+        "changedtargetsandedgesreader_test.go",
+        "storage_test.go",
+    ],
     embed = [":storage"],
     deps = [
+        "//tangopb",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
     ],
