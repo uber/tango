@@ -25,23 +25,26 @@ import (
 )
 
 type nativeGraphRunner struct {
-	bazel  bazel.Bazel
-	git    git.Interface
-	config config.RepositoryConfig
+	bazel              bazel.Bazel
+	git                git.Interface
+	config             config.RepositoryConfig
+	extraExcludedFiles []string
 }
 
 type NativeGraphRunnerParams struct {
-	BazelClient bazel.Bazel
-	GitClient   git.Interface
-	Config      config.RepositoryConfig
+	BazelClient        bazel.Bazel
+	GitClient          git.Interface
+	Config             config.RepositoryConfig
+	ExtraExcludedFiles []string
 }
 
 // graph runner takes in a bazel query request and computes the graph
 func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
 	return &nativeGraphRunner{
-		bazel:  p.BazelClient,
-		git:    p.GitClient,
-		config: p.Config,
+		bazel:              p.BazelClient,
+		git:                p.GitClient,
+		config:             p.Config,
+		extraExcludedFiles: p.ExtraExcludedFiles,
 	}
 }
 
@@ -70,7 +73,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	hashConfig := targethasher.HashConfig{
 		KnownSourceHashes: knownSourceHashes,
 		FullHashRepos:     g.config.FullHashRepos,
-		ExcludedFiles:     g.config.ExcludedFiles,
+		ExcludedFiles:     append(g.config.ExcludedFiles, g.extraExcludedFiles...),
 		UseBzlmod:         g.config.BzlmodEnabled,
 	}
 

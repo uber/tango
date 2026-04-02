@@ -60,6 +60,8 @@ message OutputConfig {
     // Maximum BFS distance from a CHANGE_TYPE_DIRECT target to include. Only considered when compute_distances is true.
     // 0 (default) means no limit. Positive values limit BFS: 1 = only DIRECT + immediate reverse deps, etc.
     int32 max_distance = 6;
+    // Regex patterns to exclude from source file hashing
+    repeated string exclude_files_regex = 7;
 }
 
 // OptimizedTarget represents a build target in a compact format with stable numeric identifiers for
@@ -170,24 +172,6 @@ message GetChangedTargetsResponse {
     }
 }
 
-// GetChangedServicesRequest is the request for the GetChangedServices method, contains the state of the Storage to analyze.
-// Changed services between base and target revisions are returned.
-message GetChangedServicesRequest {
-    // The base revision spec
-    BuildDescription first_revision = 1;
-    // The target revision spec
-    BuildDescription second_revision = 2;
-    // Controls what payload details are included in responses; used to reduce payload size when full attribute set is not needed
-    OutputConfig output_config = 3;
-}
-
-// ChangedService represents a changed service and its associated Bazel targets.
-message GetChangedServicesResponse {
-    // The name of the changed service
-    string service_name = 1;
-    // Literal full names of the changed targets belonging to the service
-    repeated string target_names = 2;
-}
 
 // GetChangedTargetGraphRequest is the request for the GetChangedTargetGraph method, contains the state of the Storage to analyze.
 // Changed target graph between base and target revisions are returned.
