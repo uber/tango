@@ -24,4 +24,5 @@ type RepositoryConfig struct {
 	BzlmodEnabled          bool     `yaml:"bzlmod_enabled"`
 	BazelCommand           string   `yaml:"bazel_command"`
 	QueryTimeout           int64    `yaml:"query_timeout"` // in seconds
+	BazelExtraArgs         []string `yaml:"bazel_extra_args"`
 }
