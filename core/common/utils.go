@@ -56,10 +56,10 @@ func GetComparedTargetsCachePath(remote, treehash1, treehash2 string) string {
 	return filepath.Join("compared-targets", ToShortRemote(remote), treehash1, treehash2)
 }
 
-// GetComparedTargetsAndEdgesCachePath returns the cache path for a GetChangedTargetsAndEdges result.
+// GetChangedTargetsAndEdgesCachePath returns the cache path for a GetChangedTargetsAndEdges result.
 // treehash1 and treehash2 are the resolved treehashes of the first and second revisions.
 // remote is the shared git remote for both revisions.
-func GetComparedTargetsAndEdgesCachePath(remote, treehash1, treehash2 string) string {
+func GetChangedTargetsAndEdgesCachePath(remote, treehash1, treehash2 string) string {
 	return filepath.Join("compared-targets-and-edges", ToShortRemote(remote), treehash1, treehash2)
 }
 

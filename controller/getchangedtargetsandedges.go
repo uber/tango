@@ -52,7 +52,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
 	treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
 	if treehash1 != "" && treehash2 != "" {
-		cacheKey := common.GetComparedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
+		cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
 		cachedReader, cacheErr := storage.NewChangedTargetsAndEdgesReader(ctx, c.storage, cacheKey)
 		if cacheErr != nil && !storage.IsNotFound(cacheErr) {
 			c.logger.Warn("GetChangedTargetsAndEdges: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
@@ -80,6 +80,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 				c.logger.Info("GetChangedTargetsAndEdges: Cache hit, streaming from storage",
 					zap.Duration("cache_read_duration", cacheReadDuration),
 				)
+				scope.Counter("cache_hit").Inc(1)
 				scope.Timer("cache_read_duration").Record(cacheReadDuration)
 				for _, resp := range cached {
 					if err := stream.Send(resp); err != nil {
@@ -209,7 +210,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
 		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
+			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
 			if writeErr := storage.WriteChangedTargetsAndEdgesStream(ctx, c.storage, cacheKey, responses); writeErr != nil {
 				c.logger.Warn("GetChangedTargetsAndEdges: Failed to cache result", zap.Error(writeErr))
 			}

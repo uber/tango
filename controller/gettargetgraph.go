@@ -135,6 +135,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 		zap.Duration("total_duration", time.Since(start)),
 	)
 	scope := c.scope.SubScope("get_graph")
+	scope.Counter("cache_hit").Inc(1)
 	scope.Timer("storage_duration").Record(time.Since(storageStart))
 	scope.Timer("total_duration").Record(time.Since(start))
 	return graphReader, nil
