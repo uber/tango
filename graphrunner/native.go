@@ -50,6 +50,10 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	if g.config.ExcludeExternalTargets {
 		query = "deps(//...:all-targets)"
 	}
+	additionalArgs := append(
+		[]string{"--order_output=no", "--proto:locations", "--noproto:default_values"},
+		g.config.BazelExtraArgs...,
+	)
 	queryResult, err := g.bazel.ExecuteQuery(ctx, &bazel.QueryRequest{
 		Query: query,
 		// --order_output=no will make Bazel execute query faster
@@ -58,7 +62,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		// proto blob smaller and serialization/deserialization faster
 		// TODO: pass in --enable_workspace or --enable_bzlmod based on the config
 
-		AdditionalArgs: []string{"--order_output=no", "--proto:locations", "--noproto:default_values"},
+		AdditionalArgs: additionalArgs,
 	})
 	if err != nil {
 		return targethasher.EmptyResult(), err
