@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	git "github.com/uber/tango/core/git"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -207,4 +208,34 @@ func (m *MockInterface) SubmoduleUpdate(ctx context.Context) error {
 func (mr *MockInterfaceMockRecorder) SubmoduleUpdate(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SubmoduleUpdate", reflect.TypeOf((*MockInterface)(nil).SubmoduleUpdate), ctx)
+}
+
+// DiffWithStatus mocks base method.
+func (m *MockInterface) DiffWithStatus(ctx context.Context, baseRef, targetRef string) ([]git.DiffEntry, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DiffWithStatus", ctx, baseRef, targetRef)
+	ret0, _ := ret[0].([]git.DiffEntry)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DiffWithStatus indicates an expected call of DiffWithStatus.
+func (mr *MockInterfaceMockRecorder) DiffWithStatus(ctx, baseRef, targetRef any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DiffWithStatus", reflect.TypeOf((*MockInterface)(nil).DiffWithStatus), ctx, baseRef, targetRef)
+}
+
+// GetCommitTimeSecond mocks base method.
+func (m *MockInterface) GetCommitTimeSecond(ctx context.Context, ref string) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCommitTimeSecond", ctx, ref)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCommitTimeSecond indicates an expected call of GetCommitTimeSecond.
+func (mr *MockInterfaceMockRecorder) GetCommitTimeSecond(ctx, ref any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCommitTimeSecond", reflect.TypeOf((*MockInterface)(nil).GetCommitTimeSecond), ctx, ref)
 }

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync"
 	"os"
 
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/git"
+	"github.com/uber/tango/core/itg"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/workspace"
@@ -39,29 +41,32 @@ type nativeOrchestrator struct {
 	repoManager repomanager.RepoManager
 	logger      *zap.SugaredLogger
 	// gitFactory allows injecting a git.Interface constructor for testing
-	gitFactory     func(directory string) git.Interface
-	graphRunner    graphrunner.GraphRunner
-	configFilePath string
+	gitFactory          func(directory string) git.Interface
+	graphRunner         graphrunner.GraphRunner
+	incrementalProvider IncrementalGraphProvider // optional; nil disables ITG fast path
+	configFilePath      string
 }
 
 type Params struct {
-	Storage        storage.Storage
-	RepoManager    repomanager.RepoManager
-	Logger         *zap.SugaredLogger
-	GitFactory     func(directory string) git.Interface
-	GraphRunner    graphrunner.GraphRunner
-	ConfigFilePath string
+	Storage             storage.Storage
+	RepoManager         repomanager.RepoManager
+	Logger              *zap.SugaredLogger
+	GitFactory          func(directory string) git.Interface
+	GraphRunner         graphrunner.GraphRunner
+	IncrementalProvider IncrementalGraphProvider // optional
+	ConfigFilePath      string
 }
 
 // NewNativeOrchestrator creates a new native orchestrator with the given parameters.
 func NewNativeOrchestrator(p Params) Orchestrator {
 	return &nativeOrchestrator{
-		storage:        p.Storage,
-		repoManager:    p.RepoManager,
-		logger:         p.Logger,
-		gitFactory:     p.GitFactory,
-		graphRunner:    p.GraphRunner,
-		configFilePath: p.ConfigFilePath,
+		storage:             p.Storage,
+		repoManager:         p.RepoManager,
+		logger:              p.Logger,
+		gitFactory:          p.GitFactory,
+		graphRunner:         p.GraphRunner,
+		incrementalProvider: p.IncrementalProvider,
+		configFilePath:      p.ConfigFilePath,
 	}
 }
 
@@ -104,6 +109,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	}
 
 	gitModule := factory(ws.Path())
+
 	for _, req := range param.Req.BuildDescription.Requests {
 		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.BaseSha, req.GetCommit())
 		if err != nil {

@@ -103,3 +103,21 @@ func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
 	}
 	return false, err
 }
+
+// List returns the keys of all blobs in the storage.
+func (d *diskStorage) List(ctx context.Context) ([]string, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	entries, err := os.ReadDir(d.rootDir)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			keys = append(keys, entry.Name())
+		}
+	}
+	return keys, nil
+}

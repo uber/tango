@@ -65,3 +65,13 @@ func (m *memoryStorage) Exists(ctx context.Context, key string) (bool, error) {
 	_, ok := m.data[key]
 	return ok, nil
 }
+
+func (m *memoryStorage) List(ctx context.Context) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	keys := make([]string, 0, len(m.data))
+	for k := range m.data {
+		keys = append(keys, k)
+	}
+	return keys, nil
+}

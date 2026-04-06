@@ -1,0 +1,12 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "cache",
+    srcs = ["cache.go"],
+    importpath = "github.com/uber/tango/core/itg/cache",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core/itg/graph",
+        "//core/storage",
+    ],
+)

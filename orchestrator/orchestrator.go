@@ -17,8 +17,8 @@ package orchestrator
 import (
 	"context"
 
+	"github.com/uber/tango/core/itg"
 	"github.com/uber/tango/core/storage"
-
 	"github.com/uber/tango/tangopb"
 )
 
@@ -30,6 +30,17 @@ type GetTargetGraphParam struct {
 // ChangedTargetsParam is the input of ComputeChangedTargets
 type ChangedTargetsParam struct {
 	Req *tangopb.GetChangedTargetsRequest
+}
+
+// IncrementalGraphProvider can compute a full target graph for a single revision
+// incrementally, without running a full bazel query of the entire workspace.
+// If incremental computation is unavailable or fails, the orchestrator falls
+// back to a full bazel query.
+type IncrementalGraphProvider interface {
+	GetGraph(ctx context.Context, req itg.GetGraphRequest) (itg.GetGraphResult, error)
+	// SeedCache stores a full bazel query result in the ITG cache. It should only be
+	// called when the query was run at a pure main-branch commit (no user diffs applied).
+	SeedCache(ctx context.Context, req itg.SeedCacheRequest) error
 }
 
 // Orchestrator defines high-level execution interface that "does everything"

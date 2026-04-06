@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
+	"github.com/uber/tango/core/itg"
 	repomanagermock "github.com/uber/tango/core/repomanager/mock"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
@@ -163,6 +164,122 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Nil(t, resp)
+}
+
+// fakeIncrementalProvider is a test double for IncrementalGraphProvider.
+type fakeIncrementalProvider struct {
+	responses []*pb.GetTargetGraphResponse
+	err       error
+}
+
+func (f *fakeIncrementalProvider) GetGraph(_ context.Context, _ itg.GetGraphRequest) (itg.GetGraphResult, error) {
+	return itg.GetGraphResult{TargetRefGraph: f.responses}, f.err
+}
+
+func (f *fakeIncrementalProvider) SeedCache(_ context.Context, _ itg.SeedCacheRequest) error {
+	return nil
+}
+
+func TestNative_GetTargetGraph_ITGSuccess(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Build a minimal valid graph response for the ITG provider to return.
+	itgResp := &pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
+	}
+
+	st := storagemock.NewMockStorage(ctrl)
+	// treehash lookup → cache miss
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(nil, &storage.NotFoundError{Path: "missing"})
+	// WriteGraphStream (ITG result) + treehash mapping
+	st.EXPECT().Put(gomock.Any(), gomock.Any()).Return(nil).Times(2)
+	// Read back the written graph
+	var buf bytes.Buffer
+	_ = gogio.NewDelimitedWriter(&buf).WriteMsg(itgResp)
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{
+		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
+	}, nil)
+
+	g := gitmock.NewMockInterface(ctrl)
+	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th-itg", nil)
+	ws := workspacemock.NewMockWorkspace(ctrl)
+	ws.EXPECT().Path().Return("/tmp/ws")
+	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().ApplyRequests(gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().Release().Return(nil)
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
+
+	o := NewNativeOrchestrator(Params{
+		Storage:             st,
+		RepoManager:         rm,
+		Logger:              zaptest.NewLogger(t).Sugar(),
+		GitFactory:          func(dir string) git.Interface { return g },
+		IncrementalProvider: &fakeIncrementalProvider{responses: []*pb.GetTargetGraphResponse{itgResp}},
+		ConfigFilePath:      "testdata/config.yaml",
+	})
+	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
+		Req: &pb.GetTargetGraphRequest{BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "abc123"}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	defer reader.Close()
+	chunk, rerr := reader.Read()
+	require.NoError(t, rerr)
+	assert.NotNil(t, chunk.GetTargets())
+}
+
+func TestNative_GetTargetGraph_ITGFails_FallsBackToFullQuery(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	st := storagemock.NewMockStorage(ctrl)
+	// treehash lookup → cache miss
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(nil, &storage.NotFoundError{Path: "missing"})
+	// WriteGraphStream (full query result) + treehash mapping
+	st.EXPECT().Put(gomock.Any(), gomock.Any()).Return(nil).Times(2)
+	// Read back the written graph
+	var buf bytes.Buffer
+	_ = gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
+	})
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{
+		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
+	}, nil)
+
+	g := gitmock.NewMockInterface(ctrl)
+	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th-fallback", nil)
+	ws := workspacemock.NewMockWorkspace(ctrl)
+	ws.EXPECT().Path().Return("/tmp/ws")
+	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().ApplyRequests(gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().Release().Return(nil)
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
+	graphRunner := graphmock.NewMockGraphRunner(ctrl)
+	graphRunner.EXPECT().Compute(gomock.Any(), gomock.Any()).Return(targethasher.Result{
+		Targets: map[string]*targethasher.Target{"//:a": {Name: "//:a", RuleType: "go_library"}},
+	}, nil)
+
+	o := NewNativeOrchestrator(Params{
+		Storage:             st,
+		RepoManager:         rm,
+		Logger:              zaptest.NewLogger(t).Sugar(),
+		GitFactory:          func(dir string) git.Interface { return g },
+		GraphRunner:         graphRunner,
+		IncrementalProvider: &fakeIncrementalProvider{err: errors.New("no cached graph found")},
+		ConfigFilePath:      "testdata/config.yaml",
+	})
+	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
+		Req: &pb.GetTargetGraphRequest{BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "abc123"}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	defer reader.Close()
+	chunk, rerr := reader.Read()
+	require.NoError(t, rerr)
+	assert.NotNil(t, chunk.GetTargets())
 }
 
 func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
