@@ -110,8 +110,15 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 
 	gitModule := factory(ws.Path())
 
+	// Capture the tree hash at BaseSha before applying any user diffs.
+	baseShaTreehash, err := gitModule.RevParse(ctx, "HEAD^{tree}")
+	if err != nil {
+		b.logger.Errorw("Treehash computation for BaseSha failed", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
+		return nil, err
+	}
+
 	for _, req := range param.Req.BuildDescription.Requests {
-		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.BaseSha, req.GetCommit())
+		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.Remote, param.Req.BuildDescription.BaseSha, req.GetCommit())
 		if err != nil {
 			b.logger.Errorw("getGraph: Error creating request", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 			return nil, err

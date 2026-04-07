@@ -24,7 +24,10 @@ import (
 
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/controller"
+	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/git"
+	"github.com/uber/tango/core/itg"
+	itgcache "github.com/uber/tango/core/itg/cache"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/storage/disk"
@@ -79,12 +82,42 @@ func run() error {
 		WorkerRootPath:       workerRootPath,
 		PoolSize:             cfg.Service.WorkerPoolSize,
 	})
+
+	// Incremental target graph (ITG) provider — optional; nil disables the fast path.
+	var incrementalProvider orchestrator.IncrementalGraphProvider
+	itgBazel, err := bazel.NewBazelClient(bazel.Params{
+		WorkspacePath: repoManagerClonePath,
+		Logger:        logger,
+	})
+	if err != nil {
+		logger.Warnf("ITG disabled: failed to create bazel client: %v", err)
+	} else {
+		itgProvider, err := itg.New(itg.Params{
+			Git:           git.New(repoManagerClonePath),
+			Bazel:         itgBazel,
+			Cache:         itgcache.NewStorageCache(store),
+			HasherFactory: itg.DefaultHasherFactory,
+			Config: itg.Config{
+				WorkspaceRoot:             repoManagerClonePath,
+				BuildFilePatterns:         []string{`BUILD$`, `BUILD\.bazel$`},
+				CriticalFilePatterns:      []string{`WORKSPACE$`, `WORKSPACE\.bazel$`, `MODULE\.bazel$`},
+				MinChangedFilesForGitHash: 50,
+			},
+		})
+		if err != nil {
+			logger.Warnf("ITG disabled: failed to create ITG provider: %v", err)
+		} else {
+			incrementalProvider = itgProvider
+		}
+	}
+
 	orch := orchestrator.NewNativeOrchestrator(orchestrator.Params{
-		Storage:        store,
-		RepoManager:    rm,
-		Logger:         logger,
-		GitFactory:     git.New,
-		ConfigFilePath: configFilePath,
+		Storage:             store,
+		RepoManager:         rm,
+		Logger:              logger,
+		GitFactory:          git.New,
+		ConfigFilePath:      configFilePath,
+		IncrementalProvider: incrementalProvider,
 	})
 
 	// Controller (YARPC server implementation)
@@ -93,6 +126,7 @@ func run() error {
 		Storage:      store,
 		Orchestrator: orch,
 	})
+
 
 	// YARPC transports and dispatcher
 	grpcTransport := yarpcgrpc.NewTransport()

@@ -101,6 +101,8 @@ func New(p Params) (*Provider, error) {
 type GetGraphRequest struct {
 	// BaseSha is a commit on main used to locate the nearest cached graph.
 	BaseSha string
+	// BaseShaTreeHash is the git tree hash at BaseSha, used to look up a cached graph.
+	BaseShaTreeHash string
 	// TargetRef is the ref to compute the graph for (diff is cacheKey.BaseSha..TargetRef).
 	TargetRef string
 	// Remote is the remote repo identifier used to namespace cache entries.
@@ -122,6 +124,14 @@ type GetGraphResult struct {
 //  2. BaseSha → TargetRef: applies the user's diffs on top and returns the result so the caller
 //     can write it to the main treehash cache keyed by TargetRef's treehash.
 func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphResult, error) {
+	// Ensure BaseSha is present locally before any git operations. The commit may not
+	// exist in the ITG provider's repo if it was only fetched into a workspace clone.
+	if _, err := p.git.RevParse(ctx, fmt.Sprintf("%s^{commit}", req.BaseSha)); err != nil {
+		if fetchErr := p.git.Fetch(ctx, req.Remote, req.BaseSha); fetchErr != nil {
+			return GetGraphResult{}, fmt.Errorf("fetching base sha %s: %w", req.BaseSha, fetchErr)
+		}
+	}
+
 	baseShaCommitSecond, err := p.git.GetCommitTimeSecond(ctx, req.BaseSha)
 	if err != nil {
 		return GetGraphResult{}, fmt.Errorf("getting commit time for sha %s: %w", req.BaseSha, err)
@@ -213,6 +223,8 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 type SeedCacheRequest struct {
 	// BaseSha is the main branch commit whose graph is being seeded.
 	BaseSha string
+	// BaseShaTreeHash is the git tree hash at BaseSha.
+	BaseShaTreeHash string
 	// Remote is the remote repo identifier used to namespace cache entries.
 	Remote string
 	// Graph is the full target graph result from a bazel query at BaseSha.

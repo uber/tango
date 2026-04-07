@@ -24,16 +24,18 @@ import (
 
 type gitRequest struct {
 	git       git.Interface
+	remote    string
 	requestID string
 	baseRef   string
 	commit    string
 }
 
-func NewGitRequest(git git.Interface, requestPath string, baseRef string, commit string) Request {
+func NewGitRequest(git git.Interface, requestPath string, remote string, baseRef string, commit string) Request {
 	// get the last part of the request path
 	requestID := filepath.Base(requestPath)
 	return &gitRequest{
 		git:       git,
+		remote:    remote,
 		requestID: requestID,
 		baseRef:   baseRef,
 		commit:    commit,
@@ -42,8 +44,8 @@ func NewGitRequest(git git.Interface, requestPath string, baseRef string, commit
 
 // Apply applies the change request to the workspace.
 func (r *gitRequest) Apply(ctx context.Context) error {
-	ref := fmt.Sprintf("+pull/%s/head:pull/%s/head", r.requestID, r.requestID)
-	err := r.git.Fetch(ctx, "origin", ref, "--force", "--no-tags")
+	ref := fmt.Sprintf("+refs/pull/%s/head:refs/pull/%s/head", r.requestID, r.requestID)
+	err := r.git.Fetch(ctx, r.remote, ref, "--force", "--no-tags")
 	if err != nil {
 		return err
 	}

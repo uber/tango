@@ -43,6 +43,7 @@ func main() {
 
 	newBaseSHA := flag.String("new-base-sha", "", "build description new base sha")
 	newRequestURLs := flag.String("new-request-urls", "", "comma-separated change request URLs for new state")
+	strategyFlag := flag.String("strategy", "native", "computation strategy: native, shell")
 	flag.Parse()
 
 	grpcTransport := yarpcgrpc.NewTransport()
@@ -66,6 +67,10 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
+	strategy := pb.COMPUTATION_STRATEGY_NATIVE
+	if *strategyFlag == "shell" {
+		strategy = pb.COMPUTATION_STRATEGY_SHELL
+	}
 
 	switch *method {
 	case "get-target-graph":
@@ -82,6 +87,7 @@ func main() {
 				Remote:   *remote,
 				BaseSha:  *baseSHA,
 				Requests: requests,
+				Strategy: strategy,
 			},
 		}
 		if err := callGetTargetGraph(ctx, client, logger, req); err != nil {
@@ -116,11 +122,13 @@ func main() {
 				Remote:   *remote,
 				BaseSha:  *baseSHA,
 				Requests: requests,
+				Strategy: strategy,
 			},
 			SecondRevision: &pb.BuildDescription{
 				Remote:   *remote,
 				BaseSha:  *newBaseSHA,
 				Requests: newRequests,
+				Strategy: strategy,
 			},
 			OutputConfig: &pb.OutputConfig{
 				ComputeDistances: *computeDistances,
@@ -157,11 +165,13 @@ func main() {
 				Remote:   *remote,
 				BaseSha:  *baseSHA,
 				Requests: requests,
+				Strategy: strategy,
 			},
 			SecondRevision: &pb.BuildDescription{
 				Remote:   *remote,
 				BaseSha:  *newBaseSHA,
 				Requests: newRequests,
+				Strategy: strategy,
 			},
 			OutputConfig: &pb.OutputConfig{
 				ComputeDistances: *computeDistances,

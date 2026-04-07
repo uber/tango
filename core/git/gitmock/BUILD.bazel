@@ -5,5 +5,8 @@ go_library(
     srcs = ["gitmock.go"],
     importpath = "github.com/uber/tango/core/git/gitmock",
     visibility = ["//visibility:public"],
-    deps = ["@org_uber_go_mock//gomock"],
+    deps = [
+        "//core/git",
+        "@org_uber_go_mock//gomock",
+    ],
 )

@@ -55,7 +55,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 
 	// Inject git and workspace
 	g := gitmock.NewMockInterface(ctrl)
-	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("raw-treehash", nil)
+	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("raw-treehash", nil).Times(2)
 	ws := workspacemock.NewMockWorkspace(ctrl)
 	ws.EXPECT().Path().Return("/tmp/ws")
 	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
@@ -105,7 +105,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
 	}, nil)
 	g := gitmock.NewMockInterface(ctrl)
-	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th", nil)
+	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th", nil).Times(2)
 	ws := workspacemock.NewMockWorkspace(ctrl)
 	ws.EXPECT().Path().Return("/tmp/ws")
 	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
@@ -148,7 +148,6 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 	ws := workspacemock.NewMockWorkspace(ctrl)
 	ws.EXPECT().Path().Return("/tmp/ws")
 	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
-	ws.EXPECT().ApplyRequests(gomock.Any(), gomock.Any()).Return(nil)
 	ws.EXPECT().Release().Return(nil)
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
@@ -202,7 +201,7 @@ func TestNative_GetTargetGraph_ITGSuccess(t *testing.T) {
 	}, nil)
 
 	g := gitmock.NewMockInterface(ctrl)
-	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th-itg", nil)
+	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th-itg", nil).Times(2)
 	ws := workspacemock.NewMockWorkspace(ctrl)
 	ws.EXPECT().Path().Return("/tmp/ws")
 	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
@@ -249,7 +248,7 @@ func TestNative_GetTargetGraph_ITGFails_FallsBackToFullQuery(t *testing.T) {
 	}, nil)
 
 	g := gitmock.NewMockInterface(ctrl)
-	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th-fallback", nil)
+	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th-fallback", nil).Times(2)
 	ws := workspacemock.NewMockWorkspace(ctrl)
 	ws.EXPECT().Path().Return("/tmp/ws")
 	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
@@ -294,8 +293,8 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 
 	// git mock must handle Apply sequence from workspace.NewRequest for PR 123
 	g := gitmock.NewMockInterface(ctrl)
-	// Compute treehash
-	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("treehash", nil)
+	// Compute baseShaTreehash + final treehash
+	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("treehash", nil).Times(2)
 	// Single storage fetch for graph by remote/treehash
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
