@@ -118,7 +118,7 @@ func (c *impl) RevParse(ctx context.Context, ref string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(out), nil
+	return strings.TrimSpace(string(out)), nil
 }
 
 // Log returns up to limit commit SHAs reachable from ref, most recent first.

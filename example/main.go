@@ -84,31 +84,46 @@ func run() error {
 	})
 
 	// Incremental target graph (ITG) provider — optional; nil disables the fast path.
+	// The ITG provider needs two separate git/bazel contexts:
+	//   - Origin clone (p.git / p.bazel): for step 1 (historical commit checkouts).
+	//   - Workspace (via BazelFactory / git.New per request): for step 2 (user diffs).
 	var incrementalProvider orchestrator.IncrementalGraphProvider
-	itgBazel, err := bazel.NewBazelClient(bazel.Params{
-		WorkspacePath: repoManagerClonePath,
-		Logger:        logger,
-	})
-	if err != nil {
-		logger.Warnf("ITG disabled: failed to create bazel client: %v", err)
-	} else {
+	for _, repoCfg := range cfg.Repository {
+		originPath := repomanager.OriginClonePath(repoManagerClonePath, repoCfg.Remote)
+		itgBazel, err := bazel.NewBazelClient(bazel.Params{
+			WorkspacePath: originPath,
+			Logger:        logger,
+			BazelCommand:  repoCfg.BazelCommand,
+		})
+		if err != nil {
+			logger.Warnf("ITG disabled for %s: failed to create bazel client: %v", repoCfg.Remote, err)
+			continue
+		}
 		itgProvider, err := itg.New(itg.Params{
-			Git:           git.New(repoManagerClonePath),
-			Bazel:         itgBazel,
+			Git:   git.New(originPath),
+			Bazel: itgBazel,
+			BazelFactory: func(workspacePath string) (bazel.Bazel, error) {
+				return bazel.NewBazelClient(bazel.Params{
+					WorkspacePath: workspacePath,
+					Logger:        logger,
+					BazelCommand:  repoCfg.BazelCommand,
+				})
+			},
 			Cache:         itgcache.NewStorageCache(store),
 			HasherFactory: itg.DefaultHasherFactory,
 			Config: itg.Config{
-				WorkspaceRoot:             repoManagerClonePath,
+				WorkspaceRoot:             originPath,
 				BuildFilePatterns:         []string{`BUILD$`, `BUILD\.bazel$`},
 				CriticalFilePatterns:      []string{`WORKSPACE$`, `WORKSPACE\.bazel$`, `MODULE\.bazel$`},
 				MinChangedFilesForGitHash: 50,
 			},
 		})
 		if err != nil {
-			logger.Warnf("ITG disabled: failed to create ITG provider: %v", err)
-		} else {
-			incrementalProvider = itgProvider
+			logger.Warnf("ITG disabled for %s: failed to create ITG provider: %v", repoCfg.Remote, err)
+			continue
 		}
+		incrementalProvider = itgProvider
+		break // single-repo server; first config entry wins
 	}
 
 	orch := orchestrator.NewNativeOrchestrator(orchestrator.Params{

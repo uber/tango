@@ -115,7 +115,7 @@ func TestRevParse_returnsStringFromRunner(t *testing.T) {
 	g := &impl{directory: "/repo", runner: m}
 	got, err := g.RevParse(context.Background(), "HEAD")
 	require.NoError(t, err)
-	require.Equal(t, "abc123\n", got)
+	require.Equal(t, "abc123", got)
 	require.Len(t, m.calls, 1)
 	c := m.calls[0]
 	require.Equal(t, "output", c.kind)

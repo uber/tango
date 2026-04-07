@@ -56,21 +56,37 @@ type Config struct {
 // HasherFactory creates a SourceHasher for the given workspace root and hash config.
 type HasherFactory func(workspaceRoot string, knownHashes map[string][]byte, fullHashRepos []string, excludedFiles []string) targethasher.SourceHasher
 
+// BazelFactory creates a Bazel client for the given workspace path.
+// It is called per-request for workspace-specific bazel operations (step 2).
+// The factory is responsible for injecting the correct bazel command and logger.
+type BazelFactory func(workspacePath string) (bazel.Bazel, error)
+
 // Provider implements IncrementalGraphProvider using the ITG algorithm.
 type Provider struct {
-	git           git.Interface
-	bazel         bazel.Bazel
-	cache         cache.Cache
-	analyzer      changeanalyzer.Analyzer
+	// git and bazel point to the origin clone and are used for step 1 only.
+	// Step 1 checks out historical commits to compute the BaseSha graph.
+	git          git.Interface
+	bazel        bazel.Bazel
+	cache        cache.Cache
+	// analyzer is used for GetFileCategory (pattern matching only, no git).
+	analyzer     changeanalyzer.Analyzer
+	// analyzerCfg is stored so a per-request workspace analyzer can be created
+	// in GetGraph for AnalyzeChange (which needs the workspace git for step 0).
+	analyzerCfg  changeanalyzer.Config
+	bazelFactory BazelFactory
 	hasherFactory HasherFactory
 	cfg           Config
 }
 
 // Params contains the dependencies for creating a new Provider.
 type Params struct {
-	Git           git.Interface
-	Bazel         bazel.Bazel
-	Cache         cache.Cache
+	// Git and Bazel point to the origin clone and are used for step 1.
+	Git          git.Interface
+	Bazel        bazel.Bazel
+	// BazelFactory creates a per-request bazel client pointed at the workspace
+	// path supplied in GetGraphRequest.WorkspacePath (step 2).
+	BazelFactory BazelFactory
+	Cache        cache.Cache
 	HasherFactory HasherFactory
 	Config        Config
 }
@@ -79,11 +95,13 @@ var queryOptions = []string{"--order_output=no", "--proto:locations", "--noproto
 
 // New creates a new ITG Provider.
 func New(p Params) (*Provider, error) {
-	a, err := changeanalyzer.NewAnalyzer(&gitAdapter{g: p.Git}, changeanalyzer.Config{
+	analyzerCfg := changeanalyzer.Config{
 		BuildFilePatterns:    p.Config.BuildFilePatterns,
 		CriticalFilePatterns: p.Config.CriticalFilePatterns,
 		IgnoredFilePatterns:  p.Config.IgnoredFilePatterns,
-	})
+	}
+	// Validate patterns upfront.
+	a, err := changeanalyzer.NewAnalyzer(&gitAdapter{g: p.Git}, analyzerCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating change analyzer: %w", err)
 	}
@@ -92,6 +110,8 @@ func New(p Params) (*Provider, error) {
 		bazel:         p.Bazel,
 		cache:         p.Cache,
 		analyzer:      a,
+		analyzerCfg:   analyzerCfg,
+		bazelFactory:  p.BazelFactory,
 		hasherFactory: p.HasherFactory,
 		cfg:           p.Config,
 	}, nil
@@ -104,9 +124,15 @@ type GetGraphRequest struct {
 	// BaseShaTreeHash is the git tree hash at BaseSha, used to look up a cached graph.
 	BaseShaTreeHash string
 	// TargetRef is the ref to compute the graph for (diff is cacheKey.BaseSha..TargetRef).
+	// This ref must be resolvable in the workspace at WorkspacePath.
 	TargetRef string
 	// Remote is the remote repo identifier used to namespace cache entries.
 	Remote string
+	// WorkspacePath is the absolute path to the worker workspace that has the user's
+	// diffs applied (i.e. the workspace checked out to TargetRef). It is used for
+	// step 2 git operations and the bazel query, so the ITG origin clone (p.git) is
+	// not disturbed by user-diff checkouts.
+	WorkspacePath string
 }
 
 // GetGraphResult contains the graphs produced by GetGraph.
@@ -118,14 +144,14 @@ type GetGraphResult struct {
 
 // GetGraph incrementally computes the full target graph for the given request.
 // It uses a two-step approach:
-//  1. zero_revision → BaseSha: computes and caches the graph at BaseSha (a main branch commit)
-//     in the ITG cache (for floor-key lookup) and returns it so the caller can also write it
-//     to the main treehash cache.
-//  2. BaseSha → TargetRef: applies the user's diffs on top and returns the result so the caller
-//     can write it to the main treehash cache keyed by TargetRef's treehash.
+//
+//  1. zero_revision → BaseSha: computes the graph at BaseSha using the origin
+//     clone (p.git / p.bazel), checking out historical commits there.
+//  2. BaseSha → TargetRef: computes the incremental diff using the workspace
+//     at req.WorkspacePath (already at TargetRef with user diffs applied),
+//     so the origin clone state is not affected.
 func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphResult, error) {
-	// Ensure BaseSha is present locally before any git operations. The commit may not
-	// exist in the ITG provider's repo if it was only fetched into a workspace clone.
+	// Ensure BaseSha is present in the origin clone before any git operations.
 	if _, err := p.git.RevParse(ctx, fmt.Sprintf("%s^{commit}", req.BaseSha)); err != nil {
 		if fetchErr := p.git.Fetch(ctx, req.Remote, req.BaseSha); fetchErr != nil {
 			return GetGraphResult{}, fmt.Errorf("fetching base sha %s: %w", req.BaseSha, fetchErr)
@@ -137,6 +163,21 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 		return GetGraphResult{}, fmt.Errorf("getting commit time for sha %s: %w", req.BaseSha, err)
 	}
 
+	// Build per-request workspace git and bazel for steps 0 and 2.
+	// The workspace is already checked out to TargetRef (with user diffs applied),
+	// so we must not do any checkouts there — only reads/diffs/bazel queries.
+	wsGit := git.New(req.WorkspacePath)
+	wsBazel, err := p.bazelFactory(req.WorkspacePath)
+	if err != nil {
+		return GetGraphResult{}, fmt.Errorf("creating workspace bazel client: %w", err)
+	}
+	// Per-request analyzer backed by the workspace git so AnalyzeChange sees the
+	// correct "HEAD" (TargetRef with PR diffs) rather than the origin clone's HEAD.
+	wsAnalyzer, err := changeanalyzer.NewAnalyzer(&gitAdapter{g: wsGit}, p.analyzerCfg)
+	if err != nil {
+		return GetGraphResult{}, fmt.Errorf("creating workspace change analyzer: %w", err)
+	}
+
 	cacheKey, err := p.searchCachedGraph(ctx, req.Remote, baseShaCommitSecond)
 	if err != nil {
 		return GetGraphResult{}, fmt.Errorf("searching for cached graph: %w", err)
@@ -144,7 +185,7 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 
 	// Validate the full range (zero_revision → targetRef) upfront so we fail fast
 	// before doing any checkout or bazel work.
-	cacheToTarget, err := p.analyzer.AnalyzeChange(ctx, &changeanalyzer.AnalyzeChangeRequest{
+	cacheToTarget, err := wsAnalyzer.AnalyzeChange(ctx, &changeanalyzer.AnalyzeChangeRequest{
 		BaseRef:   cacheKey.BaseSha,
 		TargetRef: req.TargetRef,
 	})
@@ -160,7 +201,7 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 		return GetGraphResult{}, fmt.Errorf("loading cached graph: %w", err)
 	}
 
-	// Restore HEAD when we're done — step 1 checks out BaseSha (a historical main commit).
+	// Restore origin clone HEAD when done — step 1 checks out BaseSha there.
 	curRef, err := p.git.RevParse(ctx, "HEAD")
 	if err != nil {
 		return GetGraphResult{}, fmt.Errorf("parsing HEAD: %w", err)
@@ -168,17 +209,19 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 	defer func() { _ = p.git.Checkout(ctx, curRef, "--force") }()
 
 	// Step 1: zero_revision → BaseSha.
-	// BaseSha is always a main branch commit; cache its graph in the ITG cache (keyed by
-	// commit time + sha + treehash) so future FloorKey lookups can also surface the treehash.
+	// Uses the origin clone (p.git / p.bazel) so that workspace is not touched.
 	baseShaKey := cache.Key{
 		Remote:               req.Remote,
 		BaseCommitTimeSecond: baseShaCommitSecond,
 		BaseSha:              req.BaseSha,
 	}
 	baseShaGraph, err := p.calculateGraphIncrementally(ctx, calcParams{
-		baseGraph: cacheGraph,
-		baseRef:   cacheKey.BaseSha,
-		targetRef: req.BaseSha,
+		baseGraph:     cacheGraph,
+		baseRef:       cacheKey.BaseSha,
+		targetRef:     req.BaseSha,
+		git:           p.git,
+		bazel:         p.bazel,
+		workspaceRoot: p.cfg.WorkspaceRoot,
 	})
 	if err != nil {
 		return GetGraphResult{}, fmt.Errorf("incremental graph calculation to base sha: %w", err)
@@ -205,10 +248,15 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 	}()
 
 	// Step 2: BaseSha → TargetRef (user's diffs applied on top).
+	// Uses the workspace git and bazel so the origin clone is not disturbed.
+	// The workspace is already at TargetRef, so Checkout is a no-op there.
 	targetGraph, err := p.calculateGraphIncrementally(ctx, calcParams{
-		baseGraph: baseShaGraph,
-		baseRef:   req.BaseSha,
-		targetRef: req.TargetRef,
+		baseGraph:     baseShaGraph,
+		baseRef:       req.BaseSha,
+		targetRef:     req.TargetRef,
+		git:           wsGit,
+		bazel:         wsBazel,
+		workspaceRoot: req.WorkspacePath,
 	})
 	if err != nil {
 		return GetGraphResult{}, fmt.Errorf("incremental graph calculation to target ref: %w", err)
@@ -257,17 +305,20 @@ func (p *Provider) SeedCache(ctx context.Context, req SeedCacheRequest) error {
 }
 
 type calcParams struct {
-	baseGraph *graph.OptimizedGraph
-	baseRef   string
-	targetRef string
+	baseGraph     *graph.OptimizedGraph
+	baseRef       string
+	targetRef     string
+	git           git.Interface
+	bazel         bazel.Bazel
+	workspaceRoot string
 }
 
 func (p *Provider) calculateGraphIncrementally(ctx context.Context, params calcParams) (*graph.OptimizedGraph, error) {
-	if err := p.git.Checkout(ctx, params.targetRef); err != nil {
+	if err := params.git.Checkout(ctx, params.targetRef); err != nil {
 		return nil, err
 	}
 
-	rawChanges, err := p.git.DiffWithStatus(ctx, params.baseRef, params.targetRef)
+	rawChanges, err := params.git.DiffWithStatus(ctx, params.baseRef, params.targetRef)
 	if err != nil {
 		return nil, err
 	}
@@ -285,13 +336,13 @@ func (p *Provider) calculateGraphIncrementally(ctx context.Context, params calcP
 
 	var knownHashes map[string][]byte
 	if len(changes) >= p.cfg.MinChangedFilesForGitHash {
-		knownHashes, err = p.git.FileHashes(ctx, params.targetRef)
+		knownHashes, err = params.git.FileHashes(ctx, params.targetRef)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	updateInput, err := p.parseChanges(changes, graph.NewStringSet())
+	updateInput, err := p.parseChanges(changes, graph.NewStringSet(), params.workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +352,7 @@ func (p *Provider) calculateGraphIncrementally(ctx context.Context, params calcP
 		return params.baseGraph, nil
 	}
 
-	resp, err := p.bazel.ExecuteQuery(ctx, &bazel.QueryRequest{
+	resp, err := params.bazel.ExecuteQuery(ctx, &bazel.QueryRequest{
 		Query:          strings.Join(toQuery, " + "),
 		AdditionalArgs: queryOptions,
 	})
@@ -313,7 +364,7 @@ func (p *Provider) calculateGraphIncrementally(ctx context.Context, params calcP
 	}
 
 	updateInput.QueryResult = resp.Result
-	hasher := p.hasherFactory(p.cfg.WorkspaceRoot, knownHashes, nil, nil)
+	hasher := p.hasherFactory(params.workspaceRoot, knownHashes, nil, nil)
 	if err := params.baseGraph.UpdateGraph(ctx, hasher, updateInput); err != nil {
 		return nil, err
 	}
@@ -332,7 +383,7 @@ func (p *Provider) searchCachedGraph(ctx context.Context, remote string, baseRef
 	return k, nil
 }
 
-func (p *Provider) parseChanges(changes []changeanalyzer.ChangedFileInfo, excludedFiles graph.StringSet) (graph.UpdateGraphInput, error) {
+func (p *Provider) parseChanges(changes []changeanalyzer.ChangedFileInfo, excludedFiles graph.StringSet, workspaceRoot string) (graph.UpdateGraphInput, error) {
 	deletedSrcFiles := graph.NewStringSet()
 	changedPkgs := graph.NewStringSet()
 	deletedPkgs := graph.NewStringSet()
@@ -352,12 +403,12 @@ func (p *Provider) parseChanges(changes []changeanalyzer.ChangedFileInfo, exclud
 				deletedPkgs.Insert(curPkg)
 			}
 
-			shouldAddParent, err := p.shouldAddParentPkg(changeInfo.Status, curPkg)
+			shouldAddParent, err := p.shouldAddParentPkg(changeInfo.Status, curPkg, workspaceRoot)
 			if err != nil {
 				return graph.UpdateGraphInput{}, fmt.Errorf("determine if should handle parent package: %w", err)
 			}
 			if shouldAddParent {
-				parentPkg, err := workspaceutils.GetContainingPackage(p.cfg.WorkspaceRoot, curPkg)
+				parentPkg, err := workspaceutils.GetContainingPackage(workspaceRoot, curPkg)
 				if !errors.Is(err, workspaceutils.ErrParentPackageNotExist) {
 					if err != nil {
 						return graph.UpdateGraphInput{}, fmt.Errorf("getting parent package: %w", err)
@@ -369,7 +420,7 @@ func (p *Provider) parseChanges(changes []changeanalyzer.ChangedFileInfo, exclud
 			if changeInfo.Status == changeanalyzer.Modified && isExcludedFile(changeInfo.Path, excludedFiles) {
 				break
 			}
-			parentPkg, err := workspaceutils.GetContainingPackage(p.cfg.WorkspaceRoot, changeInfo.Path)
+			parentPkg, err := workspaceutils.GetContainingPackage(workspaceRoot, changeInfo.Path)
 			if !errors.Is(err, workspaceutils.ErrParentPackageNotExist) {
 				if err != nil {
 					return graph.UpdateGraphInput{}, fmt.Errorf("getting parent package: %w", err)
@@ -386,17 +437,17 @@ func (p *Provider) parseChanges(changes []changeanalyzer.ChangedFileInfo, exclud
 		DeletedSrcFiles: deletedSrcFiles,
 		ChangedPkgs:     changedPkgs,
 		DeletedPkgs:     deletedPkgs,
-		WorkspaceRoot:   p.cfg.WorkspaceRoot,
+		WorkspaceRoot:   workspaceRoot,
 		FullHashRepos:   graph.NewStringSet(),
 	}, nil
 }
 
-func (p *Provider) shouldAddParentPkg(status changeanalyzer.ChangedFileStatus, curPkg string) (bool, error) {
+func (p *Provider) shouldAddParentPkg(status changeanalyzer.ChangedFileStatus, curPkg string, workspaceRoot string) (bool, error) {
 	if status == changeanalyzer.Added {
 		return true, nil
 	}
 	if status == changeanalyzer.Deleted {
-		_, err := os.Stat(filepath.Join(p.cfg.WorkspaceRoot, curPkg))
+		_, err := os.Stat(filepath.Join(workspaceRoot, curPkg))
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
 		}
