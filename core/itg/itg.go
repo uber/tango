@@ -235,6 +235,12 @@ type SeedCacheRequest struct {
 // requests can use it as a base. It should only be called when the query was run at
 // a pure main-branch commit (no user diffs applied), i.e. HEAD == BaseSha.
 func (p *Provider) SeedCache(ctx context.Context, req SeedCacheRequest) error {
+	if _, err := p.git.RevParse(ctx, fmt.Sprintf("%s^{commit}", req.BaseSha)); err != nil {
+		if fetchErr := p.git.Fetch(ctx, req.Remote, req.BaseSha); fetchErr != nil {
+			return fmt.Errorf("fetching base sha %s: %w", req.BaseSha, fetchErr)
+		}
+	}
+
 	commitTimeSecond, err := p.git.GetCommitTimeSecond(ctx, req.BaseSha)
 	if err != nil {
 		return fmt.Errorf("getting commit time for sha %s: %w", req.BaseSha, err)
