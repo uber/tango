@@ -75,13 +75,6 @@ const (
 	Renamed ChangedFileStatus = "R"
 )
 
-// Git is the minimal git interface required by the analyzer.
-// It is a subset of git.Interface and is satisfied directly by git.Interface.
-type Git interface {
-	DiffWithStatus(ctx context.Context, baseRef, targetRef string) ([]git.DiffEntry, error)
-	Fetch(ctx context.Context, remote, ref string, options ...string) error
-}
-
 // AnalyzeChangeRequest represents the request to analyze the change.
 type AnalyzeChangeRequest struct {
 	BaseRef, TargetRef string
@@ -101,7 +94,7 @@ type Analyzer interface {
 }
 
 type analyzer struct {
-	git                  Git
+	git                  git.Interface
 	buildFilePatterns    []*regexp.Regexp
 	criticalFilePatterns []*regexp.Regexp
 	ignoredFilePatterns  []*regexp.Regexp
@@ -115,7 +108,7 @@ type Config struct {
 }
 
 // NewAnalyzer creates a new Analyzer.
-func NewAnalyzer(g Git, cfg Config) (Analyzer, error) {
+func NewAnalyzer(g git.Interface, cfg Config) (Analyzer, error) {
 	buildPatterns, err := compilePatterns(cfg.BuildFilePatterns)
 	if err != nil {
 		return nil, fmt.Errorf("compiling build file patterns: %w", err)
