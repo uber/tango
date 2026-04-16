@@ -115,7 +115,7 @@ func TestRevParse_returnsStringFromRunner(t *testing.T) {
 	g := &impl{directory: "/repo", runner: m}
 	got, err := g.RevParse(context.Background(), "HEAD")
 	require.NoError(t, err)
-	require.Equal(t, "abc123\n", got)
+	require.Equal(t, "abc123", got)
 	require.Len(t, m.calls, 1)
 	c := m.calls[0]
 	require.Equal(t, "output", c.kind)
@@ -145,6 +145,72 @@ func TestSubmoduleUpdate_usesRunnerWithDirAndArgs(t *testing.T) {
 	require.Equal(t, "/repo", c.dir)
 	require.Equal(t, "git", c.name)
 	assert.EqualValues(t, []string{"submodule", "update", "--init", "--recursive"}, c.args)
+}
+
+func TestDiffWithStatus_parsesNameStatusOutput(t *testing.T) {
+	tests := []struct {
+		name    string
+		output  []byte
+		want    []DiffEntry
+		wantErr bool
+	}{
+		{
+			name:   "modified and added files",
+			output: []byte("M\tsrc/foo.go\nA\tsrc/bar.go\n"),
+			want: []DiffEntry{
+				{Status: "M", Path: "src/foo.go"},
+				{Status: "A", Path: "src/bar.go"},
+			},
+		},
+		{
+			name:   "rename uses destination path",
+			output: []byte("R100\told/path.go\tnew/path.go\n"),
+			want:   []DiffEntry{{Status: "R", Path: "new/path.go"}},
+		},
+		{
+			name:   "empty diff returns nil",
+			output: []byte(""),
+			want:   nil,
+		},
+		{
+			name:    "runner error propagates",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var runErr error
+			if tt.wantErr {
+				runErr = errors.New("git error")
+			}
+			m := &mockRunner{out: tt.output, err: runErr}
+			g := &impl{directory: "/repo", runner: m}
+			got, err := g.DiffWithStatus(context.Background(), "base", "head")
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetCommitTimeSecond_parsesUnixTimestamp(t *testing.T) {
+	m := &mockRunner{out: []byte("1700000000\n")}
+	g := &impl{directory: "/repo", runner: m}
+	got, err := g.GetCommitTimeSecond(context.Background(), "HEAD")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1700000000), got)
+	require.Len(t, m.calls, 1)
+	assert.EqualValues(t, []string{"log", "-1", "--format=%ct", "HEAD"}, m.calls[0].args)
+}
+
+func TestGetCommitTimeSecond_errorPropagates(t *testing.T) {
+	m := &mockRunner{err: errors.New("git error")}
+	g := &impl{directory: "/repo", runner: m}
+	_, err := g.GetCommitTimeSecond(context.Background(), "HEAD")
+	require.Error(t, err)
 }
 
 func TestDefaultGit_FileHashes(t *testing.T) {

@@ -24,6 +24,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -33,10 +34,19 @@ const (
 	_gitTimeout = 10 * time.Minute
 )
 
+// DiffEntry represents a single file change from git diff --name-status.
+type DiffEntry struct {
+	// Status is the single-character status code: "A", "D", "M", "R", etc.
+	Status string
+	// Path is the file path. For renames, this is the destination path.
+	Path string
+}
+
 // Interface defines the interface to execute git commands
 type Interface interface {
 	Checkout(ctx context.Context, ref string, options ...string) error
 	Diff(ctx context.Context, baseRef, targetRef string, options ...string) ([]byte, error)
+	DiffWithStatus(ctx context.Context, baseRef, targetRef string) ([]DiffEntry, error)
 	Fetch(ctx context.Context, remote, ref string, options ...string) error
 	Clone(ctx context.Context, target, destination string, options ...string) error
 	ApplyPatch(ctx context.Context, patch []byte) error
@@ -45,6 +55,7 @@ type Interface interface {
 	Commit(ctx context.Context, message string, options ...string) error
 	SubmoduleUpdate(ctx context.Context) error
 	FileHashes(ctx context.Context, ref string) (map[string][]byte, error)
+	GetCommitTimeSecond(ctx context.Context, ref string) (int64, error)
 }
 
 type impl struct {
@@ -107,7 +118,7 @@ func (c *impl) RevParse(ctx context.Context, ref string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(out), nil
+	return strings.TrimSpace(string(out)), nil
 }
 
 // Log returns up to limit commit SHAs reachable from ref, most recent first.
@@ -139,6 +150,40 @@ func (c *impl) SubmoduleUpdate(ctx context.Context) error {
 	defer cancel()
 	args := []string{"submodule", "update", "--init", "--recursive"}
 	return c.runner.run(ctx, c.directory, "git", args...)
+}
+
+// DiffWithStatus returns the list of changed files with their status between two refs,
+// parsed from `git diff --name-status`. For renames, Path is the destination path.
+func (c *impl) DiffWithStatus(ctx context.Context, baseRef, targetRef string) ([]DiffEntry, error) {
+	out, err := c.Diff(ctx, baseRef, targetRef, "--name-status")
+	if err != nil {
+		return nil, err
+	}
+	var entries []DiffEntry
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		// Status may have a score suffix (e.g. "R100") — use only the first character.
+		status := string(fields[0][0])
+		// For renames/copies there are two paths; use the destination (last field).
+		path := fields[len(fields)-1]
+		entries = append(entries, DiffEntry{Status: status, Path: path})
+	}
+	return entries, nil
+}
+
+// GetCommitTimeSecond returns the commit timestamp of the given ref in Unix seconds.
+func (c *impl) GetCommitTimeSecond(ctx context.Context, ref string) (int64, error) {
+	out, err := c.runner.output(ctx, c.directory, "git", "log", "-1", "--format=%ct", ref)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
 }
 
 // FileHashes gets a mapping of files to their hashes based on `git ls-tree --full-tree -r <ref>`.
