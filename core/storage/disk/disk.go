@@ -103,3 +103,30 @@ func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
 	}
 	return false, err
 }
+
+// List returns the relative paths of all regular files under the given directory prefix.
+func (d *diskStorage) List(ctx context.Context, dir string) ([]string, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	root := filepath.Join(d.rootDir, dir)
+	var keys []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(d.rootDir, path)
+		if err != nil {
+			return err
+		}
+		keys = append(keys, rel)
+		return nil
+	})
+	return keys, err
+}

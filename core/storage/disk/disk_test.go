@@ -121,6 +121,56 @@ func TestStorage_Exists(t *testing.T) {
 	})
 }
 
+func TestStorage_List(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	s, err := New(tmpDir)
+	require.NoError(t, err)
+
+	put := func(key string) {
+		t.Helper()
+		require.NoError(t, s.Put(ctx, storage.UploadRequest{Key: key, Reader: bytes.NewReader([]byte("x"))}))
+	}
+	put("itg/repoA/2024-01-01/100_abc")
+	put("itg/repoA/2024-01-02/200_def")
+	put("itg/repoB/2024-01-01/300_ghi")
+	put("graph/treehash123")
+
+	t.Run("lists files under subdirectory", func(t *testing.T) {
+		keys, err := s.List(ctx, "itg/repoA")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{
+			"itg/repoA/2024-01-01/100_abc",
+			"itg/repoA/2024-01-02/200_def",
+		}, keys)
+	})
+
+	t.Run("different subdirectory returns different keys", func(t *testing.T) {
+		keys, err := s.List(ctx, "itg/repoB")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"itg/repoB/2024-01-01/300_ghi"}, keys)
+	})
+
+	t.Run("non-existent directory returns empty", func(t *testing.T) {
+		keys, err := s.List(ctx, "nonexistent")
+		require.NoError(t, err)
+		assert.Empty(t, keys)
+	})
+
+	t.Run("empty dir lists all files", func(t *testing.T) {
+		keys, err := s.List(ctx, "")
+		require.NoError(t, err)
+		assert.Len(t, keys, 4)
+	})
+
+	t.Run("cancelled context returns error", func(t *testing.T) {
+		cancelledCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := s.List(cancelledCtx, "itg")
+		assert.Error(t, err)
+	})
+}
+
 func TestStorage_Get_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

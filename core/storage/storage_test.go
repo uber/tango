@@ -24,6 +24,47 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMemoryStorage_List(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemoryStorage()
+
+	put := func(key string) {
+		t.Helper()
+		require.NoError(t, s.Put(ctx, UploadRequest{Key: key, Reader: bytes.NewReader([]byte("x"))}))
+	}
+	put("itg/repoA/2024-01-01/100_abc")
+	put("itg/repoA/2024-01-02/200_def")
+	put("itg/repoB/2024-01-01/300_ghi")
+	put("graph/treehash123")
+
+	t.Run("lists keys under prefix", func(t *testing.T) {
+		keys, err := s.List(ctx, "itg/repoA/")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{
+			"itg/repoA/2024-01-01/100_abc",
+			"itg/repoA/2024-01-02/200_def",
+		}, keys)
+	})
+
+	t.Run("different prefix returns different keys", func(t *testing.T) {
+		keys, err := s.List(ctx, "itg/repoB/")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"itg/repoB/2024-01-01/300_ghi"}, keys)
+	})
+
+	t.Run("non-matching prefix returns empty", func(t *testing.T) {
+		keys, err := s.List(ctx, "nonexistent/")
+		require.NoError(t, err)
+		assert.Empty(t, keys)
+	})
+
+	t.Run("empty prefix returns all keys", func(t *testing.T) {
+		keys, err := s.List(ctx, "")
+		require.NoError(t, err)
+		assert.Len(t, keys, 4)
+	})
+}
+
 func TestMemoryStorage_Exists(t *testing.T) {
 	ctx := context.Background()
 	s := NewMemoryStorage()

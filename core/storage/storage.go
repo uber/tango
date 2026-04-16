@@ -58,4 +58,6 @@ type Storage interface {
 	Put(ctx context.Context, req UploadRequest) error
 	// Exists checks whether a blob exists in the storage.
 	Exists(ctx context.Context, key string) (bool, error)
+	// List returns the keys of all blobs under the given directory prefix.
+	List(ctx context.Context, dir string) ([]string, error)
 }

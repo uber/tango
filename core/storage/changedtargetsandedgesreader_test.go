@@ -128,6 +128,7 @@ func (s *errStorage) Put(_ context.Context, _ UploadRequest) error { return nil 
 func (s *errStorage) Exists(_ context.Context, _ string) (bool, error) {
 	return false, s.err
 }
+func (s *errStorage) List(_ context.Context, _ string) ([]string, error) { return nil, s.err }
 
 // nilResponseStorage is a Storage stub that returns a nil DownloadResponse from Get.
 type nilResponseStorage struct{}
@@ -139,3 +140,4 @@ func (s *nilResponseStorage) Put(_ context.Context, _ UploadRequest) error { ret
 func (s *nilResponseStorage) Exists(_ context.Context, _ string) (bool, error) {
 	return false, nil
 }
+func (s *nilResponseStorage) List(_ context.Context, _ string) ([]string, error) { return nil, nil }
