@@ -534,19 +534,3 @@ func chunkOptimizedTargets(targets []*pb.OptimizedTarget, chunkSize int) []*pb.G
 func NewStringSet(vals ...string) graph.StringSet {
 	return graph.NewStringSet(vals...)
 }
-
-// diskHasherFactory creates a SourceHasher that reads from disk with optional known hashes.
-// This is a convenience implementation; callers can provide their own HasherFactory.
-func diskHasherFactory(workspaceRoot string, knownHashes map[string][]byte, fullHashRepos []string, excludedFiles []string) targethasher.SourceHasher {
-	return targethasher.NewSourceHasher(targethasher.Params{
-		WorkspaceRoot: workspaceRoot,
-		HashConfig: targethasher.HashConfig{
-			KnownSourceHashes: knownHashes,
-			FullHashRepos:     fullHashRepos,
-			ExcludedFiles:     excludedFiles,
-		},
-	})
-}
-
-// DefaultHasherFactory is a HasherFactory backed by disk and git file hashes.
-var DefaultHasherFactory HasherFactory = diskHasherFactory
