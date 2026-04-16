@@ -66,27 +66,27 @@ type BazelFactory func(workspacePath string) (bazel.Bazel, error)
 type Provider struct {
 	// git points to the origin clone and is used to fetch BaseSha and look up
 	// commit timestamps for cache key searches.
-	git           git.Interface
-	cache         cache.Cache
+	git   git.Interface
+	cache cache.Cache
 	// analyzer is used for GetFileCategory (pattern matching only, no git).
-	analyzer      changeanalyzer.Analyzer
+	analyzer changeanalyzer.Analyzer
 	// analyzerCfg is stored so a per-request workspace analyzer can be created
 	// in GetGraph for AnalyzeChange (which needs the workspace git).
 	analyzerCfg   changeanalyzer.Config
 	bazelFactory  BazelFactory
 	hasherFactory HasherFactory
-	cfg            Config
+	cfg           Config
 	logger        *zap.SugaredLogger
 }
 
 // Params contains the dependencies for creating a new Provider.
 type Params struct {
 	// Git points to the origin clone for fetching BaseSha and commit timestamps.
-	Git          git.Interface
+	Git git.Interface
 	// BazelFactory creates a per-request bazel client pointed at the workspace
 	// path supplied in GetGraphRequest.WorkspacePath.
-	BazelFactory BazelFactory
-	Cache        cache.Cache
+	BazelFactory  BazelFactory
+	Cache         cache.Cache
 	HasherFactory HasherFactory
 	Config        Config
 	Logger        *zap.SugaredLogger

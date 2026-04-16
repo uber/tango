@@ -85,15 +85,15 @@ func (s StringSet) UnsortedList() []string {
 
 // OptimizedTarget is a representation of a Target that is optimized for storage.
 type OptimizedTarget struct {
-	ID              int    `json:"id"`
-	Hash            []byte `json:"hash"`
-	HashWithoutDeps []byte `json:"hashWithoutDeps"`
-	RuleType        int    `json:"ruleTypeID"`
-	Deps            IntSet `json:"deps"`
-	ReverseDeps     IntSet `json:"reverseDeps"`
-	Tags            []int  `json:"tagIDs"`
-	Root            bool   `json:"root"`
-	External        bool   `json:"external"`
+	ID              int         `json:"id"`
+	Hash            []byte      `json:"hash"`
+	HashWithoutDeps []byte      `json:"hashWithoutDeps"`
+	RuleType        int         `json:"ruleTypeID"`
+	Deps            IntSet      `json:"deps"`
+	ReverseDeps     IntSet      `json:"reverseDeps"`
+	Tags            []int       `json:"tagIDs"`
+	Root            bool        `json:"root"`
+	External        bool        `json:"external"`
 	Attributes      map[int]int `json:"attributes"`
 }
 

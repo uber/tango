@@ -187,7 +187,8 @@ func (c *impl) GetCommitTimeSecond(ctx context.Context, ref string) (int64, erro
 }
 
 // FileHashes gets a mapping of files to their hashes based on `git ls-tree --full-tree -r <ref>`.
-func (c *impl) FileHashes(ctx context.Context, ref string) (map[string][]byte, error) {	out, err := c.runner.output(ctx, c.directory, "git", "ls-tree", "--full-tree", "-r", ref)
+func (c *impl) FileHashes(ctx context.Context, ref string) (map[string][]byte, error) {
+	out, err := c.runner.output(ctx, c.directory, "git", "ls-tree", "--full-tree", "-r", ref)
 	if err != nil {
 		return nil, err
 	}
