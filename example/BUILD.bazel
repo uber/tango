@@ -8,10 +8,7 @@ go_library(
     deps = [
         "//config",
         "//controller",
-        "//core/bazel",
         "//core/git",
-        "//core/itg",
-        "//core/itg/cache",
         "//core/repomanager",
         "//core/storage",
         "//core/storage/disk",

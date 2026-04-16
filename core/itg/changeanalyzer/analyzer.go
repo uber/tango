@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/uber/tango/core/git"
 	"go.uber.org/multierr"
 )
 
@@ -74,16 +75,11 @@ const (
 	Renamed ChangedFileStatus = "R"
 )
 
-// ChangedFileInfo encapsulates information about a changed file.
-type ChangedFileInfo struct {
-	Status ChangedFileStatus
-	Path   string
-}
-
 // Git is the minimal git interface required by the analyzer.
+// It is a subset of git.Interface and is satisfied directly by git.Interface.
 type Git interface {
-	DiffWithStatus(ctx context.Context, baseRef, targetRef string) ([]ChangedFileInfo, error)
-	FetchRemote(ctx context.Context, remote, branch string, args ...string) error
+	DiffWithStatus(ctx context.Context, baseRef, targetRef string) ([]git.DiffEntry, error)
+	Fetch(ctx context.Context, remote, ref string, options ...string) error
 }
 
 // AnalyzeChangeRequest represents the request to analyze the change.
@@ -94,7 +90,7 @@ type AnalyzeChangeRequest struct {
 // AnalyzeChangeResponse represents the response of the change analysis.
 type AnalyzeChangeResponse struct {
 	ChangeComplexity ChangeComplexity
-	ChangedFileInfo  []ChangedFileInfo
+	Changes          []git.DiffEntry
 	Summary          map[FileCategory]map[ChangedFileStatus]int
 }
 
@@ -161,7 +157,7 @@ func (a *analyzer) AnalyzeChange(ctx context.Context, request *AnalyzeChangeRequ
 			return nil, err
 		}
 
-		errFetch := a.git.FetchRemote(ctx, "origin", "main", "--no-tags")
+		errFetch := a.git.Fetch(ctx, "origin", "main", "--no-tags")
 		if errFetch != nil {
 			return nil, multierr.Append(err, fmt.Errorf("fetch origin/main: %w", errFetch))
 		}
@@ -173,7 +169,7 @@ func (a *analyzer) AnalyzeChange(ctx context.Context, request *AnalyzeChangeRequ
 
 	response := &AnalyzeChangeResponse{
 		ChangeComplexity: UnknownComplexity,
-		ChangedFileInfo:  changes,
+		Changes:          changes,
 	}
 
 	if len(changes) == 0 {
@@ -187,7 +183,7 @@ func (a *analyzer) AnalyzeChange(ctx context.Context, request *AnalyzeChangeRequ
 		if _, ok := summary[fileType]; !ok {
 			summary[fileType] = map[ChangedFileStatus]int{}
 		}
-		summary[fileType][change.Status]++
+		summary[fileType][ChangedFileStatus(change.Status)]++
 	}
 
 	response.Summary = summary

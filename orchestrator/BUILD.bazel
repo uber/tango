@@ -13,7 +13,6 @@ go_library(
         "//core/bazel",
         "//core/common",
         "//core/git",
-        "//core/itg",
         "//core/repomanager",
         "//core/storage",
         "//core/workspace",
@@ -31,7 +30,6 @@ go_test(
     deps = [
         "//core/git",
         "//core/git/gitmock",
-        "//core/itg",
         "//core/repomanager/mock",
         "//core/storage",
         "//core/storage/storagemock",

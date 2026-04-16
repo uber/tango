@@ -101,7 +101,7 @@ func New(p Params) (*Provider, error) {
 		IgnoredFilePatterns:  p.Config.IgnoredFilePatterns,
 	}
 	// Validate patterns upfront.
-	a, err := changeanalyzer.NewAnalyzer(&gitAdapter{g: p.Git}, analyzerCfg)
+	a, err := changeanalyzer.NewAnalyzer(p.Git, analyzerCfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating change analyzer: %w", err)
 	}
@@ -173,7 +173,7 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 	}
 	// Per-request analyzer backed by the workspace git so AnalyzeChange sees the
 	// correct "HEAD" (TargetRef with PR diffs) rather than the origin clone's HEAD.
-	wsAnalyzer, err := changeanalyzer.NewAnalyzer(&gitAdapter{g: wsGit}, p.analyzerCfg)
+	wsAnalyzer, err := changeanalyzer.NewAnalyzer(wsGit, p.analyzerCfg)
 	if err != nil {
 		return GetGraphResult{}, fmt.Errorf("creating workspace change analyzer: %w", err)
 	}
@@ -326,23 +326,15 @@ func (p *Provider) calculateGraphIncrementally(ctx context.Context, params calcP
 		return params.baseGraph, nil
 	}
 
-	changes := make([]changeanalyzer.ChangedFileInfo, 0, len(rawChanges))
-	for _, e := range rawChanges {
-		changes = append(changes, changeanalyzer.ChangedFileInfo{
-			Status: changeanalyzer.ChangedFileStatus(e.Status),
-			Path:   e.Path,
-		})
-	}
-
 	var knownHashes map[string][]byte
-	if len(changes) >= p.cfg.MinChangedFilesForGitHash {
+	if len(rawChanges) >= p.cfg.MinChangedFilesForGitHash {
 		knownHashes, err = params.git.FileHashes(ctx, params.targetRef)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	updateInput, err := p.parseChanges(changes, graph.NewStringSet(), params.workspaceRoot)
+	updateInput, err := p.parseChanges(rawChanges, graph.NewStringSet(), params.workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -383,13 +375,14 @@ func (p *Provider) searchCachedGraph(ctx context.Context, remote string, baseRef
 	return k, nil
 }
 
-func (p *Provider) parseChanges(changes []changeanalyzer.ChangedFileInfo, excludedFiles graph.StringSet, workspaceRoot string) (graph.UpdateGraphInput, error) {
+func (p *Provider) parseChanges(changes []git.DiffEntry, excludedFiles graph.StringSet, workspaceRoot string) (graph.UpdateGraphInput, error) {
 	deletedSrcFiles := graph.NewStringSet()
 	changedPkgs := graph.NewStringSet()
 	deletedPkgs := graph.NewStringSet()
 
 	for _, changeInfo := range changes {
 		fileCategory := p.analyzer.GetFileCategory(changeInfo.Path)
+		status := changeanalyzer.ChangedFileStatus(changeInfo.Status)
 		switch fileCategory {
 		case changeanalyzer.BuildFile:
 			curPkg := filepath.Dir(changeInfo.Path)
@@ -397,13 +390,13 @@ func (p *Provider) parseChanges(changes []changeanalyzer.ChangedFileInfo, exclud
 				curPkg = ""
 			}
 
-			if changeInfo.Status == changeanalyzer.Added || changeInfo.Status == changeanalyzer.Modified {
+			if status == changeanalyzer.Added || status == changeanalyzer.Modified {
 				changedPkgs.Insert(curPkg)
 			} else {
 				deletedPkgs.Insert(curPkg)
 			}
 
-			shouldAddParent, err := p.shouldAddParentPkg(changeInfo.Status, curPkg, workspaceRoot)
+			shouldAddParent, err := p.shouldAddParentPkg(status, curPkg, workspaceRoot)
 			if err != nil {
 				return graph.UpdateGraphInput{}, fmt.Errorf("determine if should handle parent package: %w", err)
 			}
@@ -417,7 +410,7 @@ func (p *Provider) parseChanges(changes []changeanalyzer.ChangedFileInfo, exclud
 				}
 			}
 		case changeanalyzer.RegularFile:
-			if changeInfo.Status == changeanalyzer.Modified && isExcludedFile(changeInfo.Path, excludedFiles) {
+			if status == changeanalyzer.Modified && isExcludedFile(changeInfo.Path, excludedFiles) {
 				break
 			}
 			parentPkg, err := workspaceutils.GetContainingPackage(workspaceRoot, changeInfo.Path)
@@ -427,7 +420,7 @@ func (p *Provider) parseChanges(changes []changeanalyzer.ChangedFileInfo, exclud
 				}
 				changedPkgs.Insert(parentPkg)
 			}
-			if changeInfo.Status == changeanalyzer.Deleted {
+			if status == changeanalyzer.Deleted {
 				deletedSrcFiles.Insert(changeInfo.Path)
 			}
 		}
@@ -579,30 +572,6 @@ func chunkOptimizedTargets(targets []*pb.OptimizedTarget, chunkSize int) []*pb.G
 		})
 	}
 	return responses
-}
-
-// gitAdapter adapts git.Interface to changeanalyzer.Git.
-type gitAdapter struct {
-	g git.Interface
-}
-
-func (a *gitAdapter) DiffWithStatus(ctx context.Context, baseRef, targetRef string) ([]changeanalyzer.ChangedFileInfo, error) {
-	entries, err := a.g.DiffWithStatus(ctx, baseRef, targetRef)
-	if err != nil {
-		return nil, err
-	}
-	changes := make([]changeanalyzer.ChangedFileInfo, 0, len(entries))
-	for _, e := range entries {
-		changes = append(changes, changeanalyzer.ChangedFileInfo{
-			Status: changeanalyzer.ChangedFileStatus(e.Status),
-			Path:   e.Path,
-		})
-	}
-	return changes, nil
-}
-
-func (a *gitAdapter) FetchRemote(ctx context.Context, remote, branch string, args ...string) error {
-	return a.g.Fetch(ctx, remote, branch, args...)
 }
 
 // NewStringSet creates a StringSet from values (convenience re-export for users).
