@@ -105,7 +105,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 
 	gitModule := factory(ws.Path())
 	for _, req := range param.Req.BuildDescription.Requests {
-		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.BaseSha, req.GetCommit())
+		request, err := workspace.NewRequest(req.GetUrl(), gitModule, remote, param.Req.BuildDescription.BaseSha, req.GetCommit())
 		if err != nil {
 			b.logger.Errorw("getGraph: Error creating request", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 			return nil, err
@@ -149,7 +149,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 					BazelClient:        client,
 					GitClient:          gitModule,
 					Config:             repoCfg,
-					ExtraExcludedFiles: param.Req.GetOutputConfig().GetExcludeFilesRegex(),
+					ExtraExcludedFiles: param.Req.GetOutputConfig().ExcludeFilesRegex,
 				})
 			}
 			result, err := runner.Compute(ctx, ws)

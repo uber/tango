@@ -1,1 +1,1 @@
-common --disk_cache=~/.cache/bazel-disk-cache --remote_cache=
+common --disk_cache=~/.cache/bazel-disk-cache
