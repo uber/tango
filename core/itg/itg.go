@@ -36,6 +36,7 @@ import (
 	"github.com/uber/tango/core/itg/workspaceutils"
 	"github.com/uber/tango/core/targethasher"
 	pb "github.com/uber/tango/tangopb"
+	"go.uber.org/zap"
 )
 
 // Config contains the configuration for the ITG provider.
@@ -63,32 +64,32 @@ type BazelFactory func(workspacePath string) (bazel.Bazel, error)
 
 // Provider implements IncrementalGraphProvider using the ITG algorithm.
 type Provider struct {
-	// git and bazel point to the origin clone and are used for step 1 only.
-	// Step 1 checks out historical commits to compute the BaseSha graph.
-	git          git.Interface
-	bazel        bazel.Bazel
-	cache        cache.Cache
+	// git points to the origin clone and is used to fetch BaseSha and look up
+	// commit timestamps for cache key searches.
+	git           git.Interface
+	cache         cache.Cache
 	// analyzer is used for GetFileCategory (pattern matching only, no git).
-	analyzer     changeanalyzer.Analyzer
+	analyzer      changeanalyzer.Analyzer
 	// analyzerCfg is stored so a per-request workspace analyzer can be created
-	// in GetGraph for AnalyzeChange (which needs the workspace git for step 0).
-	analyzerCfg  changeanalyzer.Config
-	bazelFactory BazelFactory
+	// in GetGraph for AnalyzeChange (which needs the workspace git).
+	analyzerCfg   changeanalyzer.Config
+	bazelFactory  BazelFactory
 	hasherFactory HasherFactory
-	cfg           Config
+	cfg            Config
+	logger        *zap.SugaredLogger
 }
 
 // Params contains the dependencies for creating a new Provider.
 type Params struct {
-	// Git and Bazel point to the origin clone and are used for step 1.
+	// Git points to the origin clone for fetching BaseSha and commit timestamps.
 	Git          git.Interface
-	Bazel        bazel.Bazel
 	// BazelFactory creates a per-request bazel client pointed at the workspace
-	// path supplied in GetGraphRequest.WorkspacePath (step 2).
+	// path supplied in GetGraphRequest.WorkspacePath.
 	BazelFactory BazelFactory
 	Cache        cache.Cache
 	HasherFactory HasherFactory
 	Config        Config
+	Logger        *zap.SugaredLogger
 }
 
 var queryOptions = []string{"--order_output=no", "--proto:locations", "--noproto:default_values"}
@@ -107,13 +108,13 @@ func New(p Params) (*Provider, error) {
 	}
 	return &Provider{
 		git:           p.Git,
-		bazel:         p.Bazel,
 		cache:         p.Cache,
 		analyzer:      a,
 		analyzerCfg:   analyzerCfg,
 		bazelFactory:  p.BazelFactory,
 		hasherFactory: p.HasherFactory,
 		cfg:           p.Config,
+		logger:        p.Logger,
 	}, nil
 }
 
@@ -129,9 +130,8 @@ type GetGraphRequest struct {
 	// Remote is the remote repo identifier used to namespace cache entries.
 	Remote string
 	// WorkspacePath is the absolute path to the worker workspace that has the user's
-	// diffs applied (i.e. the workspace checked out to TargetRef). It is used for
-	// step 2 git operations and the bazel query, so the ITG origin clone (p.git) is
-	// not disturbed by user-diff checkouts.
+	// diffs applied (i.e. the workspace checked out to TargetRef). All git operations
+	// and bazel queries use this workspace so the ITG origin clone is not disturbed.
 	WorkspacePath string
 }
 
@@ -143,13 +143,8 @@ type GetGraphResult struct {
 }
 
 // GetGraph incrementally computes the full target graph for the given request.
-// It uses a two-step approach:
-//
-//  1. zero_revision → BaseSha: computes the graph at BaseSha using the origin
-//     clone (p.git / p.bazel), checking out historical commits there.
-//  2. BaseSha → TargetRef: computes the incremental diff using the workspace
-//     at req.WorkspacePath (already at TargetRef with user diffs applied),
-//     so the origin clone state is not affected.
+// It finds the nearest cached graph and applies incremental updates from that
+// cache point to TargetRef using the workspace git and bazel.
 func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphResult, error) {
 	// Ensure BaseSha is present in the origin clone before any git operations.
 	if _, err := p.git.RevParse(ctx, fmt.Sprintf("%s^{commit}", req.BaseSha)); err != nil {
@@ -163,16 +158,11 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 		return GetGraphResult{}, fmt.Errorf("getting commit time for sha %s: %w", req.BaseSha, err)
 	}
 
-	// Build per-request workspace git and bazel for steps 0 and 2.
-	// The workspace is already checked out to TargetRef (with user diffs applied),
-	// so we must not do any checkouts there — only reads/diffs/bazel queries.
 	wsGit := git.New(req.WorkspacePath)
 	wsBazel, err := p.bazelFactory(req.WorkspacePath)
 	if err != nil {
 		return GetGraphResult{}, fmt.Errorf("creating workspace bazel client: %w", err)
 	}
-	// Per-request analyzer backed by the workspace git so AnalyzeChange sees the
-	// correct "HEAD" (TargetRef with PR diffs) rather than the origin clone's HEAD.
 	wsAnalyzer, err := changeanalyzer.NewAnalyzer(wsGit, p.analyzerCfg)
 	if err != nil {
 		return GetGraphResult{}, fmt.Errorf("creating workspace change analyzer: %w", err)
@@ -183,8 +173,7 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 		return GetGraphResult{}, fmt.Errorf("searching for cached graph: %w", err)
 	}
 
-	// Validate the full range (zero_revision → targetRef) upfront so we fail fast
-	// before doing any checkout or bazel work.
+	// Validate the full range upfront so we fail fast before doing any bazel work.
 	cacheToTarget, err := wsAnalyzer.AnalyzeChange(ctx, &changeanalyzer.AnalyzeChangeRequest{
 		BaseRef:   cacheKey.BaseSha,
 		TargetRef: req.TargetRef,
@@ -201,58 +190,9 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 		return GetGraphResult{}, fmt.Errorf("loading cached graph: %w", err)
 	}
 
-	// Restore origin clone HEAD when done — step 1 checks out BaseSha there.
-	curRef, err := p.git.RevParse(ctx, "HEAD")
-	if err != nil {
-		return GetGraphResult{}, fmt.Errorf("parsing HEAD: %w", err)
-	}
-	defer func() { _ = p.git.Checkout(ctx, curRef, "--force") }()
-
-	// Step 1: zero_revision → BaseSha.
-	// Uses the origin clone (p.git / p.bazel) so that workspace is not touched.
-	baseShaKey := cache.Key{
-		Remote:               req.Remote,
-		BaseCommitTimeSecond: baseShaCommitSecond,
-		BaseSha:              req.BaseSha,
-	}
-	baseShaGraph, err := p.calculateGraphIncrementally(ctx, calcParams{
+	targetGraph, err := p.calculateGraphIncrementally(ctx, calcParams{
 		baseGraph:     cacheGraph,
 		baseRef:       cacheKey.BaseSha,
-		targetRef:     req.BaseSha,
-		git:           p.git,
-		bazel:         p.bazel,
-		workspaceRoot: p.cfg.WorkspaceRoot,
-	})
-	if err != nil {
-		return GetGraphResult{}, fmt.Errorf("incremental graph calculation to base sha: %w", err)
-	}
-
-	// Fast path: no user diffs applied — baseSha IS the target. Upload to the ITG cache
-	// and return directly without a second incremental calculation or a Copy.
-	if req.BaseSha == req.TargetRef {
-		go func() {
-			_ = p.cache.Put(ctx, baseShaGraph, baseShaKey)
-		}()
-		return GetGraphResult{
-			TargetRefGraph: optimizedGraphToProto(baseShaGraph),
-		}, nil
-	}
-
-	// Write baseShaGraph to the ITG cache in a goroutine so it runs concurrently
-	// with the second calculateGraphIncrementally below (which mutates baseShaGraph
-	// in-place). We clone first to avoid a data race with the gob encoder.
-	// Cache write failures are non-fatal.
-	baseShaGraphCopy := baseShaGraph.Copy()
-	go func() {
-		_ = p.cache.Put(ctx, baseShaGraphCopy, baseShaKey)
-	}()
-
-	// Step 2: BaseSha → TargetRef (user's diffs applied on top).
-	// Uses the workspace git and bazel so the origin clone is not disturbed.
-	// The workspace is already at TargetRef, so Checkout is a no-op there.
-	targetGraph, err := p.calculateGraphIncrementally(ctx, calcParams{
-		baseGraph:     baseShaGraph,
-		baseRef:       req.BaseSha,
 		targetRef:     req.TargetRef,
 		git:           wsGit,
 		bazel:         wsBazel,
@@ -260,6 +200,22 @@ func (p *Provider) GetGraph(ctx context.Context, req GetGraphRequest) (GetGraphR
 	})
 	if err != nil {
 		return GetGraphResult{}, fmt.Errorf("incremental graph calculation to target ref: %w", err)
+	}
+
+	// Seed baseSha graph to the ITG cache only if the computed graph is baseSha, so the
+	// parallel request with user diffs can find it via searchCachedGraph.
+	// baseSha is guaranteed to be on the main branch.
+	if req.BaseSha == req.TargetRef {
+		go func() {
+			putErr := p.cache.Put(ctx, targetGraph, cache.Key{
+				Remote:               req.Remote,
+				BaseCommitTimeSecond: baseShaCommitSecond,
+				BaseSha:              req.BaseSha,
+			})
+			if putErr != nil {
+				p.logger.Errorw("error seeding base sha graph to cache", zap.Error(putErr))
+			}
+		}()
 	}
 
 	return GetGraphResult{

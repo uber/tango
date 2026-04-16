@@ -14,5 +14,6 @@ go_library(
         "//core/itg/workspaceutils",
         "//core/targethasher",
         "//tangopb",
+        "@org_uber_go_zap//:zap",
     ],
 )
