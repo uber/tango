@@ -285,8 +285,8 @@ func TestGetReverseDepsAsTargets(t *testing.T) {
 	t.Run("unrelated targets not returned", func(t *testing.T) {
 		t.Parallel()
 		targets := map[string]*targethasher.Target{
-			"//pkg:a":       {Name: "//pkg:a", RuleType: "go_library"},
-			"//pkg:b":       {Name: "//pkg:b", RuleType: "go_library", Deps: []string{"//pkg:a"}},
+			"//pkg:a":         {Name: "//pkg:a", RuleType: "go_library"},
+			"//pkg:b":         {Name: "//pkg:b", RuleType: "go_library", Deps: []string{"//pkg:a"}},
 			"//pkg:unrelated": {Name: "//pkg:unrelated", RuleType: "go_library"},
 		}
 		g := OptimizeGraph(targets)

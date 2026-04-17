@@ -79,7 +79,7 @@ func TestInvalidateHashRecursively(t *testing.T) {
 	t.Run("targets with nil hash are skipped", func(t *testing.T) {
 		t.Parallel()
 		targets := map[string]*targethasher.Target{
-			"//pkg:a": {Name: "//pkg:a", RuleType: "go_library"},                   // Hash=nil
+			"//pkg:a": {Name: "//pkg:a", RuleType: "go_library"},                            // Hash=nil
 			"//pkg:b": {Name: "//pkg:b", RuleType: "go_library", Deps: []string{"//pkg:a"}}, // Hash=nil
 		}
 		g := OptimizeGraph(targets)
@@ -198,8 +198,8 @@ func TestUpsertTarget(t *testing.T) {
 		t.Parallel()
 		g := OptimizeGraph(nil)
 		newTarget := &targethasher.Target{
-			Name:  "//pkg:lib",
-			Deps:  []string{"//pkg:missing"},
+			Name: "//pkg:lib",
+			Deps: []string{"//pkg:missing"},
 		}
 		err := g.upsertTarget(newTarget, NewIntSet())
 		assert.Error(t, err)
@@ -219,8 +219,8 @@ func TestUpsertTarget(t *testing.T) {
 		libID := g.TargetNameToID["//pkg:lib"]
 
 		updated := &targethasher.Target{
-			Name:  "//pkg:lib",
-			Deps:  []string{"//pkg:dep2"},
+			Name: "//pkg:lib",
+			Deps: []string{"//pkg:dep2"},
 		}
 		require.NoError(t, g.upsertTarget(updated, NewIntSet()))
 
@@ -236,9 +236,9 @@ func TestUpsertTarget(t *testing.T) {
 			"//pkg:dep": {Name: "//pkg:dep", RuleType: "go_library", Hash: []byte{1}},
 		})
 		newTarget := &targethasher.Target{
-			Name:  "//pkg:lib",
-			Hash:  nil, // no hash yet
-			Deps:  []string{"//pkg:dep"},
+			Name: "//pkg:lib",
+			Hash: nil, // no hash yet
+			Deps: []string{"//pkg:dep"},
 		}
 		invalidated := NewIntSet()
 		require.NoError(t, g.upsertTarget(newTarget, invalidated))
