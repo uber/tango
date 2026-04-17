@@ -1,0 +1,33 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "graph",
+    srcs = [
+        "graph.go",
+        "invalidate.go",
+        "update.go",
+    ],
+    importpath = "github.com/uber/tango/core/itg/graph",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core/targethasher",
+        "@com_github_bazelbuild_buildtools//build_proto",
+        "@com_github_deckarep_golang_set_v2//:golang-set",
+    ],
+)
+
+go_test(
+    name = "graph_test",
+    srcs = [
+        "graph_test.go",
+        "invalidate_test.go",
+        "update_test.go",
+    ],
+    embed = [":graph"],
+    deps = [
+        "//core/targethasher",
+        "@com_github_bazelbuild_buildtools//build_proto",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)
