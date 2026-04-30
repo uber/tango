@@ -1,3 +1,4 @@
+load("@rules_go//extras:gomock.bzl", "gomock")
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
@@ -28,10 +29,18 @@ go_test(
         "//core/bazel",
         "@com_github_bazelbuild_buildtools//build_proto",
         "@com_github_deckarep_golang_set_v2//:golang-set",
+        "@com_github_golang_mock//gomock",
         "@com_github_google_go_cmp//cmp",
         "@com_github_google_go_cmp//cmp/cmpopts",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
-        "@org_uber_go_mock//gomock",
     ],
+)
+
+gomock(
+    name = "mock_sourcehasher",
+    out = "mock_sourcehasher_test.go",
+    interfaces = ["SourceHasher"],
+    library = ":targethasher",
+    package = "targethasher",
 )
