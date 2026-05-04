@@ -116,6 +116,11 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	for i := 0; i < len(jobs); i++ {
 		i := i
 		go func(idx int) {
+			defer func() {
+				if r := recover(); r != nil {
+					results <- graphResult{order: idx, err: fmt.Errorf("panic in graph fetch: %v", r)}
+				}
+			}()
 			var revision *pb.BuildDescription
 			if idx == 0 {
 				revision = request.GetFirstRevision()
@@ -133,7 +138,8 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 			for {
 				chunk, err := graphReader.Read()
 				if err == io.EOF {
-					break
+					results <- graphResult{order: idx, chunks: chunks}
+					return
 				}
 				if err != nil {
 					results <- graphResult{order: idx, err: err}
@@ -141,7 +147,6 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 				}
 				chunks = append(chunks, chunk)
 			}
-			results <- graphResult{order: idx, chunks: chunks}
 		}(i)
 	}
 
@@ -151,13 +156,10 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 			jobs[res.order].graphStreamChunks = res.chunks
 			jobs[res.order].completed = true
 			jobs[res.order].err = res.err
-			if res.err == io.EOF {
-				jobs[res.order].err = nil
-			}
 			if res.chunks == nil && res.err == nil {
 				jobs[res.order].err = errors.New("no chunks returned")
 			}
-			if res.err != nil {
+			if jobs[res.order].err != nil {
 				other := (res.order + 1) % 2
 				if !jobs[other].completed {
 					jobs[other].cancel()
@@ -207,11 +209,12 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 
 	// Cache the computed result concurrently so it doesn't block the stream send.
 	go func() {
-		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
-		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
+		cacheCtx := context.Background()
+		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision())
+		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision())
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
-			if writeErr := storage.WriteChangedTargetsAndEdgesStream(ctx, c.storage, cacheKey, responses); writeErr != nil {
+			if writeErr := storage.WriteChangedTargetsAndEdgesStream(cacheCtx, c.storage, cacheKey, responses); writeErr != nil {
 				c.logger.Warn("GetChangedTargetsAndEdges: Failed to cache result", zap.Error(writeErr))
 			}
 		}
