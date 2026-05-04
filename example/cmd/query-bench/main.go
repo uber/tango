@@ -30,7 +30,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/gogo/protobuf/jsonpb"
 	"github.com/uber/tango/core/bazel"
+	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/targethasher"
 	"go.uber.org/zap"
 )
@@ -107,6 +109,20 @@ func run() error {
 		elapsed = time.Since(start)
 		totalDuration += elapsed
 		fmt.Printf("run %d: targethasher: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(targethasherResult.TargetNames))
+		start = time.Now()
+		response, err := common.ResultToGetTargetGraphResponse(targethasherResult) // also print the time to convert to GetTargetGraphResponse format
+		if err != nil {
+			return fmt.Errorf("run %d: converting to GetTargetGraphResponse: %w", i+1, err)
+		}
+		elapsed = time.Since(start)
+		fmt.Printf("run %d: ResultToGetTargetGraphResponse: %v  (%d responses)\n", i+1, elapsed.Round(time.Millisecond), len(response))
+		m := jsonpb.Marshaler{Indent: "  "}
+		for _, r := range response {
+			if err := m.Marshal(os.Stdout, r); err != nil {
+				return fmt.Errorf("run %d: encoding response: %w", i+1, err)
+			}
+			fmt.Println()
+		}
 	}
 
 	if *runs > 1 {

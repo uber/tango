@@ -7,7 +7,9 @@ go_library(
     visibility = ["//visibility:private"],
     deps = [
         "//core/bazel",
+        "//core/common",
         "//core/targethasher",
+        "@com_github_gogo_protobuf//jsonpb",
         "@org_uber_go_zap//:zap",
     ],
 )
