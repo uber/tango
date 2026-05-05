@@ -46,7 +46,7 @@ func GetGraphByTreeHash(remote, treehash string) string {
 
 // GetTreehashCachePath returns the cache path for the treehash.
 func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
-	return filepath.Join(ToShortRemote(buildDescription.Remote), buildDescription.BaseSha, getReqsHash(buildDescription.Requests)) + "-" + buildDescription.Strategy.String()
+	return filepath.Join(ToShortRemote(buildDescription.Remote), fmt.Sprintf("treehash-map-%s", buildDescription.BaseSha), getReqsHash(buildDescription.Requests)) + "-" + buildDescription.Strategy.String()
 }
 
 // GetComparedTargetsCachePath returns the cache path for a compared target graph result.

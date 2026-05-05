@@ -131,6 +131,11 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	for i := 0; i < len(jobs); i++ {
 		i := i
 		go func(idx int) {
+			defer func() {
+				if r := recover(); r != nil {
+					results <- graphResult{order: idx, err: fmt.Errorf("panic in graph fetch: %v", r)}
+				}
+			}()
 			var revision *pb.BuildDescription
 			if idx == 0 {
 				revision = request.GetFirstRevision()
@@ -149,7 +154,8 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			for {
 				chunk, err := graphReader.Read()
 				if err == io.EOF {
-					break
+					results <- graphResult{order: idx, chunks: chunks}
+					return
 				}
 				if err != nil {
 					results <- graphResult{order: idx, err: err}
@@ -157,7 +163,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 				}
 				chunks = append(chunks, chunk)
 			}
-			results <- graphResult{order: idx, chunks: chunks}
 		}(i)
 	}
 
@@ -168,9 +173,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			jobs[res.order].graphStreamChunks = res.chunks
 			jobs[res.order].completed = true
 			jobs[res.order].err = res.err
-			if res.err == io.EOF {
-				jobs[res.order].err = nil
-			}
 			if res.chunks == nil && res.err == nil {
 				jobs[res.order].err = errors.New("no chunks returned")
 			}
@@ -178,7 +180,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			// one of the computations failed, if the other one has not
 			// completed yet, cancel it and wait for the result to come in,
 			// which would be a context cancelled result then
-			if res.err != nil {
+			if jobs[res.order].err != nil {
 				other := (res.order + 1) % 2
 				if !jobs[other].completed {
 					jobs[other].cancel()
@@ -238,11 +240,12 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// during computation. Both the goroutine and the send loop below only read
 	// changedTargetsResponses, so concurrent access is safe.
 	go func() {
-		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
-		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
+		cacheCtx := context.Background()
+		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision())
+		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision())
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
-			if writeErr := storage.WriteChangedTargetsStream(ctx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
+			if writeErr := storage.WriteChangedTargetsStream(cacheCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
 				c.logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
 			}
 		}
@@ -277,11 +280,6 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 
 	sourceFileRuleTypeID := detectSourceFileID(secondMetadata)
 
-	// 2) Build newTargetsMap and processing order (source files first if present)
-	newTargetsMap := make(map[string]*pb.OptimizedTarget, len(secondByName))
-	for name, t := range secondByName {
-		newTargetsMap[name] = t
-	}
 	changedByName := make(map[string]*pb.ChangedTarget)
 	changedSourceFileTargets := make(map[string]struct{})
 

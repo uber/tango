@@ -16,14 +16,6 @@ go_library(
     ],
 )
 
-gomock(
-    name = "mock_sourcehasher",
-    out = "mock_sourcehasher_test.go",
-    interfaces = ["SourceHasher"],
-    library = ":targethasher",
-    package = "targethasher",
-)
-
 go_test(
     name = "targethasher_test",
     srcs = [
@@ -43,4 +35,12 @@ go_test(
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
     ],
+)
+
+gomock(
+    name = "mock_sourcehasher",
+    out = "mock_sourcehasher_test.go",
+    interfaces = ["SourceHasher"],
+    library = ":targethasher",
+    package = "targethasher",
 )

@@ -81,7 +81,7 @@ func TestGetTreehashCachePath(t *testing.T) {
 	h := md5.New()
 	h.Write([]byte("custom://foo/bar"))
 	h.Write([]byte("github://org/repo/pull/1"))
-	want := filepath.Join("uber/tango", "deadbeef", fmt.Sprintf("%x", h.Sum(nil))) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
+	want := filepath.Join("uber/tango", "treehash-map-deadbeef", fmt.Sprintf("%x", h.Sum(nil))) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
 	assert.Equal(t, want, got)
 }
 

@@ -625,13 +625,18 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 
 		// same as before. For translated external targets, ensure the original target is also added to
 		// the targets map
-		if _, ok := p.Targets[p.TargetName]; !ok && p.TargetName != target.Name {
-			p.Targets[p.TargetName] = &Target{
-				Name:            p.TargetName,
-				RuleType:        UnknownRuleType,
-				Hash:            target.Hash,
-				HashWithoutDeps: target.HashWithoutDeps,
-				External:        target.External,
+		_, ok := p.Targets[p.TargetName]
+		if p.TargetName != target.Name {
+			if !ok {
+				p.Targets[p.TargetName] = &Target{
+					Name:            p.TargetName,
+					RuleType:        UnknownRuleType,
+					Hash:            target.Hash,
+					HashWithoutDeps: target.HashWithoutDeps,
+					External:        target.External,
+				}
+			} else {
+				p.Targets[p.TargetName].Hash = target.Hash
 			}
 		}
 	}

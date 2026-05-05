@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "workspaceutils",
+    srcs = ["workspaceutils.go"],
+    importpath = "github.com/uber/tango/core/itg/workspaceutils",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "workspaceutils_test",
+    srcs = ["workspaceutils_test.go"],
+    embed = [":workspaceutils"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)
