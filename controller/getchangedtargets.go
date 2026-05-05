@@ -222,9 +222,15 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// At this point we should have both graphs computed successfully. Let's compare them.
 	firstGraph := jobs[0].graphStreamChunks
 	secondGraph := jobs[1].graphStreamChunks
+	// Drop job references so the GC can reclaim them once the comparison is done.
+	jobs[0].graphStreamChunks = nil
+	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
 	changedTargetsResponses, err := c.compareTargetGraphs(ctx, firstGraph, secondGraph, request.GetOutputConfig())
+	// Allow GC of raw graph data while the caching goroutine runs.
+	firstGraph = nil
+	secondGraph = nil
 	if err != nil {
 		c.logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
 		return fmt.Errorf("failed to compare target graphs: %w", err)
@@ -273,8 +279,13 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 	indexStart := time.Now()
 	firstTargetsByID, firstMetadata := getTargetsAndMetadata(firstGraph)
 	secondTargetsByID, secondMetadata := getTargetsAndMetadata(secondGraph)
+	// Release raw chunk slices — individual target protos are now held by the ID maps.
+	firstGraph = nil
+	secondGraph = nil
 	firstByName := buildNameIndex(firstTargetsByID, firstMetadata)
+	firstTargetsByID = nil // all pointers are now in firstByName; drop the duplicate map
 	secondByName := buildNameIndex(secondTargetsByID, secondMetadata)
+	secondTargetsByID = nil
 	indexDuration := time.Since(indexStart)
 	scope.Timer("index_duration").Record(indexDuration)
 

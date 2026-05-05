@@ -29,7 +29,14 @@ import (
 )
 
 // edgeKey identifies an edge by source and dependency target names.
+// Used only by buildEdgeSet and its tests; compareTargetGraphsAndEdges uses
+// packed uint64 keys for lower memory overhead.
 type edgeKey struct{ source, dep string }
+
+// packEdge packs two int32 IDs into a uint64 for use as a compact, allocation-free map key.
+func packEdge(src, dep int32) uint64 {
+	return uint64(uint32(src))<<32 | uint64(uint32(dep))
+}
 
 // GetChangedTargetsAndEdges returns the changed targets and edges between two revisions.
 func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndEdgesRequest, stream pb.TangoServiceGetChangedTargetsAndEdgesYARPCServer) error {
@@ -194,9 +201,15 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 
 	firstGraph := jobs[0].graphStreamChunks
 	secondGraph := jobs[1].graphStreamChunks
+	// Drop job references so the GC can reclaim them once the comparison is done.
+	jobs[0].graphStreamChunks = nil
+	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
 	responses, err := c.compareTargetGraphsAndEdges(ctx, firstGraph, secondGraph, request.GetOutputConfig())
+	// Allow GC of raw graph data while the caching goroutine runs.
+	firstGraph = nil
+	secondGraph = nil
 	if err != nil {
 		c.logger.Error("GetChangedTargetsAndEdges: Failed to compare target graphs", zap.Error(err))
 		return fmt.Errorf("failed to compare target graphs: %w", err)
@@ -243,8 +256,13 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 	// 1) Extract targets and metadata; index by canonical names.
 	firstTargetsByID, firstMetadata := getTargetsAndMetadata(firstGraph)
 	secondTargetsByID, secondMetadata := getTargetsAndMetadata(secondGraph)
+	// Release raw chunk slices — individual target protos are now held by the ID maps.
+	firstGraph = nil
+	secondGraph = nil
 	firstByName := buildNameIndex(firstTargetsByID, firstMetadata)
+	firstTargetsByID = nil // all pointers are now in firstByName; drop the duplicate map
 	secondByName := buildNameIndex(secondTargetsByID, secondMetadata)
+	secondTargetsByID = nil
 
 	sourceFileRuleTypeID := detectSourceFileID(secondMetadata)
 
@@ -260,18 +278,24 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 	getAttrNameId := func(name string) int32 { return attrNameMapper.ID(name) }
 	getAttrValId := func(name string) int32 { return attrValMapper.ID(name) }
 
+	// edgeMapper assigns compact int32 IDs to target names for edge comparison only.
+	// Kept separate from targetMapper so the output metadata isn't polluted with
+	// every target name in the graph (only changed/added/removed targets belong there).
+	edgeMapper := common.NewNameIDMapper()
+	getEdgeID := func(name string) int32 { return edgeMapper.ID(name) }
+
 	changedByName := make(map[string]*pb.ChangedTarget)
 	changedSourceFileTargets := make(map[string]struct{})
 	var addedTargets []*pb.OptimizedTarget
 	secondIDMapping := secondMetadata.GetTargetIdMapping()
-	secondEdges := make(map[edgeKey]struct{})
+	secondEdges := make(map[uint64]struct{})
 
 	// 3) Single pass over second graph: identify changed/new/added targets and build second edge set.
 	for name, newT := range secondByName {
 		// Build second edge set inline to avoid a separate iteration.
 		for _, depID := range newT.GetDirectDependencies() {
 			if depName := secondIDMapping[depID]; depName != "" {
-				secondEdges[edgeKey{source: name, dep: depName}] = struct{}{}
+				secondEdges[packEdge(getEdgeID(name), getEdgeID(depName))] = struct{}{}
 			}
 		}
 
@@ -372,13 +396,13 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 
 	// 7) Single pass over first graph: collect removed targets and build first edge set.
 	firstIDMapping := firstMetadata.GetTargetIdMapping()
-	firstEdges := make(map[edgeKey]struct{})
+	firstEdges := make(map[uint64]struct{})
 	var removedTargets []*pb.OptimizedTarget
 	for name, oldT := range firstByName {
 		// Build first edge set inline to avoid a separate iteration.
 		for _, depID := range oldT.GetDirectDependencies() {
 			if depName := firstIDMapping[depID]; depName != "" {
-				firstEdges[edgeKey{source: name, dep: depName}] = struct{}{}
+				firstEdges[packEdge(getEdgeID(name), getEdgeID(depName))] = struct{}{}
 			}
 		}
 		if _, exists := secondByName[name]; !exists {
@@ -395,24 +419,33 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 	}
 
 	// 8) Compute new and removed edges from the sets built above.
+	// Invert edgeMapper once to resolve packed IDs back to names for the output edges.
+	edgeNames := edgeMapper.Invert()
 	var newEdges []*pb.Edge
 	for e := range secondEdges {
 		if _, exists := firstEdges[e]; !exists {
+			srcName := edgeNames[int32(e>>32)]
+			depName := edgeNames[int32(e&0xFFFFFFFF)]
 			newEdges = append(newEdges, &pb.Edge{
-				SourceId: getTargetId(e.source),
-				TargetId: getTargetId(e.dep),
+				SourceId: getTargetId(srcName),
+				TargetId: getTargetId(depName),
 			})
 		}
 	}
 	var removedEdges []*pb.Edge
 	for e := range firstEdges {
 		if _, exists := secondEdges[e]; !exists {
+			srcName := edgeNames[int32(e>>32)]
+			depName := edgeNames[int32(e&0xFFFFFFFF)]
 			removedEdges = append(removedEdges, &pb.Edge{
-				SourceId: getTargetId(e.source),
-				TargetId: getTargetId(e.dep),
+				SourceId: getTargetId(srcName),
+				TargetId: getTargetId(depName),
 			})
 		}
 	}
+	// Release edge maps and name table — no longer needed.
+	secondEdges = nil
+	firstEdges = nil
 
 	// 10) Build canonical metadata.
 	meta := &pb.Metadata{
