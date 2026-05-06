@@ -45,22 +45,28 @@ func GetGraphByTreeHash(remote, treehash string) string {
 }
 
 // GetTreehashCachePath returns the cache path for the treehash.
-func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
-	return filepath.Join(ToShortRemote(buildDescription.Remote), fmt.Sprintf("treehash-map-%s", buildDescription.BaseSha), getReqsHash(buildDescription.Requests)) + "-" + buildDescription.Strategy.String()
+// extraExcludeFilesRegex is folded into the key when non-empty so requests with
+// different exclusion sets do not collide. Empty list ⇒ legacy path unchanged.
+func GetTreehashCachePath(buildDescription *tangopb.BuildDescription, extraExcludeFilesRegex []string) string {
+	return filepath.Join(ToShortRemote(buildDescription.Remote), fmt.Sprintf("treehash-map-%s", buildDescription.BaseSha), getReqsHash(buildDescription.Requests)) + "-" + buildDescription.Strategy.String() + getExtraExcludesSuffix(extraExcludeFilesRegex)
 }
 
 // GetComparedTargetsCachePath returns the cache path for a compared target graph result.
 // treehash1 and treehash2 are the resolved treehashes of the first and second revisions.
 // remote is the shared git remote for both revisions.
-func GetComparedTargetsCachePath(remote, treehash1, treehash2 string) string {
-	return filepath.Join("compared-targets", ToShortRemote(remote), treehash1, treehash2)
+// extraExcludeFilesRegex is folded into the key when non-empty so requests with
+// different exclusion sets do not collide. Empty list ⇒ legacy path unchanged.
+func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, extraExcludeFilesRegex []string) string {
+	return filepath.Join("compared-targets", ToShortRemote(remote), treehash1, treehash2) + getExtraExcludesSuffix(extraExcludeFilesRegex)
 }
 
 // GetChangedTargetsAndEdgesCachePath returns the cache path for a GetChangedTargetsAndEdges result.
 // treehash1 and treehash2 are the resolved treehashes of the first and second revisions.
 // remote is the shared git remote for both revisions.
-func GetChangedTargetsAndEdgesCachePath(remote, treehash1, treehash2 string) string {
-	return filepath.Join("compared-targets-and-edges", ToShortRemote(remote), treehash1, treehash2)
+// extraExcludeFilesRegex is folded into the key when non-empty so requests with
+// different exclusion sets do not collide. Empty list ⇒ legacy path unchanged.
+func GetChangedTargetsAndEdgesCachePath(remote, treehash1, treehash2 string, extraExcludeFilesRegex []string) string {
+	return filepath.Join("compared-targets-and-edges", ToShortRemote(remote), treehash1, treehash2) + getExtraExcludesSuffix(extraExcludeFilesRegex)
 }
 
 // getReqsHash returns a fixed-length MD5 hash of the sorted request URLs.
@@ -80,6 +86,23 @@ func getReqsHash(requests []*tangopb.Request) string {
 		h.Write([]byte(url))
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// getExtraExcludesSuffix returns "" for an empty list (preserves legacy cache
+// paths), otherwise "-<md5 hex of sorted regexes>". Sort + per-string update
+// mirrors getReqsHash's style.
+func getExtraExcludesSuffix(regexes []string) string {
+	if len(regexes) == 0 {
+		return ""
+	}
+	sorted := make([]string, len(regexes))
+	copy(sorted, regexes)
+	sort.Strings(sorted)
+	h := md5.New()
+	for _, r := range sorted {
+		h.Write([]byte(r))
+	}
+	return fmt.Sprintf("-%x", h.Sum(nil))
 }
 
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse

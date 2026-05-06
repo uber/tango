@@ -60,8 +60,14 @@ message OutputConfig {
     // Maximum BFS distance from a CHANGE_TYPE_DIRECT target to include. Only considered when compute_distances is true.
     // 0 (default) means no limit. Positive values limit BFS: 1 = only DIRECT + immediate reverse deps, etc.
     int32 max_distance = 6;
-    // Regex patterns to exclude from source file hashing
-    repeated string exclude_files_regex = 7;
+}
+
+// RequestOptions carries request-scoped inputs that affect computation.
+// Distinct from OutputConfig, which only shapes the response.
+message RequestOptions {
+    // Regex patterns appended to RepositoryConfig.ExcludedFiles when
+    // computing target hashes. Additive — does not replace server config.
+    repeated string extra_exclude_files_regex = 1;
 }
 
 // OptimizedTarget represents a build target in a compact format with stable numeric identifiers for
@@ -137,6 +143,8 @@ message GetTargetGraphRequest {
     BuildDescription build_description = 1;
     // Controls what payload details are included in responses; used to reduce payload size when full attribute set is not needed
     OutputConfig output_config = 2;
+    // Request-scoped inputs that affect computation (e.g. extra exclude regexes)
+    RequestOptions request_options = 3;
 }
 
 // GetTargetGraphResponse is a stream response for the GetTargetGraph method.
@@ -159,6 +167,8 @@ message GetChangedTargetsRequest {
     BuildDescription second_revision = 2;
     // Controls what payload details are included in responses; used to reduce payload size when full attribute set is not needed
     OutputConfig output_config = 3;
+    // Request-scoped inputs that affect computation (e.g. extra exclude regexes)
+    RequestOptions request_options = 4;
 }
 
 // GetChangedTargetsResponse is the response for the GetChangedTargets method.
@@ -182,6 +192,8 @@ message GetChangedTargetGraphRequest {
     BuildDescription second_revision = 2;
     // Controls what payload details are included in responses; used to reduce payload size when full attribute set is not needed
     OutputConfig output_config = 3;
+    // Request-scoped inputs that affect computation (e.g. extra exclude regexes)
+    RequestOptions request_options = 4;
 }
 
 // GetChangedTargetGraphResponse is the response for the GetChangedTargetGraph method.
@@ -202,6 +214,8 @@ message GetChangedTargetsAndEdgesRequest {
     BuildDescription second_revision = 2;
     // Controls what payload details are included in responses; used to reduce payload size when full attribute set is not needed
     OutputConfig output_config = 3;
+    // Request-scoped inputs that affect computation (e.g. extra exclude regexes)
+    RequestOptions request_options = 4;
 }
 
 message GetChangedTargetsAndEdgesResponse {

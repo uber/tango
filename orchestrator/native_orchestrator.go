@@ -149,7 +149,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 					BazelClient:        client,
 					GitClient:          gitModule,
 					Config:             repoCfg,
-					ExtraExcludedFiles: param.Req.GetOutputConfig().GetExcludeFilesRegex(),
+					ExtraExcludedFiles: param.Req.GetRequestOptions().GetExtraExcludeFilesRegex(),
 				})
 			}
 			result, err := runner.Compute(ctx, ws)
@@ -174,7 +174,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		}
 	}
 	// Map build description to treehash for future lookup.
-	treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription)
+	treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription, param.Req.GetRequestOptions().GetExtraExcludeFilesRegex())
 	treehashReader := bytes.NewReader([]byte(treehash))
 	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
 	if err != nil {

@@ -56,10 +56,11 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 
 	// Try to serve from cache first.
 	cacheStart := time.Now()
-	treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
-	treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
+	extraExcludes := request.GetRequestOptions().GetExtraExcludeFilesRegex()
+	treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision(), extraExcludes)
+	treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision(), extraExcludes)
 	if treehash1 != "" && treehash2 != "" {
-		cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
+		cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, extraExcludes)
 		cachedReader, cacheErr := storage.NewChangedTargetsAndEdgesReader(ctx, c.storage, cacheKey)
 		if cacheErr != nil && !storage.IsNotFound(cacheErr) {
 			c.logger.Warn("GetChangedTargetsAndEdges: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
@@ -134,7 +135,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 			} else {
 				revision = request.GetSecondRevision()
 			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig())
+			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig(), request.GetRequestOptions())
 			if err != nil || graphReader == nil {
 				results <- graphResult{order: idx, err: err}
 				return
@@ -223,10 +224,10 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	// Cache the computed result concurrently so it doesn't block the stream send.
 	go func() {
 		cacheCtx := context.Background()
-		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision())
-		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision())
+		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision(), extraExcludes)
+		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision(), extraExcludes)
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2)
+			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, extraExcludes)
 			if writeErr := storage.WriteChangedTargetsAndEdgesStream(cacheCtx, c.storage, cacheKey, responses); writeErr != nil {
 				c.logger.Warn("GetChangedTargetsAndEdges: Failed to cache result", zap.Error(writeErr))
 			}

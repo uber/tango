@@ -36,7 +36,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	logger := c.logger.With(
 		zap.Any("build_description", request.GetBuildDescription()),
 	)
-	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetOutputConfig())
+	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetOutputConfig(), request.GetRequestOptions())
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 // getGraph retrieves the target graph for a given build description and output config.
 // Returns nil response for cache miss or empty response cases (to indicate no send should happen).
 // TODO: remove output config from input parameters if not used in future.
-func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDescription, outputConfig *pb.OutputConfig) (storage.GraphReader, error) {
+func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDescription, outputConfig *pb.OutputConfig, requestOptions *pb.RequestOptions) (storage.GraphReader, error) {
 	start := time.Now()
 	if buildDescription == nil {
 		return nil, errors.New("build description is empty or invalid")
@@ -85,14 +85,14 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 		zap.Any("build_description", buildDescription),
 	)
 	// Look up the the git treehash based on cache path
-	treehashCachePath := common.GetTreehashCachePath(buildDescription)
+	treehashCachePath := common.GetTreehashCachePath(buildDescription, requestOptions.GetExtraExcludeFilesRegex())
 	treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
 	if err != nil {
 		if storage.IsNotFound(err) {
 			// Cache miss - blob doesn't exist, need to compute and store target graph
 			logger.Info("getGraph: treehash not found", zap.Error(err))
 			computeStart := time.Now()
-			graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: &pb.GetTargetGraphRequest{BuildDescription: buildDescription, OutputConfig: outputConfig}})
+			graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: &pb.GetTargetGraphRequest{BuildDescription: buildDescription, OutputConfig: outputConfig, RequestOptions: requestOptions}})
 			if err != nil {
 				return nil, err
 			}
