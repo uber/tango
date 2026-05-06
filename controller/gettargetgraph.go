@@ -36,7 +36,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	logger := c.logger.With(
 		zap.Any("build_description", request.GetBuildDescription()),
 	)
-	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetOutputConfig(), request.GetRequestOptions())
+	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 // getGraph retrieves the target graph for a given build description and output config.
 // Returns nil response for cache miss or empty response cases (to indicate no send should happen).
 // TODO: remove output config from input parameters if not used in future.
-func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDescription, outputConfig *pb.OutputConfig, requestOptions *pb.RequestOptions) (storage.GraphReader, error) {
+func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDescription, outputConfig *pb.OutputConfig, requestOptions *pb.RequestOptions, bypassCache bool) (storage.GraphReader, error) {
 	start := time.Now()
 	if buildDescription == nil {
 		return nil, errors.New("build description is empty or invalid")
@@ -84,59 +84,63 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 	logger := c.logger.With(
 		zap.Any("build_description", buildDescription),
 	)
-	// Look up the the git treehash based on cache path
-	treehashCachePath := common.GetTreehashCachePath(buildDescription, requestOptions.GetExtraExcludeFilesRegex())
-	treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
-	if err != nil {
-		if storage.IsNotFound(err) {
-			// Cache miss - blob doesn't exist, need to compute and store target graph
-			logger.Info("getGraph: treehash not found", zap.Error(err))
-			computeStart := time.Now()
-			graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: &pb.GetTargetGraphRequest{BuildDescription: buildDescription, OutputConfig: outputConfig, RequestOptions: requestOptions}})
-			if err != nil {
+	if !bypassCache {
+		// Look up the the git treehash based on cache path
+		treehashCachePath := common.GetTreehashCachePath(buildDescription, requestOptions.GetExtraExcludeFilesRegex())
+		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
+		if err != nil {
+			if storage.IsNotFound(err) {
+				// Cache miss - blob doesn't exist, need to compute and store target graph
+				logger.Info("getGraph: treehash not found", zap.Error(err))
+			} else {
+				// Other errors (network, infra issues) should be retried
+				logger.Error("getGraph: Storage error", zap.Error(err))
 				return nil, err
 			}
-			logger.Info("getGraph: computed target graph",
-				zap.Duration("compute_duration", time.Since(computeStart)),
+		} else if treehashResponse == nil || treehashResponse.ReadCloser == nil {
+			// This shouldn't happen with valid Storage implementation, but handle gracefully
+			logger.Info("getGraph: Empty response from Storage")
+			return nil, nil // Return nil to indicate no send should happen
+		} else {
+			defer treehashResponse.ReadCloser.Close()
+			treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)
+			if err != nil {
+				logger.Error("getGraph: Error reading treehash", zap.Error(err))
+				return nil, err
+			}
+			logger.Info("getGraph: treehash found")
+			treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes))
+			// Download the target graph based on treehash.
+			storageStart := time.Now()
+			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
+			if err != nil {
+				logger.Error("getGraph: Error reading graph from Storage", zap.Error(err))
+				return nil, err
+			}
+			logger.Info("getGraph: loaded graph from storage",
+				zap.Duration("storage_duration", time.Since(storageStart)),
 				zap.Duration("total_duration", time.Since(start)),
 			)
 			scope := c.scope.SubScope("get_graph")
-			scope.Timer("compute_duration").Record(time.Since(computeStart))
+			scope.Counter("cache_hit").Inc(1)
+			scope.Timer("storage_duration").Record(time.Since(storageStart))
 			scope.Timer("total_duration").Record(time.Since(start))
 			return graphReader, nil
 		}
-		// Other errors (network, infra issues) should be retried
-		logger.Error("getGraph: Storage error", zap.Error(err))
-		return nil, err
+	} else {
+		logger.Info("getGraph: bypass_cache=true, skipping cache lookup")
 	}
-	if treehashResponse == nil || treehashResponse.ReadCloser == nil {
-		// This shouldn't happen with valid Storage implementation, but handle gracefully
-		logger.Info("getGraph: Empty response from Storage")
-		return nil, nil // Return nil to indicate no send should happen
-	}
-	defer treehashResponse.ReadCloser.Close()
-	treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)
+	computeStart := time.Now()
+	graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: &pb.GetTargetGraphRequest{BuildDescription: buildDescription, OutputConfig: outputConfig, RequestOptions: requestOptions}, BypassCache: bypassCache})
 	if err != nil {
-		logger.Error("getGraph: Error reading treehash", zap.Error(err))
 		return nil, err
 	}
-
-	logger.Info("getGraph: treehash found")
-	treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes))
-	// Download the target graph based on treehash.
-	storageStart := time.Now()
-	graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
-	if err != nil {
-		logger.Error("getGraph: Error reading graph from Storage", zap.Error(err))
-		return nil, err
-	}
-	logger.Info("getGraph: loaded graph from storage",
-		zap.Duration("storage_duration", time.Since(storageStart)),
+	logger.Info("getGraph: computed target graph",
+		zap.Duration("compute_duration", time.Since(computeStart)),
 		zap.Duration("total_duration", time.Since(start)),
 	)
 	scope := c.scope.SubScope("get_graph")
-	scope.Counter("cache_hit").Inc(1)
-	scope.Timer("storage_duration").Record(time.Since(storageStart))
+	scope.Timer("compute_duration").Record(time.Since(computeStart))
 	scope.Timer("total_duration").Record(time.Since(start))
 	return graphReader, nil
 }

@@ -124,54 +124,55 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		return nil, err
 	}
 	treehashPath := common.GetGraphByTreeHash(param.Req.BuildDescription.Remote, treehash)
-	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
-	if err == nil {
-		return graphReader, nil
-	}
-	if err != nil {
-		if storage.IsNotFound(err) {
-			b.logger.Infow("getGraph: treehash not found. Computing the target graph.", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
-			// Compute the target graph and store it in storage.
-			runner := b.graphRunner
-			if runner == nil {
-				client, err := bazel.NewBazelClient(bazel.Params{
-					WorkspacePath: ws.Path(),
-					Logger:        b.logger,
-					BazelCommand:  repoCfg.BazelCommand,
-					QueryTimeout:  time.Duration(repoCfg.QueryTimeout) * time.Second,
-				})
-				if err != nil {
-					b.logger.Errorw("getGraph: Error creating bazel client", zap.Error(err))
-					return nil, err
-				}
-				// Use default native graph runner
-				runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
-					BazelClient:        client,
-					GitClient:          gitModule,
-					Config:             repoCfg,
-					ExtraExcludedFiles: param.Req.GetRequestOptions().GetExtraExcludeFilesRegex(),
-				})
-			}
-			result, err := runner.Compute(ctx, ws)
-			if err != nil {
-				b.logger.Errorw("getGraph: Error computing target graph", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
-				return nil, err
-			}
-			responses, err := common.ResultToGetTargetGraphResponse(result)
-			if err != nil {
-				b.logger.Errorw("getGraph: Error converting target graph to GetTargetGraphResponse", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
-				return nil, err
-			}
-			err = storage.WriteGraphStream(ctx, b.storage, treehashPath, responses)
-			if err != nil {
-				b.logger.Errorw("getGraph: Error writing target graph to storage", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
-				return nil, err
-			}
-		} else {
+	if !param.BypassCache {
+		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
+		if err == nil {
+			return graphReader, nil
+		}
+		if !storage.IsNotFound(err) {
 			// Other errors (network, infra issues) should be retried
 			b.logger.Errorw("getGraph: Storage error", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 			return nil, err
 		}
+		b.logger.Infow("getGraph: treehash not found. Computing the target graph.", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
+	} else {
+		b.logger.Infow("getGraph: bypass_cache=true. Skipping cache lookup, computing the target graph.", zap.Any("request build description", param.Req.BuildDescription))
+	}
+	// Compute the target graph and store it in storage.
+	runner := b.graphRunner
+	if runner == nil {
+		client, err := bazel.NewBazelClient(bazel.Params{
+			WorkspacePath: ws.Path(),
+			Logger:        b.logger,
+			BazelCommand:  repoCfg.BazelCommand,
+			QueryTimeout:  time.Duration(repoCfg.QueryTimeout) * time.Second,
+		})
+		if err != nil {
+			b.logger.Errorw("getGraph: Error creating bazel client", zap.Error(err))
+			return nil, err
+		}
+		// Use default native graph runner
+		runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
+			BazelClient:        client,
+			GitClient:          gitModule,
+			Config:             repoCfg,
+			ExtraExcludedFiles: param.Req.GetRequestOptions().GetExtraExcludeFilesRegex(),
+		})
+	}
+	result, err := runner.Compute(ctx, ws)
+	if err != nil {
+		b.logger.Errorw("getGraph: Error computing target graph", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
+		return nil, err
+	}
+	responses, err := common.ResultToGetTargetGraphResponse(result)
+	if err != nil {
+		b.logger.Errorw("getGraph: Error converting target graph to GetTargetGraphResponse", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
+		return nil, err
+	}
+	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, responses)
+	if err != nil {
+		b.logger.Errorw("getGraph: Error writing target graph to storage", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
+		return nil, err
 	}
 	// Map build description to treehash for future lookup.
 	treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription, param.Req.GetRequestOptions().GetExtraExcludeFilesRegex())
@@ -181,7 +182,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		b.logger.Errorw("getGraph: Error reading target graph from storage", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 		return nil, err
 	}
-	graphReader, err = storage.NewGraphReader(ctx, b.storage, treehashPath)
+	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 	if err != nil {
 		b.logger.Errorw("getGraph: Error creating graph reader", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 		return nil, err

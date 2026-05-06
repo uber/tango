@@ -145,6 +145,8 @@ message GetTargetGraphRequest {
     OutputConfig output_config = 2;
     // Request-scoped inputs that affect computation (e.g. extra exclude regexes)
     RequestOptions request_options = 3;
+    // When true, skip reading from cache and recompute the target graph, overwriting the existing cached result.
+    bool bypass_cache = 4;
 }
 
 // GetTargetGraphResponse is a stream response for the GetTargetGraph method.
@@ -169,6 +171,8 @@ message GetChangedTargetsRequest {
     OutputConfig output_config = 3;
     // Request-scoped inputs that affect computation (e.g. extra exclude regexes)
     RequestOptions request_options = 4;
+    // When true, skip reading from cache and recompute, overwriting the existing cached result.
+    bool bypass_cache = 5;
 }
 
 // GetChangedTargetsResponse is the response for the GetChangedTargets method.
@@ -194,6 +198,8 @@ message GetChangedTargetGraphRequest {
     OutputConfig output_config = 3;
     // Request-scoped inputs that affect computation (e.g. extra exclude regexes)
     RequestOptions request_options = 4;
+    // When true, skip reading from cache and recompute, overwriting the existing cached result.
+    bool bypass_cache = 5;
 }
 
 // GetChangedTargetGraphResponse is the response for the GetChangedTargetGraph method.
@@ -216,6 +222,8 @@ message GetChangedTargetsAndEdgesRequest {
     OutputConfig output_config = 3;
     // Request-scoped inputs that affect computation (e.g. extra exclude regexes)
     RequestOptions request_options = 4;
+    // When true, skip reading from cache and recompute, overwriting the existing cached result.
+    bool bypass_cache = 5;
 }
 
 message GetChangedTargetsAndEdgesResponse {

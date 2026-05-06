@@ -55,53 +55,55 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	logger.Info("GetChangedTargetsAndEdges: Processing request")
 
 	// Try to serve from cache first.
-	cacheStart := time.Now()
 	extraExcludes := request.GetRequestOptions().GetExtraExcludeFilesRegex()
-	treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision(), extraExcludes)
-	treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision(), extraExcludes)
-	if treehash1 != "" && treehash2 != "" {
-		cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, extraExcludes)
-		cachedReader, cacheErr := storage.NewChangedTargetsAndEdgesReader(ctx, c.storage, cacheKey)
-		if cacheErr != nil && !storage.IsNotFound(cacheErr) {
-			c.logger.Warn("GetChangedTargetsAndEdges: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
-		} else if cachedReader != nil {
-			var cached []*pb.GetChangedTargetsAndEdgesResponse
-			var readErr error
-			for {
-				var resp *pb.GetChangedTargetsAndEdgesResponse
-				resp, readErr = cachedReader.Read()
-				if readErr == io.EOF {
-					readErr = nil
-					break
-				}
-				if readErr != nil {
-					break
-				}
-				cached = append(cached, resp)
-			}
-			cachedReader.Close()
-
-			if readErr != nil {
-				c.logger.Warn("GetChangedTargetsAndEdges: Cached result is incomplete, recomputing", zap.Error(readErr))
-			} else {
-				cacheReadDuration := time.Since(cacheStart)
-				c.logger.Info("GetChangedTargetsAndEdges: Cache hit, streaming from storage",
-					zap.Duration("cache_read_duration", cacheReadDuration),
-				)
-				scope.Counter("cache_hit").Inc(1)
-				scope.Timer("cache_read_duration").Record(cacheReadDuration)
-				for _, resp := range cached {
-					if err := stream.Send(resp); err != nil {
-						c.logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
-						return fmt.Errorf("failed to send cached response: %w", err)
+	if !request.GetBypassCache() {
+		cacheStart := time.Now()
+		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision(), extraExcludes)
+		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision(), extraExcludes)
+		if treehash1 != "" && treehash2 != "" {
+			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, extraExcludes)
+			cachedReader, cacheErr := storage.NewChangedTargetsAndEdgesReader(ctx, c.storage, cacheKey)
+			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
+				c.logger.Warn("GetChangedTargetsAndEdges: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
+			} else if cachedReader != nil {
+				var cached []*pb.GetChangedTargetsAndEdgesResponse
+				var readErr error
+				for {
+					var resp *pb.GetChangedTargetsAndEdgesResponse
+					resp, readErr = cachedReader.Read()
+					if readErr == io.EOF {
+						readErr = nil
+						break
 					}
+					if readErr != nil {
+						break
+					}
+					cached = append(cached, resp)
 				}
-				totalDuration := time.Since(start)
-				c.logger.Info("GetChangedTargetsAndEdges: Successfully streamed from cache",
-					zap.Duration("total_duration", totalDuration),
-				)
-				scope.Timer("total_duration").Record(totalDuration)
-				return nil
+				cachedReader.Close()
+
+				if readErr != nil {
+					c.logger.Warn("GetChangedTargetsAndEdges: Cached result is incomplete, recomputing", zap.Error(readErr))
+				} else {
+					cacheReadDuration := time.Since(cacheStart)
+					c.logger.Info("GetChangedTargetsAndEdges: Cache hit, streaming from storage",
+						zap.Duration("cache_read_duration", cacheReadDuration),
+					)
+					scope.Counter("cache_hit").Inc(1)
+					scope.Timer("cache_read_duration").Record(cacheReadDuration)
+					for _, resp := range cached {
+						if err := stream.Send(resp); err != nil {
+							c.logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
+							return fmt.Errorf("failed to send cached response: %w", err)
+						}
+					}
+					totalDuration := time.Since(start)
+					c.logger.Info("GetChangedTargetsAndEdges: Successfully streamed from cache",
+						zap.Duration("total_duration", totalDuration),
+					)
+					scope.Timer("total_duration").Record(totalDuration)
+					return nil
+				}
 			}
 		}
 	}
@@ -135,7 +137,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 			} else {
 				revision = request.GetSecondRevision()
 			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig(), request.GetRequestOptions())
+			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
 			if err != nil || graphReader == nil {
 				results <- graphResult{order: idx, err: err}
 				return

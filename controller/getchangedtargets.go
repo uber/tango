@@ -57,55 +57,57 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// Try to serve from cache first using the stored treehashes for both revisions.
 	// readTreehash returns "" on any miss/error so we silently skip the cache when
 	// either treehash is not yet available.
-	cacheStart := time.Now()
 	extraExcludes := request.GetRequestOptions().GetExtraExcludeFilesRegex()
-	treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision(), extraExcludes)
-	treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision(), extraExcludes)
-	if treehash1 != "" && treehash2 != "" {
-		cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, extraExcludes)
-		cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
-		if cacheErr != nil && !storage.IsNotFound(cacheErr) {
-			c.logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
-		} else if cachedReader != nil {
-			// Buffer all responses before sending any. A concurrent goroutine write may have
-			// left a partial blob in storage; buffering lets us detect corruption and fall
-			// through to recompute before we've sent anything to the client.
-			var cached []*pb.GetChangedTargetsResponse
-			var readErr error
-			for {
-				var resp *pb.GetChangedTargetsResponse
-				resp, readErr = cachedReader.Read()
-				if readErr == io.EOF {
-					readErr = nil
-					break
+	if !request.GetBypassCache() {
+		cacheStart := time.Now()
+		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision(), extraExcludes)
+		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision(), extraExcludes)
+		if treehash1 != "" && treehash2 != "" {
+			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, extraExcludes)
+			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
+			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
+				c.logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
+			} else if cachedReader != nil {
+				// Buffer all responses before sending any. A concurrent goroutine write may have
+				// left a partial blob in storage; buffering lets us detect corruption and fall
+				// through to recompute before we've sent anything to the client.
+				var cached []*pb.GetChangedTargetsResponse
+				var readErr error
+				for {
+					var resp *pb.GetChangedTargetsResponse
+					resp, readErr = cachedReader.Read()
+					if readErr == io.EOF {
+						readErr = nil
+						break
+					}
+					if readErr != nil {
+						break
+					}
+					cached = append(cached, resp)
 				}
-				if readErr != nil {
-					break
-				}
-				cached = append(cached, resp)
-			}
-			cachedReader.Close()
+				cachedReader.Close()
 
-			if readErr != nil {
-				// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
-				c.logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
-			} else {
-				cacheReadDuration := time.Since(cacheStart)
-				c.logger.Info("GetChangedTargets: Cache hit, streaming from storage",
-					zap.Duration("cache_read_duration", cacheReadDuration),
-				)
-				scope.Counter("cache_hit").Inc(1)
-				scope.Timer("cache_read_duration").Record(cacheReadDuration)
-				if sendErr := sendWithDistanceFilter(stream, cached, request.GetOutputConfig()); sendErr != nil {
-					c.logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
-					return fmt.Errorf("failed to send cached response: %w", sendErr)
+				if readErr != nil {
+					// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
+					c.logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
+				} else {
+					cacheReadDuration := time.Since(cacheStart)
+					c.logger.Info("GetChangedTargets: Cache hit, streaming from storage",
+						zap.Duration("cache_read_duration", cacheReadDuration),
+					)
+					scope.Counter("cache_hit").Inc(1)
+					scope.Timer("cache_read_duration").Record(cacheReadDuration)
+					if sendErr := sendWithDistanceFilter(stream, cached, request.GetOutputConfig()); sendErr != nil {
+						c.logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
+						return fmt.Errorf("failed to send cached response: %w", sendErr)
+					}
+					totalDuration := time.Since(start)
+					c.logger.Info("GetChangedTargets: Successfully streamed from cache",
+						zap.Duration("total_duration", totalDuration),
+					)
+					scope.Timer("total_duration").Record(totalDuration)
+					return nil
 				}
-				totalDuration := time.Since(start)
-				c.logger.Info("GetChangedTargets: Successfully streamed from cache",
-					zap.Duration("total_duration", totalDuration),
-				)
-				scope.Timer("total_duration").Record(totalDuration)
-				return nil
 			}
 		}
 	}
@@ -143,7 +145,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			} else {
 				revision = request.GetSecondRevision()
 			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig(), request.GetRequestOptions())
+			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
 			if err != nil || graphReader == nil {
 				results <- graphResult{order: idx, err: err}
 				return

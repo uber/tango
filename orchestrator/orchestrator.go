@@ -24,7 +24,8 @@ import (
 
 // GetTargetGraphParam is the input of GetTargetGraph
 type GetTargetGraphParam struct {
-	Req *tangopb.GetTargetGraphRequest
+	Req         *tangopb.GetTargetGraphRequest
+	BypassCache bool
 }
 
 // ChangedTargetsParam is the input of ComputeChangedTargets
