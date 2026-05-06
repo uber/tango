@@ -40,6 +40,7 @@ func main() {
 	timeout := flag.Duration("timeout", 5*time.Minute, "request timeout")
 	maxDistance := flag.Int("max-distance", -1, "max distance for changed targets")
 	computeDistances := flag.Bool("compute-distances", false, "compute distances for changed targets")
+	bypassCache := flag.Bool("bypass-cache", false, "skip cache lookup and force recomputation, overwriting cached result")
 
 	newBaseSHA := flag.String("new-base-sha", "", "build description new base sha")
 	newRequestURLs := flag.String("new-request-urls", "", "comma-separated change request URLs for new state")
@@ -83,6 +84,7 @@ func main() {
 				BaseSha:  *baseSHA,
 				Requests: requests,
 			},
+			BypassCache: *bypassCache,
 		}
 		if err := callGetTargetGraph(ctx, client, logger, req); err != nil {
 			// log error and exit
@@ -126,6 +128,7 @@ func main() {
 				ComputeDistances: *computeDistances,
 				MaxDistance:      int32(*maxDistance),
 			},
+			BypassCache: *bypassCache,
 		}
 		if err := callGetChangedTargets(ctx, client, logger, req); err != nil {
 			logger.Errorf("Error: %v", err)
@@ -167,6 +170,7 @@ func main() {
 				ComputeDistances: *computeDistances,
 				MaxDistance:      int32(*maxDistance),
 			},
+			BypassCache: *bypassCache,
 		}
 		if err := callGetChangedTargetsAndEdges(ctx, client, logger, req); err != nil {
 			logger.Errorf("Error: %v", err)
