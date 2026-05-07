@@ -123,7 +123,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		b.logger.Errorw("Treehash computation failed", zap.Any("request build description", param.Req.BuildDescription), zap.Error(err))
 		return nil, err
 	}
-	treehashPath := common.GetGraphByTreeHash(param.Req.BuildDescription.Remote, treehash)
+	treehashPath := common.GetGraphByTreeHash(param.Req.BuildDescription.Remote, treehash, param.Req.GetRequestOptions())
 	if !param.BypassCache {
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 		if err == nil {
@@ -175,7 +175,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		return nil, err
 	}
 	// Map build description to treehash for future lookup.
-	treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription, param.Req.GetRequestOptions().GetExtraExcludeFilesRegex())
+	treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription)
 	treehashReader := bytes.NewReader([]byte(treehash))
 	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
 	if err != nil {

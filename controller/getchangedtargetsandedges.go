@@ -55,13 +55,12 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	logger.Info("GetChangedTargetsAndEdges: Processing request")
 
 	// Try to serve from cache first.
-	extraExcludes := request.GetRequestOptions().GetExtraExcludeFilesRegex()
 	if !request.GetBypassCache() {
 		cacheStart := time.Now()
-		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision(), extraExcludes)
-		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision(), extraExcludes)
+		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
+		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, extraExcludes)
+			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			cachedReader, cacheErr := storage.NewChangedTargetsAndEdgesReader(ctx, c.storage, cacheKey)
 			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
 				c.logger.Warn("GetChangedTargetsAndEdges: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
@@ -226,10 +225,10 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	// Cache the computed result concurrently so it doesn't block the stream send.
 	go func() {
 		cacheCtx := context.Background()
-		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision(), extraExcludes)
-		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision(), extraExcludes)
+		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision())
+		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision())
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, extraExcludes)
+			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			if writeErr := storage.WriteChangedTargetsAndEdgesStream(cacheCtx, c.storage, cacheKey, responses); writeErr != nil {
 				c.logger.Warn("GetChangedTargetsAndEdges: Failed to cache result", zap.Error(writeErr))
 			}

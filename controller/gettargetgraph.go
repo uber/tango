@@ -86,7 +86,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 	)
 	if !bypassCache {
 		// Look up the the git treehash based on cache path
-		treehashCachePath := common.GetTreehashCachePath(buildDescription, requestOptions.GetExtraExcludeFilesRegex())
+		treehashCachePath := common.GetTreehashCachePath(buildDescription)
 		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
 		if err != nil {
 			if storage.IsNotFound(err) {
@@ -109,7 +109,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 				return nil, err
 			}
 			logger.Info("getGraph: treehash found")
-			treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes))
+			treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes), requestOptions)
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)

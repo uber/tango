@@ -61,8 +61,21 @@ func TestGetGraphByTreeHash(t *testing.T) {
 	t.Parallel()
 	remote := "git@github:uber/tango"
 	treehash := "abcd1234"
-	got := GetGraphByTreeHash(remote, treehash)
+
+	// Nil/empty options ⇒ legacy path (regression: cache compatibility).
+	got := GetGraphByTreeHash(remote, treehash, nil)
 	assert.Equal(t, filepath.Join("uber/tango", treehash), got)
+	assert.Equal(t, got, GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{}))
+
+	// Non-empty options ⇒ suffix appended; different lists ⇒ different keys.
+	withFoo := GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}})
+	assert.NotEqual(t, got, withFoo)
+	assert.NotEqual(t, withFoo, GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"bar.*"}}))
+	// Order-independence: sort before hashing.
+	assert.Equal(t,
+		GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"a", "b"}}),
+		GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"b", "a"}}),
+	)
 }
 
 func TestGetTreehashCachePath(t *testing.T) {
@@ -76,26 +89,13 @@ func TestGetTreehashCachePath(t *testing.T) {
 		BaseSha:  "deadbeef",
 		Requests: reqs,
 	}
-	got := GetTreehashCachePath(desc, nil)
+	got := GetTreehashCachePath(desc)
 	// URLs are sorted then fed individually into the digest (no separator)
 	h := md5.New()
 	h.Write([]byte("custom://foo/bar"))
 	h.Write([]byte("github://org/repo/pull/1"))
 	want := filepath.Join("uber/tango", "treehash-map-deadbeef", fmt.Sprintf("%x", h.Sum(nil))) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
 	assert.Equal(t, want, got)
-
-	// Empty regex list ⇒ legacy path (regression: cache compatibility).
-	assert.Equal(t, want, GetTreehashCachePath(desc, []string{}))
-
-	// Non-empty regex list ⇒ suffix appended; different lists ⇒ different keys.
-	withExcludes := GetTreehashCachePath(desc, []string{"foo.*"})
-	assert.NotEqual(t, want, withExcludes)
-	assert.NotEqual(t, withExcludes, GetTreehashCachePath(desc, []string{"bar.*"}))
-	// Order-independence: sort before hashing.
-	assert.Equal(t,
-		GetTreehashCachePath(desc, []string{"a", "b"}),
-		GetTreehashCachePath(desc, []string{"b", "a"}),
-	)
 }
 
 func TestGetReqsHash(t *testing.T) {
@@ -146,11 +146,11 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 	got := GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil)
 	assert.Equal(t, filepath.Join("compared-targets", "uber/tango", "abc", "def"), got)
 
-	// Empty list ⇒ legacy path.
-	assert.Equal(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", []string{}))
+	// Nil/empty options ⇒ legacy path.
+	assert.Equal(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{}))
 
 	// Different exclude lists ⇒ different keys.
-	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", []string{"foo.*"}))
+	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}}))
 }
 
 func TestGetChangedTargetsAndEdgesCachePath(t *testing.T) {
@@ -161,9 +161,9 @@ func TestGetChangedTargetsAndEdgesCachePath(t *testing.T) {
 	// Must be distinct from the GetChangedTargets cache path.
 	assert.NotEqual(t, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil), got)
 
-	// Empty list ⇒ legacy path; non-empty ⇒ different key.
-	assert.Equal(t, got, GetChangedTargetsAndEdgesCachePath("git@github:uber/tango", "abc", "def", []string{}))
-	assert.NotEqual(t, got, GetChangedTargetsAndEdgesCachePath("git@github:uber/tango", "abc", "def", []string{"foo.*"}))
+	// Nil/empty options ⇒ legacy path; non-empty ⇒ different key.
+	assert.Equal(t, got, GetChangedTargetsAndEdgesCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{}))
+	assert.NotEqual(t, got, GetChangedTargetsAndEdgesCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}}))
 }
 
 func TestChunkTargets(t *testing.T) {

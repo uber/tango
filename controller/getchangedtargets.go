@@ -57,13 +57,12 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// Try to serve from cache first using the stored treehashes for both revisions.
 	// readTreehash returns "" on any miss/error so we silently skip the cache when
 	// either treehash is not yet available.
-	extraExcludes := request.GetRequestOptions().GetExtraExcludeFilesRegex()
 	if !request.GetBypassCache() {
 		cacheStart := time.Now()
-		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision(), extraExcludes)
-		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision(), extraExcludes)
+		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
+		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, extraExcludes)
+			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
 			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
 				c.logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
@@ -250,10 +249,10 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// changedTargetsResponses, so concurrent access is safe.
 	go func() {
 		cacheCtx := context.Background()
-		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision(), extraExcludes)
-		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision(), extraExcludes)
+		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision())
+		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision())
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, extraExcludes)
+			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			if writeErr := storage.WriteChangedTargetsStream(cacheCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
 				c.logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
 			}
@@ -855,8 +854,8 @@ func getDefaultDistance(outputConfig *pb.OutputConfig, forNewTarget bool) int32 
 
 // readTreehash fetches the treehash stored at GetTreehashCachePath for the given build description.
 // Returns an empty string on any error or cache miss so callers can treat it as an optional optimistic lookup.
-func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription, extraExcludeFilesRegex []string) string {
-	resp, err := st.Get(ctx, storage.DownloadRequest{Key: common.GetTreehashCachePath(buildDescription, extraExcludeFilesRegex)})
+func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) string {
+	resp, err := st.Get(ctx, storage.DownloadRequest{Key: common.GetTreehashCachePath(buildDescription)})
 	if err != nil || resp == nil || resp.ReadCloser == nil {
 		return ""
 	}
