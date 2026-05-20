@@ -450,13 +450,6 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 	firstEdges = nil
 
 	// 10) Build canonical metadata.
-	meta := &pb.Metadata{
-		TargetIdMapping:             targetMapper.Invert(),
-		RuleTypeMapping:             ruleTypeMapper.Invert(),
-		TagMapping:                  tagMapper.Invert(),
-		AttributeNameMapping:        attrNameMapper.Invert(),
-		AttributeStringValueMapping: attrValMapper.Invert(),
-	}
 
 	totalDuration := time.Since(start)
 	c.logger.Info("compareTargetGraphsAndEdges: Done",
@@ -464,24 +457,74 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 	)
 	scope.Timer("total_duration").Record(totalDuration)
 
-	return []*pb.GetChangedTargetsAndEdgesResponse{
-		{
+	// Chunk changed/added/removed targets to stay within the 64MB default gRPC per-message limit.
+	// Edges are tiny (2 int32s each) and go in a single message with the first chunk.
+	var responses []*pb.GetChangedTargetsAndEdgesResponse
+	firstChunk := true
+	emitChunk := func(ct []*pb.ChangedTarget, added, removed []*pb.OptimizedTarget) {
+		cte := &pb.ChangedTargetsAndEdges{
+			ChangedTargets: ct,
+			AddedTargets:   added,
+			RemovedTargets: removed,
+		}
+		if firstChunk {
+			cte.NewEdges = newEdges
+			cte.RemovedEdges = removedEdges
+			firstChunk = false
+		}
+		responses = append(responses, &pb.GetChangedTargetsAndEdgesResponse{
 			Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
-				ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{
-					ChangedTargets: changed,
-					AddedTargets:   addedTargets,
-					RemovedTargets: removedTargets,
-					NewEdges:       newEdges,
-					RemovedEdges:   removedEdges,
-				},
+				ChangedTargetsAndEdges: cte,
 			},
-		},
-		{
+		})
+	}
+
+	// Interleave chunks so each message carries work from all three slices where possible.
+	maxIdx := max(
+		(len(changed)+common.DefaultChangedTargetChunkSize-1)/common.DefaultChangedTargetChunkSize,
+		max(
+			(len(addedTargets)+common.DefaultTargetChunkSize-1)/common.DefaultTargetChunkSize,
+			(len(removedTargets)+common.DefaultTargetChunkSize-1)/common.DefaultTargetChunkSize,
+		),
+	)
+	if maxIdx == 0 {
+		emitChunk(nil, nil, nil)
+	}
+	for i := range maxIdx {
+		var ct []*pb.ChangedTarget
+		if start := i * common.DefaultChangedTargetChunkSize; start < len(changed) {
+			end := min(start+common.DefaultChangedTargetChunkSize, len(changed))
+			ct = changed[start:end]
+		}
+		var added []*pb.OptimizedTarget
+		if start := i * common.DefaultTargetChunkSize; start < len(addedTargets) {
+			end := min(start+common.DefaultTargetChunkSize, len(addedTargets))
+			added = addedTargets[start:end]
+		}
+		var removed []*pb.OptimizedTarget
+		if start := i * common.DefaultTargetChunkSize; start < len(removedTargets) {
+			end := min(start+common.DefaultTargetChunkSize, len(removedTargets))
+			removed = removedTargets[start:end]
+		}
+		emitChunk(ct, added, removed)
+	}
+
+	for _, meta := range common.ChunkMetadata(
+		targetMapper.Invert(),
+		ruleTypeMapper.Invert(),
+		tagMapper.Invert(),
+		attrNameMapper.Invert(),
+		attrValMapper.Invert(),
+		common.DefaultMetadataMapChunkSize,
+	) {
+		responses = append(responses, &pb.GetChangedTargetsAndEdgesResponse{
 			Item: &pb.GetChangedTargetsAndEdgesResponse_Metadata{
 				Metadata: meta,
 			},
-		},
-	}, nil
+		})
+	}
+
+	return responses, nil
 }
 
 // buildEdgeSet constructs a set of (source, dep) name pairs from all direct dependencies in the graph.

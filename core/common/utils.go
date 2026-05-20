@@ -28,9 +28,15 @@ import (
 )
 
 const (
-	// DefaultTargetChunkSize is the default number of targets per message chunk, used for streaming large target graphs.
-	// Kept below 64MB gRPC default message limit; 500 targets ≈ ~50MB worst-case.
-	DefaultTargetChunkSize = 500
+	// DefaultTargetChunkSize is the default number of OptimizedTarget entries per stream message.
+	// Sized conservatively: at ~40KB/target worst-case (target with ~10K direct deps × 4 bytes),
+	// 250 targets ≈ 10MB — well under the 64MB default gRPC per-message limit.
+	DefaultTargetChunkSize = 250
+
+	// DefaultChangedTargetChunkSize is the default number of ChangedTarget entries per stream message.
+	// A ChangedTarget carries both old_target and new_target (2× an OptimizedTarget), so we use
+	// half the regular chunk size to stay within the same byte budget.
+	DefaultChangedTargetChunkSize = 125
 
 	// DefaultMetadataMapChunkSize is the max entries per metadata message chunk.
 	// target_id_mapping and attribute_string_value_mapping scale with repo size and can exceed
@@ -204,14 +210,18 @@ func ResultToGetTargetGraphResponse(result targethasher.Result) ([]*tangopb.GetT
 
 	// chunk targets into multiple messages for streaming
 	responses := chunkTargets(optimizedTargets, DefaultTargetChunkSize)
-	responses = append(responses, chunkMetadata(
+	for _, meta := range ChunkMetadata(
 		targetIDToName,
 		ruleTypeIDToName,
 		tagIDToName,
 		attrNameIDToName,
 		attrStrValIDToVal,
 		DefaultMetadataMapChunkSize,
-	)...)
+	) {
+		responses = append(responses, &tangopb.GetTargetGraphResponse{
+			Item: &tangopb.GetTargetGraphResponse_Metadata{Metadata: meta},
+		})
+	}
 
 	return responses, nil
 }
@@ -256,18 +266,18 @@ func chunkTargets(targets []*tangopb.OptimizedTarget, chunkSize int) []*tangopb.
 	return responses
 }
 
-// chunkMetadata splits the metadata maps into multiple GetTargetGraphResponse messages.
+// ChunkMetadata splits the metadata maps into multiple Metadata messages.
 // target_id_mapping and attribute_string_value_mapping scale with repo size and can exceed the
 // 64MB gRPC per-message limit for large monorepos; they are split across chunks of chunkSize entries.
 // The small maps (rule_type, tag, attribute_name) always fit in one message and are sent in the first chunk.
-func chunkMetadata(
+func ChunkMetadata(
 	targetIDToName map[int32]string,
 	ruleTypeIDToName map[int32]string,
 	tagIDToName map[int32]string,
 	attrNameIDToName map[int32]string,
 	attrStrValIDToVal map[int32]string,
 	chunkSize int,
-) []*tangopb.GetTargetGraphResponse {
+) []*tangopb.Metadata {
 	if chunkSize <= 0 {
 		chunkSize = DefaultMetadataMapChunkSize
 	}
@@ -276,7 +286,7 @@ func chunkMetadata(
 	attrValChunks := splitMap(attrStrValIDToVal, chunkSize)
 
 	numChunks := max(1, max(len(targetChunks), len(attrValChunks)))
-	responses := make([]*tangopb.GetTargetGraphResponse, 0, numChunks)
+	chunks := make([]*tangopb.Metadata, 0, numChunks)
 
 	for i := range numChunks {
 		meta := &tangopb.Metadata{}
@@ -292,12 +302,10 @@ func chunkMetadata(
 		if i < len(attrValChunks) {
 			meta.AttributeStringValueMapping = attrValChunks[i]
 		}
-		responses = append(responses, &tangopb.GetTargetGraphResponse{
-			Item: &tangopb.GetTargetGraphResponse_Metadata{Metadata: meta},
-		})
+		chunks = append(chunks, meta)
 	}
 
-	return responses
+	return chunks
 }
 
 // splitMap splits a map[int32]string into slices of at most size entries each.

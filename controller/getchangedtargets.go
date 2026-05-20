@@ -429,29 +429,42 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 		changed = append(changed, ct)
 	}
 
-	// 5) Construct canonical metadata and emit responses.
-	meta := &pb.Metadata{
-		TargetIdMapping:             targetMapper.Invert(),
-		RuleTypeMapping:             ruleTypeMapper.Invert(),
-		TagMapping:                  tagMapper.Invert(),
-		AttributeNameMapping:        attrNameMapper.Invert(),
-		AttributeStringValueMapping: attrValMapper.Invert(),
-	}
-
-	// Emit changes and metadata as separate responses.
+	// Emit changes in chunks to stay within gRPC per-message size limits, followed by chunked metadata.
 	var results []*pb.GetChangedTargetsResponse
-	results = append(results, &pb.GetChangedTargetsResponse{
-		Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-			ChangedTargets: &pb.ChangedTargets{
-				ChangedTargets: changed,
+	for i := 0; i < len(changed); i += common.DefaultChangedTargetChunkSize {
+		end := i + common.DefaultChangedTargetChunkSize
+		if end > len(changed) {
+			end = len(changed)
+		}
+		results = append(results, &pb.GetChangedTargetsResponse{
+			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+				ChangedTargets: &pb.ChangedTargets{
+					ChangedTargets: changed[i:end],
+				},
 			},
-		},
-	})
-	results = append(results, &pb.GetChangedTargetsResponse{
-		Item: &pb.GetChangedTargetsResponse_Metadata{
-			Metadata: meta,
-		},
-	})
+		})
+	}
+	if len(results) == 0 {
+		results = append(results, &pb.GetChangedTargetsResponse{
+			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+				ChangedTargets: &pb.ChangedTargets{},
+			},
+		})
+	}
+	for _, meta := range common.ChunkMetadata(
+		targetMapper.Invert(),
+		ruleTypeMapper.Invert(),
+		tagMapper.Invert(),
+		attrNameMapper.Invert(),
+		attrValMapper.Invert(),
+		common.DefaultMetadataMapChunkSize,
+	) {
+		results = append(results, &pb.GetChangedTargetsResponse{
+			Item: &pb.GetChangedTargetsResponse_Metadata{
+				Metadata: meta,
+			},
+		})
+	}
 	totalDuration := time.Since(start)
 	c.logger.Info("compareTargetGraphs: Done",
 		zap.Duration("total_duration", totalDuration),
@@ -460,10 +473,18 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 	return results, nil
 }
 
-// getTargetsAndMetadata builds ID->target maps and extracts metadata from a target graph stream.
+// getTargetsAndMetadata builds ID->target maps and merges metadata from a target graph stream.
+// Metadata may arrive in multiple chunks (e.g. when target_id_mapping exceeds the gRPC message
+// size limit); all chunks are merged into a single Metadata so callers can use it uniformly.
 func getTargetsAndMetadata(graph []*pb.GetTargetGraphResponse) (map[int32]*pb.OptimizedTarget, *pb.Metadata) {
 	targets := make(map[int32]*pb.OptimizedTarget)
-	var meta *pb.Metadata
+	merged := &pb.Metadata{
+		TargetIdMapping:             make(map[int32]string),
+		RuleTypeMapping:             make(map[int32]string),
+		TagMapping:                  make(map[int32]string),
+		AttributeNameMapping:        make(map[int32]string),
+		AttributeStringValueMapping: make(map[int32]string),
+	}
 	for _, chunk := range graph {
 		switch item := chunk.GetItem().(type) {
 		case *pb.GetTargetGraphResponse_Targets:
@@ -471,10 +492,25 @@ func getTargetsAndMetadata(graph []*pb.GetTargetGraphResponse) (map[int32]*pb.Op
 				targets[t.GetId()] = t
 			}
 		case *pb.GetTargetGraphResponse_Metadata:
-			meta = item.Metadata
+			m := item.Metadata
+			for k, v := range m.GetTargetIdMapping() {
+				merged.TargetIdMapping[k] = v
+			}
+			for k, v := range m.GetRuleTypeMapping() {
+				merged.RuleTypeMapping[k] = v
+			}
+			for k, v := range m.GetTagMapping() {
+				merged.TagMapping[k] = v
+			}
+			for k, v := range m.GetAttributeNameMapping() {
+				merged.AttributeNameMapping[k] = v
+			}
+			for k, v := range m.GetAttributeStringValueMapping() {
+				merged.AttributeStringValueMapping[k] = v
+			}
 		}
 	}
-	return targets, meta
+	return targets, merged
 }
 
 // buildNameIndex creates name->target maps using the provided metadata information.
