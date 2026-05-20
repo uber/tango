@@ -8,7 +8,6 @@ go_library(
     deps = [
         "//tangopb",
         "@org_uber_go_yarpc//:yarpc",
-        "@org_uber_go_yarpc//transport/grpc",
         "@org_uber_go_zap//:zap",
     ],
 )

@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"go.uber.org/yarpc"
-	yarpcgrpc "go.uber.org/yarpc/transport/grpc"
 	"go.uber.org/zap"
 
 	pb "github.com/uber/tango/tangopb"
@@ -46,11 +45,6 @@ func main() {
 	newRequestURLs := flag.String("new-request-urls", "", "comma-separated change request URLs for new state")
 	flag.Parse()
 
-	// Allow up to 256MB per received message — large repos can produce metadata messages > 64MB default.
-	const maxMsgSize = 256 * 1024 * 1024
-	grpcTransport := yarpcgrpc.NewTransport(
-		yarpcgrpc.ClientMaxRecvMsgSize(maxMsgSize),
-	)
 	out := grpcTransport.NewSingleOutbound(*addr)
 	zl, _ := zap.NewDevelopment()
 	defer zl.Sync()

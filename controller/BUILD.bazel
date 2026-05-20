@@ -12,6 +12,7 @@ go_library(
     importpath = "github.com/uber/tango/controller",
     visibility = ["//visibility:public"],
     deps = [
+        "//config",
         "//core/common",
         "//core/storage",
         "//orchestrator",
@@ -29,9 +30,11 @@ go_test(
         "getchangedtargets_test.go",
         "getchangedtargetsandedges_test.go",
         "gettargetgraph_test.go",
+        "testhelper_test.go",
     ],
     embed = [":controller"],
     deps = [
+        "//core/common",
         "//core/storage",
         "//core/storage/storagemock",
         "//orchestrator/orchestratormock",
