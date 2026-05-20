@@ -62,7 +62,7 @@ func NewChangedTargetsReader(ctx context.Context, st Storage, key string) (Chang
 		return nil, nil
 	}
 	return &changedTargetsReaderCloser{
-		reader: gogio.NewDelimitedReader(resp.ReadCloser, 32<<20), // 32MB/message limit
+		reader: gogio.NewDelimitedReader(resp.ReadCloser, 32<<20),
 	}, nil
 }
 

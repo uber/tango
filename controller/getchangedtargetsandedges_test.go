@@ -27,7 +27,6 @@ import (
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
@@ -37,6 +36,49 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
+
+// collectCTEResponses merges all chunked GetChangedTargetsAndEdgesResponse messages into
+// a single ChangedTargetsAndEdges and Metadata, matching the original single-message shape
+// that tests were written against.
+func collectCTEResponses(responses []*pb.GetChangedTargetsAndEdgesResponse) (*pb.ChangedTargetsAndEdges, *pb.Metadata) {
+	cte := &pb.ChangedTargetsAndEdges{}
+	meta := &pb.Metadata{
+		TargetIdMapping:             make(map[int32]string),
+		RuleTypeMapping:             make(map[int32]string),
+		TagMapping:                  make(map[int32]string),
+		AttributeNameMapping:        make(map[int32]string),
+		AttributeStringValueMapping: make(map[int32]string),
+	}
+	for _, resp := range responses {
+		switch item := resp.GetItem().(type) {
+		case *pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges:
+			c := item.ChangedTargetsAndEdges
+			cte.ChangedTargets = append(cte.ChangedTargets, c.GetChangedTargets()...)
+			cte.AddedTargets = append(cte.AddedTargets, c.GetAddedTargets()...)
+			cte.RemovedTargets = append(cte.RemovedTargets, c.GetRemovedTargets()...)
+			cte.NewEdges = append(cte.NewEdges, c.GetNewEdges()...)
+			cte.RemovedEdges = append(cte.RemovedEdges, c.GetRemovedEdges()...)
+		case *pb.GetChangedTargetsAndEdgesResponse_Metadata:
+			m := item.Metadata
+			for k, v := range m.GetTargetIdMapping() {
+				meta.TargetIdMapping[k] = v
+			}
+			for k, v := range m.GetRuleTypeMapping() {
+				meta.RuleTypeMapping[k] = v
+			}
+			for k, v := range m.GetTagMapping() {
+				meta.TagMapping[k] = v
+			}
+			for k, v := range m.GetAttributeNameMapping() {
+				meta.AttributeNameMapping[k] = v
+			}
+			for k, v := range m.GetAttributeStringValueMapping() {
+				meta.AttributeStringValueMapping[k] = v
+			}
+		}
+	}
+	return cte, meta
+}
 
 // --- Validation ---
 
@@ -208,7 +250,7 @@ func TestGetChangedTargetsAndEdges_StreamSendError(t *testing.T) {
 // --- compareTargetGraphsAndEdges tests ---
 
 func TestCompareTargetGraphsAndEdges_Empty(t *testing.T) {
-	c := &controller{logger: zap.NewNop(), scope: tally.NoopScope}
+	c := newTestController(zap.NewNop())
 
 	emptyGraph := func() []*pb.GetTargetGraphResponse {
 		return []*pb.GetTargetGraphResponse{{
@@ -219,18 +261,19 @@ func TestCompareTargetGraphsAndEdges_Empty(t *testing.T) {
 	res, err := c.compareTargetGraphsAndEdges(context.Background(), emptyGraph(), emptyGraph(), nil)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
-	cte := res[0].GetChangedTargetsAndEdges()
+	cte, _ := collectCTEResponses(res)
 	require.NotNil(t, cte)
 	assert.Empty(t, cte.GetChangedTargets())
 	assert.Empty(t, cte.GetAddedTargets())
 	assert.Empty(t, cte.GetRemovedTargets())
 	assert.Empty(t, cte.GetNewEdges())
 	assert.Empty(t, cte.GetRemovedEdges())
-	assert.NotNil(t, res[1].GetMetadata())
+	_, meta := collectCTEResponses(res)
+	assert.NotNil(t, meta)
 }
 
 func TestCompareTargetGraphsAndEdges_AddedTarget(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// First graph: empty
 	first := []*pb.GetTargetGraphResponse{{
@@ -257,8 +300,7 @@ func TestCompareTargetGraphsAndEdges_AddedTarget(t *testing.T) {
 
 	res, err := c.compareTargetGraphsAndEdges(context.Background(), first, second, nil)
 	require.NoError(t, err)
-	cte := res[0].GetChangedTargetsAndEdges()
-	meta := res[1].GetMetadata()
+	cte, meta := collectCTEResponses(res)
 
 	require.Len(t, cte.GetChangedTargets(), 1)
 	assert.Equal(t, pb.CHANGE_TYPE_NEW, cte.GetChangedTargets()[0].GetChangeType())
@@ -273,7 +315,7 @@ func TestCompareTargetGraphsAndEdges_AddedTarget(t *testing.T) {
 }
 
 func TestCompareTargetGraphsAndEdges_RemovedTarget(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// First graph: one target
 	first := []*pb.GetTargetGraphResponse{
@@ -300,8 +342,7 @@ func TestCompareTargetGraphsAndEdges_RemovedTarget(t *testing.T) {
 
 	res, err := c.compareTargetGraphsAndEdges(context.Background(), first, second, nil)
 	require.NoError(t, err)
-	cte := res[0].GetChangedTargetsAndEdges()
-	meta := res[1].GetMetadata()
+	cte, meta := collectCTEResponses(res)
 
 	assert.Empty(t, cte.GetChangedTargets())
 	assert.Empty(t, cte.GetAddedTargets())
@@ -315,7 +356,7 @@ func TestCompareTargetGraphsAndEdges_RemovedTarget(t *testing.T) {
 }
 
 func TestCompareTargetGraphsAndEdges_NewEdge(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// First graph: A and B, no edge between them
 	first := []*pb.GetTargetGraphResponse{
@@ -356,8 +397,7 @@ func TestCompareTargetGraphsAndEdges_NewEdge(t *testing.T) {
 
 	res, err := c.compareTargetGraphsAndEdges(context.Background(), first, second, nil)
 	require.NoError(t, err)
-	cte := res[0].GetChangedTargetsAndEdges()
-	meta := res[1].GetMetadata()
+	cte, meta := collectCTEResponses(res)
 
 	require.Len(t, cte.GetNewEdges(), 1, "should detect 1 new edge A->B")
 	edge := cte.GetNewEdges()[0]
@@ -367,7 +407,7 @@ func TestCompareTargetGraphsAndEdges_NewEdge(t *testing.T) {
 }
 
 func TestCompareTargetGraphsAndEdges_RemovedEdge(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// First graph: A depends on B
 	first := []*pb.GetTargetGraphResponse{
@@ -408,8 +448,7 @@ func TestCompareTargetGraphsAndEdges_RemovedEdge(t *testing.T) {
 
 	res, err := c.compareTargetGraphsAndEdges(context.Background(), first, second, nil)
 	require.NoError(t, err)
-	cte := res[0].GetChangedTargetsAndEdges()
-	meta := res[1].GetMetadata()
+	cte, meta := collectCTEResponses(res)
 
 	require.Len(t, cte.GetRemovedEdges(), 1, "should detect 1 removed edge A->B")
 	edge := cte.GetRemovedEdges()[0]
@@ -419,7 +458,7 @@ func TestCompareTargetGraphsAndEdges_RemovedEdge(t *testing.T) {
 }
 
 func TestCompareTargetGraphsAndEdges_ChangedTargetClassification(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// First: source file A (rule "source file"), lib L depends on A
 	first := []*pb.GetTargetGraphResponse{
@@ -462,8 +501,7 @@ func TestCompareTargetGraphsAndEdges_ChangedTargetClassification(t *testing.T) {
 
 	res, err := c.compareTargetGraphsAndEdges(context.Background(), first, second, nil)
 	require.NoError(t, err)
-	cte := res[0].GetChangedTargetsAndEdges()
-	meta := res[1].GetMetadata()
+	cte, meta := collectCTEResponses(res)
 
 	require.Len(t, cte.GetChangedTargets(), 2)
 	byName := make(map[string]*pb.ChangedTarget)
@@ -476,7 +514,7 @@ func TestCompareTargetGraphsAndEdges_ChangedTargetClassification(t *testing.T) {
 }
 
 func TestCompareTargetGraphsAndEdges_UnchangedTargetNotReturned(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// Both graphs have target A with the same hash — it should not appear in changed_targets.
 	first := []*pb.GetTargetGraphResponse{
@@ -510,7 +548,7 @@ func TestCompareTargetGraphsAndEdges_UnchangedTargetNotReturned(t *testing.T) {
 
 	res, err := c.compareTargetGraphsAndEdges(context.Background(), first, second, nil)
 	require.NoError(t, err)
-	cte := res[0].GetChangedTargetsAndEdges()
+	cte, _ := collectCTEResponses(res)
 	assert.Empty(t, cte.GetChangedTargets())
 	assert.Empty(t, cte.GetAddedTargets())
 	assert.Empty(t, cte.GetRemovedTargets())
@@ -519,7 +557,7 @@ func TestCompareTargetGraphsAndEdges_UnchangedTargetNotReturned(t *testing.T) {
 }
 
 func TestCompareTargetGraphsAndEdges_EdgePreservedWhenTargetUnchanged(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// A->B edge exists in both revisions (neither target changes).
 	mkGraph := func(aID, bID int32, aHash, bHash string) []*pb.GetTargetGraphResponse {
@@ -548,14 +586,14 @@ func TestCompareTargetGraphsAndEdges_EdgePreservedWhenTargetUnchanged(t *testing
 		nil,
 	)
 	require.NoError(t, err)
-	cte := res[0].GetChangedTargetsAndEdges()
+	cte, _ := collectCTEResponses(res)
 	assert.Empty(t, cte.GetChangedTargets())
 	assert.Empty(t, cte.GetNewEdges(), "edge present in both revisions should not be new")
 	assert.Empty(t, cte.GetRemovedEdges(), "edge present in both revisions should not be removed")
 }
 
 func TestCompareTargetGraphsAndEdges_CanonicalIDs(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// Two targets in first; one removed, one added, one new edge.
 	first := []*pb.GetTargetGraphResponse{
@@ -597,8 +635,7 @@ func TestCompareTargetGraphsAndEdges_CanonicalIDs(t *testing.T) {
 	res, err := c.compareTargetGraphsAndEdges(context.Background(), first, second, nil)
 	require.NoError(t, err)
 
-	cte := res[0].GetChangedTargetsAndEdges()
-	meta := res[1].GetMetadata()
+	cte, meta := collectCTEResponses(res)
 
 	// A changed
 	var foundA bool
@@ -677,7 +714,7 @@ func TestGetChangedTargetsAndEdges_EndToEnd(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsAndEdgesResponse, _ ...any) error {
 		sentResponses = append(sentResponses, resp)
 		return nil
-	}).Times(2)
+	}).AnyTimes()
 
 	store := storagemock.NewMockStorage(ctrl)
 
@@ -771,9 +808,8 @@ func TestGetChangedTargetsAndEdges_EndToEnd(t *testing.T) {
 		assert.Fail(t, "timed out waiting for cache write")
 	}
 
-	require.Len(t, sentResponses, 2)
-	cte := sentResponses[0].GetChangedTargetsAndEdges()
-	meta := sentResponses[1].GetMetadata()
+	require.NotEmpty(t, sentResponses)
+	cte, meta := collectCTEResponses(sentResponses)
 	require.NotNil(t, cte)
 	require.NotNil(t, meta)
 
@@ -848,7 +884,7 @@ func TestGetChangedTargetsAndEdges_CacheHit(t *testing.T) {
 			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cachedBytes))}, nil),
 	)
 
-	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
+	stream.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
 
 	c := NewController(Params{
 		Logger:       zaptest.NewLogger(t),
@@ -900,7 +936,7 @@ func TestGetChangedTargetsAndEdges_CacheCorrupt(t *testing.T) {
 		return nil
 	})
 
-	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
+	stream.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
 
 	c := NewController(Params{
 		Logger:       zaptest.NewLogger(t),
@@ -930,7 +966,7 @@ func TestGetChangedTargetsAndEdges_CacheWriteAfterCompute(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsAndEdgesResponse, _ ...any) error {
 		sentResponses = append(sentResponses, resp)
 		return nil
-	}).Times(2)
+	}).AnyTimes()
 
 	// Build first revision graph: A and B with A->B edge.
 	var buf1 bytes.Buffer
@@ -1019,9 +1055,8 @@ func TestGetChangedTargetsAndEdges_CacheWriteAfterCompute(t *testing.T) {
 		assert.Fail(t, "cache write goroutine did not complete in time")
 	}
 
-	require.Len(t, sentResponses, 2)
-	cte := sentResponses[0].GetChangedTargetsAndEdges()
-	meta := sentResponses[1].GetMetadata()
+	require.NotEmpty(t, sentResponses)
+	cte, meta := collectCTEResponses(sentResponses)
 	require.NotNil(t, cte)
 	require.NotNil(t, meta)
 

@@ -16,6 +16,8 @@ package controller
 
 import (
 	"github.com/uber-go/tally"
+	"github.com/uber/tango/config"
+	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
@@ -29,14 +31,18 @@ type Params struct {
 	Logger       *zap.Logger
 	Storage      storage.Storage
 	Orchestrator orchestrator.Orchestrator
-	Scope        tally.Scope `optional:"true"`
+	Scope        tally.Scope        `optional:"true"`
+	ChunkConfig  config.ChunkConfig `optional:"true"`
 }
 
 type controller struct {
-	logger       *zap.Logger
-	storage      storage.Storage
-	orchestrator orchestrator.Orchestrator
-	scope        tally.Scope
+	logger                 *zap.Logger
+	storage                storage.Storage
+	orchestrator           orchestrator.Orchestrator
+	scope                  tally.Scope
+	targetChunkSize        int
+	changedTargetChunkSize int
+	metadataMapChunkSize   int
 }
 
 // NewController creates a new controller.
@@ -45,10 +51,25 @@ func NewController(p Params) pb.TangoYARPCServer {
 	if scope == nil {
 		scope = tally.NoopScope
 	}
+	targetChunkSize := p.ChunkConfig.TargetChunkSize
+	if targetChunkSize <= 0 {
+		targetChunkSize = common.DefaultTargetChunkSize
+	}
+	changedTargetChunkSize := p.ChunkConfig.ChangedTargetChunkSize
+	if changedTargetChunkSize <= 0 {
+		changedTargetChunkSize = common.DefaultChangedTargetChunkSize
+	}
+	metadataMapChunkSize := p.ChunkConfig.MetadataMapChunkSize
+	if metadataMapChunkSize <= 0 {
+		metadataMapChunkSize = common.DefaultMetadataMapChunkSize
+	}
 	return &controller{
-		logger:       p.Logger,
-		storage:      p.Storage,
-		orchestrator: p.Orchestrator,
-		scope:        scope.SubScope("controller"),
+		logger:                 p.Logger,
+		storage:                p.Storage,
+		orchestrator:           p.Orchestrator,
+		scope:                  scope.SubScope("controller"),
+		targetChunkSize:        targetChunkSize,
+		changedTargetChunkSize: changedTargetChunkSize,
+		metadataMapChunkSize:   metadataMapChunkSize,
 	}
 }

@@ -27,7 +27,6 @@ import (
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
@@ -125,7 +124,7 @@ func TestValidateGetChangedTargetsRequest(t *testing.T) {
 }
 
 func TestCompareTargetGraphs(t *testing.T) {
-	c := &controller{logger: zap.NewNop(), scope: tally.NoopScope}
+	c := newTestController(zap.NewNop())
 
 	firstGraph := &pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Metadata{
@@ -400,7 +399,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	first := []*pb.GetTargetGraphResponse{
 		{
@@ -453,7 +452,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: source file A (id 1, hash h1), lib L (id 2, hash h1, dep -> A)
 	first := []*pb.GetTargetGraphResponse{
@@ -535,7 +534,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_IndirectWhenNoSourceDep(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T (id 1, rule), no deps
 	first := []*pb.GetTargetGraphResponse{
@@ -586,7 +585,7 @@ func TestCompareTargetGraphs_IndirectWhenNoSourceDep(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_DirectWhenDependenciesChanged(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T (id 1, rule) with deps on A
 	first := []*pb.GetTargetGraphResponse{
@@ -661,7 +660,7 @@ func TestCompareTargetGraphs_DirectWhenDependenciesChanged(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_DirectWhenAttributesChanged(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T with attribute "key1" -> "value1"
 	first := []*pb.GetTargetGraphResponse{
@@ -732,7 +731,7 @@ func TestCompareTargetGraphs_DirectWhenAttributesChanged(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_DirectWhenNewAttributeAdded(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T with one attribute
 	first := []*pb.GetTargetGraphResponse{
@@ -1103,7 +1102,7 @@ func TestComputeDistances_NilMetadata(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_IndirectWhenOnlyHashChanged(t *testing.T) {
-	c := &controller{logger: zaptest.NewLogger(t), scope: tally.NoopScope}
+	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T with deps and attributes
 	first := []*pb.GetTargetGraphResponse{
