@@ -95,7 +95,12 @@ func run() error {
 	})
 
 	// YARPC transports and dispatcher
-	grpcTransport := yarpcgrpc.NewTransport()
+	// Allow up to 256MB per message — large repos can produce metadata messages > 64MB default.
+	const maxMsgSize = 256 * 1024 * 1024
+	grpcTransport := yarpcgrpc.NewTransport(
+		yarpcgrpc.ServerMaxRecvMsgSize(maxMsgSize),
+		yarpcgrpc.ServerMaxSendMsgSize(maxMsgSize),
+	)
 	port := "127.0.0.1:8081"
 	grpcListener, err := net.Listen("tcp", port)
 	if err != nil {

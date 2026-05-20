@@ -29,7 +29,14 @@ import (
 
 const (
 	// DefaultTargetChunkSize is the default number of targets per message chunk, used for streaming large target graphs.
-	DefaultTargetChunkSize = 1000
+	// Kept below 64MB gRPC default message limit; 500 targets ≈ ~50MB worst-case.
+	DefaultTargetChunkSize = 500
+
+	// DefaultMetadataMapChunkSize is the max entries per metadata message chunk.
+	// target_id_mapping and attribute_string_value_mapping scale with repo size and can exceed
+	// the 64MB gRPC message limit for large monorepos, so they are split across multiple messages.
+	// At ~85 bytes/entry (60-char avg target name + proto overhead), 50 000 entries ≈ 4.25MB per chunk.
+	DefaultMetadataMapChunkSize = 50_000
 )
 
 // ToShortRemote returns the short remote name given a git ssh remote string.
@@ -197,17 +204,14 @@ func ResultToGetTargetGraphResponse(result targethasher.Result) ([]*tangopb.GetT
 
 	// chunk targets into multiple messages for streaming
 	responses := chunkTargets(optimizedTargets, DefaultTargetChunkSize)
-	responses = append(responses, &tangopb.GetTargetGraphResponse{
-		Item: &tangopb.GetTargetGraphResponse_Metadata{
-			Metadata: &tangopb.Metadata{
-				TargetIdMapping:             targetIDToName,
-				RuleTypeMapping:             ruleTypeIDToName,
-				TagMapping:                  tagIDToName,
-				AttributeNameMapping:        attrNameIDToName,
-				AttributeStringValueMapping: attrStrValIDToVal,
-			},
-		},
-	})
+	responses = append(responses, chunkMetadata(
+		targetIDToName,
+		ruleTypeIDToName,
+		tagIDToName,
+		attrNameIDToName,
+		attrStrValIDToVal,
+		DefaultMetadataMapChunkSize,
+	)...)
 
 	return responses, nil
 }
@@ -250,4 +254,68 @@ func chunkTargets(targets []*tangopb.OptimizedTarget, chunkSize int) []*tangopb.
 	}
 
 	return responses
+}
+
+// chunkMetadata splits the metadata maps into multiple GetTargetGraphResponse messages.
+// target_id_mapping and attribute_string_value_mapping scale with repo size and can exceed the
+// 64MB gRPC per-message limit for large monorepos; they are split across chunks of chunkSize entries.
+// The small maps (rule_type, tag, attribute_name) always fit in one message and are sent in the first chunk.
+func chunkMetadata(
+	targetIDToName map[int32]string,
+	ruleTypeIDToName map[int32]string,
+	tagIDToName map[int32]string,
+	attrNameIDToName map[int32]string,
+	attrStrValIDToVal map[int32]string,
+	chunkSize int,
+) []*tangopb.GetTargetGraphResponse {
+	if chunkSize <= 0 {
+		chunkSize = DefaultMetadataMapChunkSize
+	}
+
+	targetChunks := splitMap(targetIDToName, chunkSize)
+	attrValChunks := splitMap(attrStrValIDToVal, chunkSize)
+
+	numChunks := max(1, max(len(targetChunks), len(attrValChunks)))
+	responses := make([]*tangopb.GetTargetGraphResponse, 0, numChunks)
+
+	for i := range numChunks {
+		meta := &tangopb.Metadata{}
+		// Small maps are always small enough to fit in one message; include them in the first chunk.
+		if i == 0 {
+			meta.RuleTypeMapping = ruleTypeIDToName
+			meta.TagMapping = tagIDToName
+			meta.AttributeNameMapping = attrNameIDToName
+		}
+		if i < len(targetChunks) {
+			meta.TargetIdMapping = targetChunks[i]
+		}
+		if i < len(attrValChunks) {
+			meta.AttributeStringValueMapping = attrValChunks[i]
+		}
+		responses = append(responses, &tangopb.GetTargetGraphResponse{
+			Item: &tangopb.GetTargetGraphResponse_Metadata{Metadata: meta},
+		})
+	}
+
+	return responses
+}
+
+// splitMap splits a map[int32]string into slices of at most size entries each.
+func splitMap(m map[int32]string, size int) []map[int32]string {
+	if len(m) == 0 {
+		return nil
+	}
+	chunks := make([]map[int32]string, 0, (len(m)+size-1)/size)
+	current := make(map[int32]string, size)
+	for k, v := range m {
+		current[k] = v
+		if len(current) >= size {
+			chunks = append(chunks, current)
+			current = make(map[int32]string, size)
+		}
+	}
+	if len(current) > 0 {
+		chunks = append(chunks, current)
+	}
+	return chunks
 }

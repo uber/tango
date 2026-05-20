@@ -194,7 +194,7 @@ func TestChunkTargets(t *testing.T) {
 func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 	t.Parallel()
 
-	// Create 1500 targets (DefaultTargetChunkSize=1000) → expect 2 chunks + metadata
+	// 1500 targets with DefaultTargetChunkSize=500 → 3 target chunks + 1 metadata = 4 responses
 	numTargets := 1500
 	result := targethasher.Result{
 		TargetNames: make([]string, numTargets),
@@ -209,10 +209,13 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 	responses, err := ResultToGetTargetGraphResponse(result)
 	require.NoError(t, err)
 
-	// Expect 2 target chunks + 1 metadata = 3 responses
-	require.Len(t, responses, 3)
+	// 3 target chunks + 1 metadata chunk (1500 targets well under DefaultMetadataMapChunkSize)
+	require.Len(t, responses, 4)
 
-	// Last should be metadata
-	_, ok := responses[2].Item.(*pb.GetTargetGraphResponse_Metadata)
+	for _, resp := range responses[:3] {
+		_, ok := resp.Item.(*pb.GetTargetGraphResponse_Targets)
+		assert.True(t, ok, "expected Targets chunk")
+	}
+	_, ok := responses[3].Item.(*pb.GetTargetGraphResponse_Metadata)
 	assert.True(t, ok, "last response should be Metadata")
 }
