@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"go.uber.org/yarpc"
+	yarpcgrpc "go.uber.org/yarpc/transport/grpc"
 	"go.uber.org/zap"
 
 	pb "github.com/uber/tango/tangopb"
@@ -45,6 +46,7 @@ func main() {
 	newRequestURLs := flag.String("new-request-urls", "", "comma-separated change request URLs for new state")
 	flag.Parse()
 
+	grpcTransport := yarpcgrpc.NewTransport()
 	out := grpcTransport.NewSingleOutbound(*addr)
 	zl, _ := zap.NewDevelopment()
 	defer zl.Sync()

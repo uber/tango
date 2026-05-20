@@ -32,6 +32,7 @@ import (
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/yarpc"
 	"go.uber.org/yarpc/api/transport"
+	yarpcgrpc "go.uber.org/yarpc/transport/grpc"
 	"go.uber.org/zap"
 )
 
@@ -94,6 +95,7 @@ func run() error {
 	})
 
 	// YARPC transports and dispatcher
+	grpcTransport := yarpcgrpc.NewTransport()
 	port := "127.0.0.1:8081"
 	grpcListener, err := net.Listen("tcp", port)
 	if err != nil {
