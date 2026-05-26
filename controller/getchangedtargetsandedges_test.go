@@ -1073,49 +1073,17 @@ func TestGetChangedTargetsAndEdges_CacheWriteAfterCompute(t *testing.T) {
 
 // --- sendWithDistanceFilterForEdges ---
 
-func TestSendWithDistanceFilterForEdges_MetadataAlwaysForwarded(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsAndEdgesYARPCServer(ctrl)
-
-	meta := &pb.Metadata{TargetIdMapping: map[int32]string{1: "//app:T"}}
-	responses := []*pb.GetChangedTargetsAndEdgesResponse{
-		{
-			Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
-				ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{
-					ChangedTargets: []*pb.ChangedTarget{
-						{Distance: 5, ChangeType: pb.CHANGE_TYPE_INDIRECT},
-					},
-				},
-			},
-		},
-		{
-			Item: &pb.GetChangedTargetsAndEdgesResponse_Metadata{Metadata: meta},
-		},
-	}
-
-	var sent []*pb.GetChangedTargetsAndEdgesResponse
-	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsAndEdgesResponse, _ ...any) error {
-		sent = append(sent, r)
-		return nil
-	}).Times(2)
-
-	// max_distance=1 filters out the distance-5 target; metadata always forwarded.
-	require.NoError(t, sendWithDistanceFilterForEdges(stream, responses, &pb.OutputConfig{ComputeDistances: true, MaxDistance: 1}))
-
-	assert.Empty(t, sent[0].GetChangedTargetsAndEdges().GetChangedTargets())
-	assert.Equal(t, meta, sent[1].GetMetadata())
-}
-
-func TestSendWithDistanceFilterForEdges_AddedRemovedAndEdgesPreserved(t *testing.T) {
+func TestSendWithDistanceFilterForEdges_NonChangedTargetFieldsPreserved(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsAndEdgesYARPCServer(ctrl)
 
 	// changed_targets contain a mix that will be filtered; added/removed/edges
-	// must be passed through verbatim regardless of distance bound.
+	// and metadata must pass through verbatim regardless of distance bound.
 	addedTargets := []*pb.OptimizedTarget{{Id: 100}, {Id: 101}}
 	removedTargets := []*pb.OptimizedTarget{{Id: 200}}
 	newEdges := []*pb.Edge{{SourceId: 1, TargetId: 2}, {SourceId: 3, TargetId: 4}}
 	removedEdges := []*pb.Edge{{SourceId: 5, TargetId: 6}}
+	meta := &pb.Metadata{TargetIdMapping: map[int32]string{1: "//app:T"}}
 
 	responses := []*pb.GetChangedTargetsAndEdgesResponse{
 		{
@@ -1133,13 +1101,16 @@ func TestSendWithDistanceFilterForEdges_AddedRemovedAndEdgesPreserved(t *testing
 				},
 			},
 		},
+		{
+			Item: &pb.GetChangedTargetsAndEdgesResponse_Metadata{Metadata: meta},
+		},
 	}
 
 	var sent []*pb.GetChangedTargetsAndEdgesResponse
 	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsAndEdgesResponse, _ ...any) error {
 		sent = append(sent, r)
 		return nil
-	}).Times(1)
+	}).Times(2)
 
 	require.NoError(t, sendWithDistanceFilterForEdges(stream, responses, &pb.OutputConfig{ComputeDistances: true, MaxDistance: 1}))
 
@@ -1152,6 +1123,7 @@ func TestSendWithDistanceFilterForEdges_AddedRemovedAndEdgesPreserved(t *testing
 	assert.Equal(t, removedTargets, cte.GetRemovedTargets())
 	assert.Equal(t, newEdges, cte.GetNewEdges())
 	assert.Equal(t, removedEdges, cte.GetRemovedEdges())
+	assert.Equal(t, meta, sent[1].GetMetadata())
 }
 
 func TestSendWithDistanceFilterForEdges_SendError(t *testing.T) {
