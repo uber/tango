@@ -13,6 +13,7 @@ go_library(
         "@com_github_bazelbuild_buildtools//build_proto",
         "@com_github_bazelbuild_buildtools//labels",
         "@com_github_deckarep_golang_set_v2//:golang-set",
+        "@org_golang_x_sync//errgroup",
     ],
 )
 
