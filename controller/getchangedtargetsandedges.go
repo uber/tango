@@ -90,11 +90,9 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 					)
 					scope.Counter("cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
-					for _, resp := range cached {
-						if err := stream.Send(resp); err != nil {
-							c.logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
-							return fmt.Errorf("failed to send cached response: %w", err)
-						}
+					if err := sendWithDistanceFilterForEdges(stream, cached, request.GetOutputConfig()); err != nil {
+						c.logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
+						return err
 					}
 					totalDuration := time.Since(start)
 					c.logger.Info("GetChangedTargetsAndEdges: Successfully streamed from cache",
@@ -235,11 +233,9 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 		}
 	}()
 
-	for _, resp := range responses {
-		if err := stream.Send(resp); err != nil {
-			c.logger.Error("GetChangedTargetsAndEdges: Failed to send response", zap.Error(err))
-			return fmt.Errorf("failed to send response: %w", err)
-		}
+	if err := sendWithDistanceFilterForEdges(stream, responses, request.GetOutputConfig()); err != nil {
+		c.logger.Error("GetChangedTargetsAndEdges: Failed to send response", zap.Error(err))
+		return err
 	}
 
 	totalDuration := time.Since(start)
@@ -531,6 +527,42 @@ func buildEdgeSet(byName map[string]*pb.OptimizedTarget, meta *pb.Metadata) map[
 		}
 	}
 	return edges
+}
+
+// sendWithDistanceFilterForEdges streams responses, filtering changed_targets by
+// BFS distance when output_config.compute_distances is set. Added/removed targets
+// and edges pass through unchanged — they represent graph topology deltas that
+// are not ranked by distance from a CHANGE_TYPE_DIRECT seed.
+func sendWithDistanceFilterForEdges(
+	stream pb.TangoServiceGetChangedTargetsAndEdgesYARPCServer,
+	responses []*pb.GetChangedTargetsAndEdgesResponse,
+	outputConfig *pb.OutputConfig,
+) error {
+	maxDist := maxDistanceFromOutputConfig(outputConfig)
+	for _, resp := range responses {
+		toSend := resp
+		if maxDist >= 0 {
+			if cte, ok := resp.GetItem().(*pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges); ok {
+				payload := cte.ChangedTargetsAndEdges
+				kept := filterChangedTargetsByDistance(payload.GetChangedTargets(), maxDist)
+				toSend = &pb.GetChangedTargetsAndEdgesResponse{
+					Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
+						ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{
+							ChangedTargets: kept,
+							AddedTargets:   payload.GetAddedTargets(),
+							RemovedTargets: payload.GetRemovedTargets(),
+							NewEdges:       payload.GetNewEdges(),
+							RemovedEdges:   payload.GetRemovedEdges(),
+						},
+					},
+				}
+			}
+		}
+		if err := stream.Send(toSend); err != nil {
+			return fmt.Errorf("failed to send response: %w", err)
+		}
+	}
+	return nil
 }
 
 func validateGetChangedTargetsAndEdgesRequest(request *pb.GetChangedTargetsAndEdgesRequest) error {

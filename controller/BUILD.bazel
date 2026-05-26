@@ -4,6 +4,7 @@ go_library(
     name = "controller",
     srcs = [
         "controller.go",
+        "distance_filter.go",
         "getchangedtargetgraph.go",
         "getchangedtargets.go",
         "getchangedtargetsandedges.go",
@@ -27,6 +28,7 @@ go_library(
 go_test(
     name = "controller_test",
     srcs = [
+        "distance_filter_test.go",
         "getchangedtargets_test.go",
         "getchangedtargetsandedges_test.go",
         "gettargetgraph_test.go",

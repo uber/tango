@@ -742,21 +742,12 @@ func transposeOptimizedTarget(
 // and max_distance >= 0. Metadata and other non-target responses are always forwarded.
 // Filtering and sending are combined into a single pass to avoid an intermediate allocation.
 func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, outputConfig *pb.OutputConfig) error {
-	maxDist := int32(-1)
-	if outputConfig.GetComputeDistances() {
-		maxDist = outputConfig.GetMaxDistance()
-	}
+	maxDist := maxDistanceFromOutputConfig(outputConfig)
 	for _, resp := range responses {
 		toSend := resp
 		if maxDist >= 0 {
 			if ct, ok := resp.GetItem().(*pb.GetChangedTargetsResponse_ChangedTargets); ok {
-				targets := ct.ChangedTargets.GetChangedTargets()
-				kept := make([]*pb.ChangedTarget, 0, len(targets))
-				for _, t := range targets {
-					if d := t.GetDistance(); d >= 0 && d <= maxDist {
-						kept = append(kept, t)
-					}
-				}
+				kept := filterChangedTargetsByDistance(ct.ChangedTargets.GetChangedTargets(), maxDist)
 				toSend = &pb.GetChangedTargetsResponse{
 					Item: &pb.GetChangedTargetsResponse_ChangedTargets{
 						ChangedTargets: &pb.ChangedTargets{ChangedTargets: kept},
