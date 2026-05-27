@@ -39,14 +39,21 @@ type job struct {
 }
 
 // GetChangedTargets returns the changed targets between two revisions.
-func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error {
+func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
+	scope := c.scope.SubScope("get_changed_targets")
+	defer func() {
+		if retErr != nil {
+			scope.Counter("failure").Inc(1)
+		} else {
+			scope.Counter("success").Inc(1)
+		}
+	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
 		c.logger.Error("GetChangedTargets: Invalid request", zap.Error(err))
 		return err
 	}
 	ctx := stream.Context()
 	start := time.Now()
-	scope := c.scope.SubScope("get_changed_targets")
 	logger := c.logger.With(
 		zap.Any("first_revision", request.GetFirstRevision()),
 		zap.Any("second_revision", request.GetSecondRevision()),
@@ -259,13 +266,17 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		}
 	}()
 
+	sendStart := time.Now()
 	if err := sendWithDistanceFilter(stream, changedTargetsResponses, request.GetOutputConfig()); err != nil {
 		c.logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
 		return fmt.Errorf("failed to send response: %w", err)
 	}
+	sendDuration := time.Since(sendStart)
+	scope.Timer("send_duration").Record(sendDuration)
 
 	totalDuration := time.Since(start)
 	c.logger.Info("GetChangedTargets: Successfully processed request",
+		zap.Duration("send_duration", sendDuration),
 		zap.Duration("total_duration", totalDuration),
 	)
 	scope.Timer("total_duration").Record(totalDuration)

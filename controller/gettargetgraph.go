@@ -30,7 +30,15 @@ import (
 )
 
 // GetTargetGraph returns the target graph for a given request.
-func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) error {
+func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
+	scope := c.scope.SubScope("get_target_graph")
+	defer func() {
+		if retErr != nil {
+			scope.Counter("failure").Inc(1)
+		} else {
+			scope.Counter("success").Inc(1)
+		}
+	}()
 	start := time.Now()
 	ctx := stream.Context()
 	logger := c.logger.With(
@@ -55,7 +63,6 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 				zap.Duration("send_duration", sendDuration),
 				zap.Duration("total_duration", totalDuration),
 			)
-			scope := c.scope.SubScope("get_target_graph")
 			scope.Timer("send_duration").Record(sendDuration)
 			scope.Timer("total_duration").Record(totalDuration)
 			return nil

@@ -39,14 +39,21 @@ func packEdge(src, dep int32) uint64 {
 }
 
 // GetChangedTargetsAndEdges returns the changed targets and edges between two revisions.
-func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndEdgesRequest, stream pb.TangoServiceGetChangedTargetsAndEdgesYARPCServer) error {
+func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndEdgesRequest, stream pb.TangoServiceGetChangedTargetsAndEdgesYARPCServer) (retErr error) {
+	scope := c.scope.SubScope("get_changed_targets_and_edges")
+	defer func() {
+		if retErr != nil {
+			scope.Counter("failure").Inc(1)
+		} else {
+			scope.Counter("success").Inc(1)
+		}
+	}()
 	if err := validateGetChangedTargetsAndEdgesRequest(request); err != nil {
 		c.logger.Error("GetChangedTargetsAndEdges: Invalid request", zap.Error(err))
 		return err
 	}
 	ctx := stream.Context()
 	start := time.Now()
-	scope := c.scope.SubScope("get_changed_targets_and_edges")
 	logger := c.logger.With(
 		zap.Any("first_revision", request.GetFirstRevision()),
 		zap.Any("second_revision", request.GetSecondRevision()),
@@ -233,13 +240,17 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 		}
 	}()
 
+	sendStart := time.Now()
 	if err := sendWithDistanceFilterForEdges(stream, responses, request.GetOutputConfig()); err != nil {
 		c.logger.Error("GetChangedTargetsAndEdges: Failed to send response", zap.Error(err))
 		return err
 	}
+	sendDuration := time.Since(sendStart)
+	scope.Timer("send_duration").Record(sendDuration)
 
 	totalDuration := time.Since(start)
 	c.logger.Info("GetChangedTargetsAndEdges: Successfully processed request",
+		zap.Duration("send_duration", sendDuration),
 		zap.Duration("total_duration", totalDuration),
 	)
 	scope.Timer("total_duration").Record(totalDuration)

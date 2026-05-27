@@ -18,6 +18,14 @@ import (
 	pb "github.com/uber/tango/tangopb"
 )
 
-func (c *controller) GetChangedTargetGraph(request *pb.GetChangedTargetGraphRequest, stream pb.TangoServiceGetChangedTargetGraphYARPCServer) error {
+func (c *controller) GetChangedTargetGraph(request *pb.GetChangedTargetGraphRequest, stream pb.TangoServiceGetChangedTargetGraphYARPCServer) (retErr error) {
+	scope := c.scope.SubScope("get_changed_target_graph")
+	defer func() {
+		if retErr != nil {
+			scope.Counter("failure").Inc(1)
+		} else {
+			scope.Counter("success").Inc(1)
+		}
+	}()
 	return nil
 }
