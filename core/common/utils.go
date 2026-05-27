@@ -56,14 +56,14 @@ func ToShortRemote(remote string) string {
 // requestOptions is folded into the key when any of its fields affect computation
 // (today: extra_exclude_files_regex). Empty/nil ⇒ legacy path unchanged.
 func GetGraphByTreeHash(remote, treehash string, requestOptions *tangopb.RequestOptions) string {
-	return filepath.Join(ToShortRemote(remote), treehash) + HashRequestOptions(requestOptions)
+	return filepath.Join("graph", ToShortRemote(remote), treehash) + HashRequestOptions(requestOptions)
 }
 
 // GetTreehashCachePath returns the cache path for the treehash mapping.
 // The git treehash is purely a function of git state, so requestOptions is not
 // part of this key.
 func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
-	return filepath.Join(ToShortRemote(buildDescription.Remote), fmt.Sprintf("treehash-map-%s", buildDescription.BaseSha), getReqsHash(buildDescription.Requests)) + "-" + buildDescription.Strategy.String()
+	return filepath.Join("treehash", ToShortRemote(buildDescription.Remote), fmt.Sprintf("treehash-map-%s", buildDescription.BaseSha), GetReqsHash(buildDescription.Requests)) + "-" + buildDescription.Strategy.String()
 }
 
 // GetComparedTargetsCachePath returns the cache path for a compared target graph result.
@@ -84,10 +84,10 @@ func GetChangedTargetsAndEdgesCachePath(remote, treehash1, treehash2 string, req
 	return filepath.Join("compared-targets-and-edges", ToShortRemote(remote), treehash1, treehash2) + HashRequestOptions(requestOptions)
 }
 
-// getReqsHash returns a fixed-length MD5 hash of the sorted request URLs.
+// GetReqsHash returns a fixed-length MD5 hash of the sorted request URLs.
 // Each URL's bytes are fed into the digest individually (no separator), matching
 // the Java MessageDigest.update(str.getBytes()) per-string behavior.
-func getReqsHash(requests []*tangopb.Request) string {
+func GetReqsHash(requests []*tangopb.Request) string {
 	if len(requests) == 0 {
 		return ""
 	}
