@@ -77,7 +77,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	hashConfig := targethasher.HashConfig{
 		KnownSourceHashes: knownSourceHashes,
 		FullHashRepos:     g.config.FullHashRepos,
-		ExcludedFiles:     append(g.config.ExcludedFiles, g.extraExcludedFiles...),
+		ExcludedRegex:     append(g.config.ExcludedFiles, g.extraExcludedFiles...),
 		UseBzlmod:         g.config.BzlmodEnabled,
 	}
 
