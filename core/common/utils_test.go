@@ -64,7 +64,7 @@ func TestGetGraphByTreeHash(t *testing.T) {
 
 	// Nil/empty options ⇒ legacy path (regression: cache compatibility).
 	got := GetGraphByTreeHash(remote, treehash, nil)
-	assert.Equal(t, filepath.Join("uber/tango", treehash), got)
+	assert.Equal(t, filepath.Join("graph", "uber/tango", treehash), got)
 	assert.Equal(t, got, GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{}))
 
 	// Non-empty options ⇒ suffix appended; different lists ⇒ different keys.
@@ -94,7 +94,7 @@ func TestGetTreehashCachePath(t *testing.T) {
 	h := md5.New()
 	h.Write([]byte("custom://foo/bar"))
 	h.Write([]byte("github://org/repo/pull/1"))
-	want := filepath.Join("uber/tango", "treehash-map-deadbeef", fmt.Sprintf("%x", h.Sum(nil))) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
+	want := filepath.Join("treehash", "uber/tango", "treehash-map-deadbeef", fmt.Sprintf("%x", h.Sum(nil))) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
 	assert.Equal(t, want, got)
 }
 
