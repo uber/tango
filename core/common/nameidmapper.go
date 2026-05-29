@@ -15,7 +15,10 @@
 package common
 
 // NameIDMapper assigns stable int32 IDs to string names on demand.
-// IDs are assigned sequentially starting from 0.
+// IDs are assigned sequentially starting from 1. Zero is reserved as the
+// proto3 "unset" sentinel so consumers using encoding/json (which honors
+// `omitempty` on int32 fields) or any client that treats GetId() == 0 as
+// missing never silently lose real entries.
 type NameIDMapper struct {
 	nameToID map[string]int32
 	nextID   int32
@@ -25,7 +28,7 @@ type NameIDMapper struct {
 func NewNameIDMapper() *NameIDMapper {
 	return &NameIDMapper{
 		nameToID: make(map[string]int32),
-		nextID:   0,
+		nextID:   1,
 	}
 }
 

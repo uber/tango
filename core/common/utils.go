@@ -147,9 +147,11 @@ func HashRequestOptions(opts *tangopb.RequestOptions) string {
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse
 func ResultToGetTargetGraphResponse(result targethasher.Result) ([]*tangopb.GetTargetGraphResponse, error) {
 	// Map target names to ids. This list is topologically sorted, so the ids are stable.
+	// IDs start at 1 — 0 is reserved as the proto3 "unset" sentinel so consumers using
+	// encoding/json (which honors `omitempty` on int32 fields) never silently lose a target.
 	targetNamesMapping := make(map[string]int32, len(result.TargetNames))
 	for i, name := range result.TargetNames {
-		targetNamesMapping[name] = int32(i)
+		targetNamesMapping[name] = int32(i + 1)
 	}
 
 	ruleTypeMapper := NewNameIDMapper()

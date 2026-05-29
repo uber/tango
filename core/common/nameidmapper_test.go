@@ -15,6 +15,7 @@
 package common
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,15 +25,15 @@ func TestNameIDMapper_AssignsSequentialAndStableIDs(t *testing.T) {
 	mapper := NewNameIDMapper()
 
 	idA := mapper.ID("a")
-	assert.Equal(t, int32(0), idA)
+	assert.Equal(t, int32(1), idA, "first id must be 1; 0 is reserved as proto3 unspecified")
 	idB := mapper.ID("b")
-	assert.Equal(t, int32(1), idB)
+	assert.Equal(t, int32(2), idB)
 	// Re-requesting 'a' should return the same id
 	idA2 := mapper.ID("a")
 	assert.Equal(t, idA, idA2)
 	// A new, third name should get the next sequential id
 	idC := mapper.ID("c")
-	assert.Equal(t, int32(2), idC)
+	assert.Equal(t, int32(3), idC)
 }
 
 func TestNameIDMapper_MappingAndInvert(t *testing.T) {
@@ -44,18 +45,28 @@ func TestNameIDMapper_MappingAndInvert(t *testing.T) {
 
 	mapping := mapper.Mapping()
 	assert.Equal(t, 3, len(mapping))
-	assert.Equal(t, int32(0), mapping["x"])
-	assert.Equal(t, int32(1), mapping["y"])
-	assert.Equal(t, int32(2), mapping["z"])
+	assert.Equal(t, int32(1), mapping["x"])
+	assert.Equal(t, int32(2), mapping["y"])
+	assert.Equal(t, int32(3), mapping["z"])
 
 	inv := mapper.Invert()
 	assert.Equal(t, 3, len(inv))
-	assert.Equal(t, "x", inv[0])
-	assert.Equal(t, "y", inv[1])
-	assert.Equal(t, "z", inv[2])
+	assert.Equal(t, "x", inv[1])
+	assert.Equal(t, "y", inv[2])
+	assert.Equal(t, "z", inv[3])
+	_, hasZero := inv[0]
+	assert.False(t, hasZero, "id 0 must remain reserved")
 
 	// Mutating the inverted map should not affect the original mapping
-	inv[3] = "extra"
+	inv[4] = "extra"
 	_, ok := mapping["extra"]
 	assert.False(t, ok)
+}
+
+func TestNameIDMapper_NeverAssignsZero(t *testing.T) {
+	mapper := NewNameIDMapper()
+	for i := 0; i < 1000; i++ {
+		id := mapper.ID(fmt.Sprintf("name-%d", i))
+		assert.NotEqual(t, int32(0), id)
+	}
 }
