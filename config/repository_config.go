@@ -30,3 +30,9 @@ type RepositoryConfig struct {
 	// Positive values enable distance trimming with the given limit.
 	MaxDistance int32 `yaml:"max_distance"`
 }
+
+// RepositoryConfigProvider looks up per-repository configuration by remote.
+// Implementations may read from a local file, a remote config service, etc.
+type RepositoryConfigProvider interface {
+	GetRepositoryConfig(remote string) (RepositoryConfig, bool)
+}

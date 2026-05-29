@@ -22,6 +22,8 @@ import (
 	yaml "github.com/goccy/go-yaml"
 )
 
+var _ RepositoryConfigProvider = (*Config)(nil)
+
 // Config is the root configuration structure.
 type Config struct {
 	Repository []RepositoryConfig `yaml:"repository"`
