@@ -19,13 +19,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/git"
+	"go.uber.org/zap"
 )
 
 func TestNewRequest_Github_Success(t *testing.T) {
 	rawURL := "github://org/repo/pull/123"
 	var g git.Interface = nil
 
-	req, err := NewRequest(rawURL, g, "baseRef", "abc123")
+	req, err := NewRequest(rawURL, g, "baseRef", "abc123", zap.NewNop().Sugar())
 	require.NoError(t, err)
 	require.NotNil(t, req)
 
@@ -40,7 +41,7 @@ func TestNewRequest_InvalidURL(t *testing.T) {
 	rawURL := "://bad"
 	var g git.Interface = nil
 
-	req, err := NewRequest(rawURL, g, "baseRef", "")
+	req, err := NewRequest(rawURL, g, "baseRef", "", zap.NewNop().Sugar())
 	require.Error(t, err)
 	require.Nil(t, req)
 }

@@ -70,7 +70,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			cachedReader, cacheErr := storage.NewChangedTargetsAndEdgesReader(ctx, c.storage, cacheKey)
 			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
-				c.logger.Warn("GetChangedTargetsAndEdges: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
+				logger.Warn("GetChangedTargetsAndEdges: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
 			} else if cachedReader != nil {
 				var cached []*pb.GetChangedTargetsAndEdgesResponse
 				var readErr error
@@ -89,20 +89,20 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 				cachedReader.Close()
 
 				if readErr != nil {
-					c.logger.Warn("GetChangedTargetsAndEdges: Cached result is incomplete, recomputing", zap.Error(readErr))
+					logger.Warn("GetChangedTargetsAndEdges: Cached result is incomplete, recomputing", zap.Error(readErr))
 				} else {
 					cacheReadDuration := time.Since(cacheStart)
-					c.logger.Info("GetChangedTargetsAndEdges: Cache hit, streaming from storage",
+					logger.Info("GetChangedTargetsAndEdges: Cache hit, streaming from storage",
 						zap.Duration("cache_read_duration", cacheReadDuration),
 					)
 					scope.Counter("cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
 					if err := sendWithDistanceFilterForEdges(stream, cached, request.GetOutputConfig()); err != nil {
-						c.logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
+						logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
 						return err
 					}
 					totalDuration := time.Since(start)
-					c.logger.Info("GetChangedTargetsAndEdges: Successfully streamed from cache",
+					logger.Info("GetChangedTargetsAndEdges: Successfully streamed from cache",
 						zap.Duration("total_duration", totalDuration),
 					)
 					scope.Timer("total_duration").Record(totalDuration)
@@ -184,7 +184,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	}
 
 	graphFetchDuration := time.Since(graphFetchStart)
-	c.logger.Info("GetChangedTargetsAndEdges: Both graphs fetched",
+	logger.Info("GetChangedTargetsAndEdges: Both graphs fetched",
 		zap.Duration("graph_fetch_duration", graphFetchDuration),
 	)
 	scope.Timer("graph_fetch_duration").Record(graphFetchDuration)
@@ -213,16 +213,16 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	responses, err := c.compareTargetGraphsAndEdges(ctx, firstGraph, secondGraph, request.GetOutputConfig())
+	responses, err := c.compareTargetGraphsAndEdges(logger, firstGraph, secondGraph, request.GetOutputConfig())
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
 	if err != nil {
-		c.logger.Error("GetChangedTargetsAndEdges: Failed to compare target graphs", zap.Error(err))
+		logger.Error("GetChangedTargetsAndEdges: Failed to compare target graphs", zap.Error(err))
 		return fmt.Errorf("failed to compare target graphs: %w", err)
 	}
 	compareDuration := time.Since(compareStart)
-	c.logger.Info("GetChangedTargetsAndEdges: Target graphs compared",
+	logger.Info("GetChangedTargetsAndEdges: Target graphs compared",
 		zap.Duration("compare_duration", compareDuration),
 	)
 	scope.Timer("compare_duration").Record(compareDuration)
@@ -235,21 +235,21 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			if writeErr := storage.WriteChangedTargetsAndEdgesStream(cacheCtx, c.storage, cacheKey, responses); writeErr != nil {
-				c.logger.Warn("GetChangedTargetsAndEdges: Failed to cache result", zap.Error(writeErr))
+				logger.Warn("GetChangedTargetsAndEdges: Failed to cache result", zap.Error(writeErr))
 			}
 		}
 	}()
 
 	sendStart := time.Now()
 	if err := sendWithDistanceFilterForEdges(stream, responses, request.GetOutputConfig()); err != nil {
-		c.logger.Error("GetChangedTargetsAndEdges: Failed to send response", zap.Error(err))
+		logger.Error("GetChangedTargetsAndEdges: Failed to send response", zap.Error(err))
 		return err
 	}
 	sendDuration := time.Since(sendStart)
 	scope.Timer("send_duration").Record(sendDuration)
 
 	totalDuration := time.Since(start)
-	c.logger.Info("GetChangedTargetsAndEdges: Successfully processed request",
+	logger.Info("GetChangedTargetsAndEdges: Successfully processed request",
 		zap.Duration("send_duration", sendDuration),
 		zap.Duration("total_duration", totalDuration),
 	)
@@ -257,10 +257,10 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	return nil
 }
 
-func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph, secondGraph []*pb.GetTargetGraphResponse, outputConfig *pb.OutputConfig) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
+func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, outputConfig *pb.OutputConfig) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs_and_edges")
-	c.logger.Info("compareTargetGraphsAndEdges: Computing differences between target graphs")
+	logger.Info("compareTargetGraphsAndEdges: Computing differences between target graphs")
 
 	// 1) Extract targets and metadata; index by canonical names.
 	firstTargetsByID, firstMetadata := getTargetsAndMetadata(firstGraph)
@@ -394,7 +394,7 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 
 	// 5) Compute BFS distances if requested.
 	if outputConfig.GetComputeDistances() {
-		computeDistances(c.logger, changedByName, secondByName, secondMetadata, outputConfig.GetMaxDistance())
+		computeDistances(logger, changedByName, secondByName, secondMetadata, outputConfig.GetMaxDistance())
 	}
 
 	// 6) Collect changed targets.
@@ -459,7 +459,7 @@ func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, firstGraph
 	// 10) Build canonical metadata.
 
 	totalDuration := time.Since(start)
-	c.logger.Info("compareTargetGraphsAndEdges: Done",
+	logger.Info("compareTargetGraphsAndEdges: Done",
 		zap.Duration("total_duration", totalDuration),
 	)
 	scope.Timer("total_duration").Record(totalDuration)

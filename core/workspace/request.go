@@ -19,6 +19,7 @@ import (
 	"net/url"
 
 	"github.com/uber/tango/core/git"
+	"go.uber.org/zap"
 )
 
 // Request represents a change request type, like Phabricator diff or Github pull request
@@ -27,14 +28,14 @@ type Request interface {
 }
 
 // NewRequest creates a new request based on the request URL.
-func NewRequest(rawURL string, g git.Interface, baseRef string, commit string) (Request, error) {
+func NewRequest(rawURL string, g git.Interface, baseRef string, commit string, logger *zap.SugaredLogger) (Request, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
 	}
 	switch u.Scheme {
 	case "github":
-		return NewGitRequest(g, u.Path, baseRef, commit), nil
+		return NewGitRequest(g, u.Path, baseRef, commit, logger), nil
 	}
 	return nil, nil
 }

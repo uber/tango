@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 
 	"github.com/uber/tango/core/git"
+	"go.uber.org/zap"
 )
 
 type gitRequest struct {
@@ -27,9 +28,10 @@ type gitRequest struct {
 	requestID string
 	baseRef   string
 	commit    string
+	logger    *zap.SugaredLogger
 }
 
-func NewGitRequest(git git.Interface, requestPath string, baseRef string, commit string) Request {
+func NewGitRequest(git git.Interface, requestPath string, baseRef string, commit string, logger *zap.SugaredLogger) Request {
 	// get the last part of the request path
 	requestID := filepath.Base(requestPath)
 	return &gitRequest{
@@ -37,14 +39,17 @@ func NewGitRequest(git git.Interface, requestPath string, baseRef string, commit
 		requestID: requestID,
 		baseRef:   baseRef,
 		commit:    commit,
+		logger:    logger,
 	}
 }
 
 // Apply applies the change request to the workspace.
 func (r *gitRequest) Apply(ctx context.Context) error {
+	r.logger.Infow("gitRequest: Applying PR", zap.String("request_id", r.requestID), zap.String("base_ref", r.baseRef), zap.String("commit", r.commit))
 	ref := fmt.Sprintf("+pull/%s/head:pull/%s/head", r.requestID, r.requestID)
 	err := r.git.Fetch(ctx, "origin", ref, "--force", "--no-tags")
 	if err != nil {
+		r.logger.Errorw("gitRequest: Failed to fetch PR", zap.String("request_id", r.requestID), zap.Error(err))
 		return err
 	}
 	if r.commit != "" {
@@ -58,19 +63,24 @@ func (r *gitRequest) Apply(ctx context.Context) error {
 	}
 	patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
 	if err != nil {
+		r.logger.Errorw("gitRequest: Failed to compute diff", zap.String("request_id", r.requestID), zap.Error(err))
 		return err
 	}
 	err = r.git.ApplyPatch(ctx, patch)
 	if err != nil {
+		r.logger.Errorw("gitRequest: Failed to apply patch", zap.String("request_id", r.requestID), zap.Error(err))
 		return err
 	}
 	err = r.git.Commit(ctx, fmt.Sprintf("Applied PR: %s", r.requestID), "--allow-empty")
 	if err != nil {
+		r.logger.Errorw("gitRequest: Failed to commit", zap.String("request_id", r.requestID), zap.Error(err))
 		return err
 	}
 	err = r.git.SubmoduleUpdate(ctx)
 	if err != nil {
+		r.logger.Errorw("gitRequest: Failed to update submodules", zap.String("request_id", r.requestID), zap.Error(err))
 		return err
 	}
+	r.logger.Infow("gitRequest: Successfully applied PR", zap.String("request_id", r.requestID))
 	return nil
 }

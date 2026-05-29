@@ -72,7 +72,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
 			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
-				c.logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
+				logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
 			} else if cachedReader != nil {
 				// Buffer all responses before sending any. A concurrent goroutine write may have
 				// left a partial blob in storage; buffering lets us detect corruption and fall
@@ -95,20 +95,20 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 				if readErr != nil {
 					// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
-					c.logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
+					logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
 				} else {
 					cacheReadDuration := time.Since(cacheStart)
-					c.logger.Info("GetChangedTargets: Cache hit, streaming from storage",
+					logger.Info("GetChangedTargets: Cache hit, streaming from storage",
 						zap.Duration("cache_read_duration", cacheReadDuration),
 					)
 					scope.Counter("cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
 					if sendErr := sendWithDistanceFilter(stream, cached, request.GetOutputConfig()); sendErr != nil {
-						c.logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
+						logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
 						return fmt.Errorf("failed to send cached response: %w", sendErr)
 					}
 					totalDuration := time.Since(start)
-					c.logger.Info("GetChangedTargets: Successfully streamed from cache",
+					logger.Info("GetChangedTargets: Successfully streamed from cache",
 						zap.Duration("total_duration", totalDuration),
 					)
 					scope.Timer("total_duration").Record(totalDuration)
@@ -202,7 +202,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}
 
 	graphFetchDuration := time.Since(graphFetchStart)
-	c.logger.Info("GetChangedTargets: Both graphs fetched",
+	logger.Info("GetChangedTargets: Both graphs fetched",
 		zap.Duration("graph_fetch_duration", graphFetchDuration),
 	)
 	scope.Timer("graph_fetch_duration").Record(graphFetchDuration)
@@ -236,16 +236,16 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, firstGraph, secondGraph, request.GetOutputConfig())
+	changedTargetsResponses, err := c.compareTargetGraphs(logger, firstGraph, secondGraph, request.GetOutputConfig())
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
 	if err != nil {
-		c.logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
+		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
 		return fmt.Errorf("failed to compare target graphs: %w", err)
 	}
 	compareDuration := time.Since(compareStart)
-	c.logger.Info("GetChangedTargets: Target graphs compared",
+	logger.Info("GetChangedTargets: Target graphs compared",
 		zap.Duration("compare_duration", compareDuration),
 	)
 	scope.Timer("compare_duration").Record(compareDuration)
@@ -261,21 +261,21 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			if writeErr := storage.WriteChangedTargetsStream(cacheCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
-				c.logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
+				logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
 			}
 		}
 	}()
 
 	sendStart := time.Now()
 	if err := sendWithDistanceFilter(stream, changedTargetsResponses, request.GetOutputConfig()); err != nil {
-		c.logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
+		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
 		return fmt.Errorf("failed to send response: %w", err)
 	}
 	sendDuration := time.Since(sendStart)
 	scope.Timer("send_duration").Record(sendDuration)
 
 	totalDuration := time.Since(start)
-	c.logger.Info("GetChangedTargets: Successfully processed request",
+	logger.Info("GetChangedTargets: Successfully processed request",
 		zap.Duration("send_duration", sendDuration),
 		zap.Duration("total_duration", totalDuration),
 	)
@@ -283,10 +283,10 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	return nil
 }
 
-func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, secondGraph []*pb.GetTargetGraphResponse, outputConfig *pb.OutputConfig) ([]*pb.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, outputConfig *pb.OutputConfig) ([]*pb.GetChangedTargetsResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs")
-	c.logger.Info("compareTargetGraphs: Computing differences between target graphs")
+	logger.Info("compareTargetGraphs: Computing differences between target graphs")
 
 	// 1) Extract targets and metadata; index by canonical names
 	indexStart := time.Now()
@@ -477,7 +477,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, second
 		})
 	}
 	totalDuration := time.Since(start)
-	c.logger.Info("compareTargetGraphs: Done",
+	logger.Info("compareTargetGraphs: Done",
 		zap.Duration("total_duration", totalDuration),
 	)
 	scope.Timer("total_duration").Record(totalDuration)

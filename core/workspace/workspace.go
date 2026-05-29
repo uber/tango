@@ -77,7 +77,10 @@ func (w *workspace) Checkout(ctx context.Context, remote string, ref string) err
 	_, err := w.git.RevParse(ctx, commit)
 	// commit is not present in the repository
 	if err != nil {
-		w.logger.Warnf("git rev-parse %s failed with error %v, attempt to fetch from remote", commit, err)
+		w.logger.Warnw("git rev-parse failed, attempting to fetch from remote",
+			zap.String("remote", remote),
+			zap.String("ref", ref),
+			zap.Error(err))
 		err = w.git.Fetch(ctx, remote, ref)
 		if err != nil {
 			return err
