@@ -43,10 +43,10 @@ func TestMaxDistanceFromOutputConfig(t *testing.T) {
 
 func TestResolveMaxDistance(t *testing.T) {
 	tests := []struct {
-		name       string
-		repoCfg    config.RepositoryConfig
-		outputCfg  *pb.OutputConfig
-		want       int32
+		name      string
+		repoCfg   config.RepositoryConfig
+		outputCfg *pb.OutputConfig
+		want      int32
 	}{
 		{
 			name:    "neither set: no trimming",

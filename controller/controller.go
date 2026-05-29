@@ -31,9 +31,9 @@ type Params struct {
 	Logger             *zap.Logger
 	Storage            storage.Storage
 	Orchestrator       orchestrator.Orchestrator
-	Scope              tally.Scope                      `optional:"true"`
-	ChunkConfig        config.ChunkConfig               `optional:"true"`
-	RepoConfigProvider config.RepositoryConfigProvider  `optional:"true"`
+	Scope              tally.Scope                     `optional:"true"`
+	ChunkConfig        config.ChunkConfig              `optional:"true"`
+	RepoConfigProvider config.RepositoryConfigProvider `optional:"true"`
 }
 
 type controller struct {
