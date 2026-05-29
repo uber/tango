@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/uber/tango/config"
 	pb "github.com/uber/tango/tangopb"
 )
 
@@ -36,6 +37,53 @@ func TestMaxDistanceFromOutputConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, maxDistanceFromOutputConfig(tt.cfg))
+		})
+	}
+}
+
+func TestResolveMaxDistance(t *testing.T) {
+	tests := []struct {
+		name       string
+		repoCfg    config.RepositoryConfig
+		outputCfg  *pb.OutputConfig
+		want       int32
+	}{
+		{
+			name:    "neither set: no trimming",
+			repoCfg: config.RepositoryConfig{},
+			want:    -1,
+		},
+		{
+			name:    "repo config default applied when client has no compute_distances",
+			repoCfg: config.RepositoryConfig{MaxDistance: 3},
+			want:    3,
+		},
+		{
+			name:      "client compute_distances overrides repo config",
+			repoCfg:   config.RepositoryConfig{MaxDistance: 3},
+			outputCfg: &pb.OutputConfig{ComputeDistances: true, MaxDistance: 5},
+			want:      5,
+		},
+		{
+			name:      "client compute_distances=true with max_distance=0 overrides repo config",
+			repoCfg:   config.RepositoryConfig{MaxDistance: 3},
+			outputCfg: &pb.OutputConfig{ComputeDistances: true, MaxDistance: 0},
+			want:      0,
+		},
+		{
+			name:      "client compute_distances=true, no repo config",
+			outputCfg: &pb.OutputConfig{ComputeDistances: true, MaxDistance: 2},
+			want:      2,
+		},
+		{
+			name:    "repo config=0 means unset: no trimming",
+			repoCfg: config.RepositoryConfig{MaxDistance: 0},
+			want:    -1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, resolveMaxDistance(tt.repoCfg, tt.outputCfg))
 		})
 	}
 }

@@ -61,6 +61,8 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 
 	logger.Info("GetChangedTargetsAndEdges: Processing request")
 
+	maxDist := resolveMaxDistance(c.getRepoConfig(request.GetFirstRevision().GetRemote()), request.GetOutputConfig())
+
 	// Try to serve from cache first.
 	if !request.GetBypassCache() {
 		cacheStart := time.Now()
@@ -97,7 +99,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 					)
 					scope.Counter("cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
-					if err := sendWithDistanceFilterForEdges(stream, cached, request.GetOutputConfig()); err != nil {
+					if err := sendWithDistanceFilterForEdges(stream, cached, maxDist); err != nil {
 						logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
 						return err
 					}
@@ -213,7 +215,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	responses, err := c.compareTargetGraphsAndEdges(logger, firstGraph, secondGraph, request.GetOutputConfig())
+	responses, err := c.compareTargetGraphsAndEdges(logger, firstGraph, secondGraph, maxDist)
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -241,7 +243,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	}()
 
 	sendStart := time.Now()
-	if err := sendWithDistanceFilterForEdges(stream, responses, request.GetOutputConfig()); err != nil {
+	if err := sendWithDistanceFilterForEdges(stream, responses, maxDist); err != nil {
 		logger.Error("GetChangedTargetsAndEdges: Failed to send response", zap.Error(err))
 		return err
 	}
@@ -257,7 +259,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	return nil
 }
 
-func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, outputConfig *pb.OutputConfig) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
+func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs_and_edges")
 	logger.Info("compareTargetGraphsAndEdges: Computing differences between target graphs")
@@ -323,7 +325,7 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 			changedByName[name] = &pb.ChangedTarget{
 				ChangeType: pb.CHANGE_TYPE_NEW,
 				NewTarget:  transposed,
-				Distance:   getDefaultDistance(outputConfig, true),
+				Distance:   getDefaultDistance(maxDist, true),
 			}
 			addedTargets = append(addedTargets, transposed)
 			continue
@@ -359,7 +361,7 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 			ChangeType: initial,
 			OldTarget:  oldTarget,
 			NewTarget:  newTarget,
-			Distance:   getDefaultDistance(outputConfig, false),
+			Distance:   getDefaultDistance(maxDist, false),
 		}
 	}
 
@@ -392,9 +394,9 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 		}
 	}
 
-	// 5) Compute BFS distances if requested.
-	if outputConfig.GetComputeDistances() {
-		computeDistances(logger, changedByName, secondByName, secondMetadata, outputConfig.GetMaxDistance())
+	// 5) Compute BFS distances when distance trimming is active (maxDist >= 0).
+	if maxDist >= 0 {
+		computeDistances(logger, changedByName, secondByName, secondMetadata, maxDist)
 	}
 
 	// 6) Collect changed targets.
@@ -541,15 +543,14 @@ func buildEdgeSet(byName map[string]*pb.OptimizedTarget, meta *pb.Metadata) map[
 }
 
 // sendWithDistanceFilterForEdges streams responses, filtering changed_targets by
-// BFS distance when output_config.compute_distances is set. Added/removed targets
+// BFS distance when maxDist >= 0. Added/removed targets
 // and edges pass through unchanged — they represent graph topology deltas that
 // are not ranked by distance from a CHANGE_TYPE_DIRECT seed.
 func sendWithDistanceFilterForEdges(
 	stream pb.TangoServiceGetChangedTargetsAndEdgesYARPCServer,
 	responses []*pb.GetChangedTargetsAndEdgesResponse,
-	outputConfig *pb.OutputConfig,
+	maxDist int32,
 ) error {
-	maxDist := maxDistanceFromOutputConfig(outputConfig)
 	for _, resp := range responses {
 		toSend := resp
 		if maxDist >= 0 {

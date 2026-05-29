@@ -61,6 +61,8 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	logger.Info("GetChangedTargets: Processing request")
 
+	maxDist := resolveMaxDistance(c.getRepoConfig(request.GetFirstRevision().GetRemote()), request.GetOutputConfig())
+
 	// Try to serve from cache first using the stored treehashes for both revisions.
 	// readTreehash returns "" on any miss/error so we silently skip the cache when
 	// either treehash is not yet available.
@@ -103,7 +105,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 					)
 					scope.Counter("cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
-					if sendErr := sendWithDistanceFilter(stream, cached, request.GetOutputConfig()); sendErr != nil {
+					if sendErr := sendWithDistanceFilter(stream, cached, maxDist); sendErr != nil {
 						logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
 						return fmt.Errorf("failed to send cached response: %w", sendErr)
 					}
@@ -236,7 +238,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	changedTargetsResponses, err := c.compareTargetGraphs(logger, firstGraph, secondGraph, request.GetOutputConfig())
+	changedTargetsResponses, err := c.compareTargetGraphs(logger, firstGraph, secondGraph, maxDist)
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -267,7 +269,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}()
 
 	sendStart := time.Now()
-	if err := sendWithDistanceFilter(stream, changedTargetsResponses, request.GetOutputConfig()); err != nil {
+	if err := sendWithDistanceFilter(stream, changedTargetsResponses, maxDist); err != nil {
 		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
 		return fmt.Errorf("failed to send response: %w", err)
 	}
@@ -283,7 +285,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	return nil
 }
 
-func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, outputConfig *pb.OutputConfig) ([]*pb.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs")
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
@@ -338,7 +340,7 @@ func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondG
 					secondMetadata.GetAttributeStringValueMapping(),
 					getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
 				),
-				Distance: getDefaultDistance(outputConfig, true),
+				Distance: getDefaultDistance(maxDist, true),
 			}
 			continue
 		}
@@ -382,7 +384,7 @@ func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondG
 			ChangeType: initial,
 			OldTarget:  oldTarget,
 			NewTarget:  newTarget,
-			Distance:   getDefaultDistance(outputConfig, false),
+			Distance:   getDefaultDistance(maxDist, false),
 		}
 	}
 	diffScanDuration := time.Since(diffScanStart)
@@ -425,11 +427,10 @@ func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondG
 	classifyDuration := time.Since(classifyStart)
 	scope.Timer("classify_duration").Record(classifyDuration)
 
-	// Compute BFS distances from CHANGE_TYPE_DIRECT targets through the dependency graph.
-	// max_distance is only considered when compute_distances is true.
-	if outputConfig.GetComputeDistances() {
+	// Compute BFS distances when distance trimming is active (maxDist >= 0).
+	if maxDist >= 0 {
 		distancesStart := time.Now()
-		computeDistances(c.logger, changedByName, secondByName, secondMetadata, outputConfig.GetMaxDistance())
+		computeDistances(c.logger, changedByName, secondByName, secondMetadata, maxDist)
 		distancesDuration := time.Since(distancesStart)
 		scope.Timer("distances_duration").Record(distancesDuration)
 	}
@@ -749,11 +750,10 @@ func transposeOptimizedTarget(
 }
 
 // sendWithDistanceFilter streams responses to the client, filtering changed targets to those
-// within outputConfig.MaxDistance from any CHANGE_TYPE_DIRECT target when compute_distances is true
-// and max_distance >= 0. Metadata and other non-target responses are always forwarded.
+// within maxDist from any CHANGE_TYPE_DIRECT target when maxDist >= 0.
+// Metadata and other non-target responses are always forwarded.
 // Filtering and sending are combined into a single pass to avoid an intermediate allocation.
-func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, outputConfig *pb.OutputConfig) error {
-	maxDist := maxDistanceFromOutputConfig(outputConfig)
+func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, maxDist int32) error {
 	for _, resp := range responses {
 		toSend := resp
 		if maxDist >= 0 {
@@ -777,7 +777,7 @@ func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, 
 // target to each changed target via the reverse dependency graph using BFS.
 // DIRECT targets get distance 0, their reverse dependants get 1, and so on.
 // When maxDistance >= 0, the BFS is pruned: targets at distance > maxDistance are never
-// enqueued, so they keep their initial distance of -1 (out-of-range). 0 means no limit.
+// enqueued, so they keep their initial distance of -1 (out-of-range).
 //
 // Targets unreachable from any DIRECT target keep the initial distance of -1.
 func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTarget, targetsByName map[string]*pb.OptimizedTarget, meta *pb.Metadata, maxDistance int32) {
@@ -878,8 +878,8 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 	return nil
 }
 
-func getDefaultDistance(outputConfig *pb.OutputConfig, forNewTarget bool) int32 {
-	if !outputConfig.GetComputeDistances() {
+func getDefaultDistance(maxDist int32, forNewTarget bool) int32 {
+	if maxDist < 0 {
 		return -1
 	}
 	// New targets are always CHANGE_TYPE_NEW → distance 0.

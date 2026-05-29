@@ -33,6 +33,7 @@ type Params struct {
 	Orchestrator orchestrator.Orchestrator
 	Scope        tally.Scope        `optional:"true"`
 	ChunkConfig  config.ChunkConfig `optional:"true"`
+	Cfg          *config.Config     `optional:"true"`
 }
 
 type controller struct {
@@ -43,6 +44,7 @@ type controller struct {
 	targetChunkSize        int
 	changedTargetChunkSize int
 	metadataMapChunkSize   int
+	cfg                    *config.Config
 }
 
 // NewController creates a new controller.
@@ -71,5 +73,16 @@ func NewController(p Params) pb.TangoYARPCServer {
 		targetChunkSize:        targetChunkSize,
 		changedTargetChunkSize: changedTargetChunkSize,
 		metadataMapChunkSize:   metadataMapChunkSize,
+		cfg:                    p.Cfg,
 	}
+}
+
+// getRepoConfig returns the RepositoryConfig for the given remote, or a
+// zero-value config when no server-side configuration exists for that remote.
+func (c *controller) getRepoConfig(remote string) config.RepositoryConfig {
+	if c.cfg == nil {
+		return config.RepositoryConfig{}
+	}
+	repoConfig, _ := c.cfg.GetRepositoryConfig(remote)
+	return repoConfig
 }

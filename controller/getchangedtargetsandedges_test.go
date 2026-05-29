@@ -258,7 +258,7 @@ func TestCompareTargetGraphsAndEdges_Empty(t *testing.T) {
 		}}
 	}
 
-	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), emptyGraph(), emptyGraph(), nil)
+	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), emptyGraph(), emptyGraph(), -1)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 	cte, _ := collectCTEResponses(res)
@@ -298,7 +298,7 @@ func TestCompareTargetGraphsAndEdges_AddedTarget(t *testing.T) {
 		},
 	}
 
-	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, nil)
+	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cte, meta := collectCTEResponses(res)
 
@@ -340,7 +340,7 @@ func TestCompareTargetGraphsAndEdges_RemovedTarget(t *testing.T) {
 		}},
 	}}
 
-	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, nil)
+	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cte, meta := collectCTEResponses(res)
 
@@ -395,7 +395,7 @@ func TestCompareTargetGraphsAndEdges_NewEdge(t *testing.T) {
 		},
 	}
 
-	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, nil)
+	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cte, meta := collectCTEResponses(res)
 
@@ -446,7 +446,7 @@ func TestCompareTargetGraphsAndEdges_RemovedEdge(t *testing.T) {
 		},
 	}
 
-	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, nil)
+	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cte, meta := collectCTEResponses(res)
 
@@ -499,7 +499,7 @@ func TestCompareTargetGraphsAndEdges_ChangedTargetClassification(t *testing.T) {
 		},
 	}
 
-	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, nil)
+	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cte, meta := collectCTEResponses(res)
 
@@ -546,7 +546,7 @@ func TestCompareTargetGraphsAndEdges_UnchangedTargetNotReturned(t *testing.T) {
 		},
 	}
 
-	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, nil)
+	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cte, _ := collectCTEResponses(res)
 	assert.Empty(t, cte.GetChangedTargets())
@@ -583,7 +583,7 @@ func TestCompareTargetGraphsAndEdges_EdgePreservedWhenTargetUnchanged(t *testing
 	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(),
 		mkGraph(1, 2, "hA", "hB"),
 		mkGraph(10, 20, "hA", "hB"),
-		nil,
+		-1,
 	)
 	require.NoError(t, err)
 	cte, _ := collectCTEResponses(res)
@@ -632,7 +632,7 @@ func TestCompareTargetGraphsAndEdges_CanonicalIDs(t *testing.T) {
 		},
 	}
 
-	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, nil)
+	res, err := c.compareTargetGraphsAndEdges(zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 
 	cte, meta := collectCTEResponses(res)
@@ -1112,7 +1112,7 @@ func TestSendWithDistanceFilterForEdges_NonChangedTargetFieldsPreserved(t *testi
 		return nil
 	}).Times(2)
 
-	require.NoError(t, sendWithDistanceFilterForEdges(stream, responses, &pb.OutputConfig{ComputeDistances: true, MaxDistance: 1}))
+	require.NoError(t, sendWithDistanceFilterForEdges(stream, responses, 1))
 
 	cte := sent[0].GetChangedTargetsAndEdges()
 	require.Len(t, cte.GetChangedTargets(), 1, "only distance-0 target should survive")
@@ -1140,7 +1140,7 @@ func TestSendWithDistanceFilterForEdges_SendError(t *testing.T) {
 
 	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send error"))
 
-	err := sendWithDistanceFilterForEdges(stream, responses, &pb.OutputConfig{})
+	err := sendWithDistanceFilterForEdges(stream, responses, -1)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "send error")
 }
