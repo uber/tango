@@ -238,7 +238,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	changedTargetsResponses, err := c.compareTargetGraphs(logger, firstGraph, secondGraph, maxDist)
+	changedTargetsResponses, err := c.compareTargetGraphs(logger, firstGraph, secondGraph, maxDist, request.GetOutputConfig().GetComputeDistances())
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -285,7 +285,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	return nil
 }
 
-func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs")
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
@@ -340,7 +340,7 @@ func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondG
 					secondMetadata.GetAttributeStringValueMapping(),
 					getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
 				),
-				Distance: getDefaultDistance(maxDist, true),
+				Distance: getDefaultDistance(maxDist, outputDistances, true),
 			}
 			continue
 		}
@@ -384,7 +384,7 @@ func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondG
 			ChangeType: initial,
 			OldTarget:  oldTarget,
 			NewTarget:  newTarget,
-			Distance:   getDefaultDistance(maxDist, false),
+			Distance:   getDefaultDistance(maxDist, outputDistances, false),
 		}
 	}
 	diffScanDuration := time.Since(diffScanStart)
@@ -427,8 +427,8 @@ func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondG
 	classifyDuration := time.Since(classifyStart)
 	scope.Timer("classify_duration").Record(classifyDuration)
 
-	// Compute BFS distances when distance trimming is active (maxDist >= 0).
-	if maxDist >= 0 {
+	// Compute BFS distances when filtering is active or the client requested distance output.
+	if maxDist >= 0 || outputDistances {
 		distancesStart := time.Now()
 		computeDistances(c.logger, changedByName, secondByName, secondMetadata, maxDist)
 		distancesDuration := time.Since(distancesStart)
@@ -878,8 +878,8 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 	return nil
 }
 
-func getDefaultDistance(maxDist int32, forNewTarget bool) int32 {
-	if maxDist < 0 {
+func getDefaultDistance(maxDist int32, outputDistances bool, forNewTarget bool) int32 {
+	if maxDist < 0 && !outputDistances {
 		return -1
 	}
 	// New targets are always CHANGE_TYPE_NEW → distance 0.

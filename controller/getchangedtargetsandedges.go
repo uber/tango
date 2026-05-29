@@ -215,7 +215,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	responses, err := c.compareTargetGraphsAndEdges(logger, firstGraph, secondGraph, maxDist)
+	responses, err := c.compareTargetGraphsAndEdges(logger, firstGraph, secondGraph, maxDist, request.GetOutputConfig().GetComputeDistances())
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -259,7 +259,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	return nil
 }
 
-func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
+func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs_and_edges")
 	logger.Info("compareTargetGraphsAndEdges: Computing differences between target graphs")
@@ -325,7 +325,7 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 			changedByName[name] = &pb.ChangedTarget{
 				ChangeType: pb.CHANGE_TYPE_NEW,
 				NewTarget:  transposed,
-				Distance:   getDefaultDistance(maxDist, true),
+				Distance:   getDefaultDistance(maxDist, outputDistances, true),
 			}
 			addedTargets = append(addedTargets, transposed)
 			continue
@@ -361,7 +361,7 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 			ChangeType: initial,
 			OldTarget:  oldTarget,
 			NewTarget:  newTarget,
-			Distance:   getDefaultDistance(maxDist, false),
+			Distance:   getDefaultDistance(maxDist, outputDistances, false),
 		}
 	}
 
@@ -394,8 +394,8 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 		}
 	}
 
-	// 5) Compute BFS distances when distance trimming is active (maxDist >= 0).
-	if maxDist >= 0 {
+	// 5) Compute BFS distances when filtering is active or the client requested distance output.
+	if maxDist >= 0 || outputDistances {
 		computeDistances(logger, changedByName, secondByName, secondMetadata, maxDist)
 	}
 

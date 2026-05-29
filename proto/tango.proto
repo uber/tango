@@ -55,10 +55,12 @@ message OutputConfig {
     bool include_hashes = 3;
     // Indicates if only root targets (i.e. targets that are not depended on by any other targets) should be included in the response
     bool roots_only = 4;
-    // Indicates if BFS distances from CHANGE_TYPE_DIRECT targets should be computed for each ChangedTarget
+    // Indicates if BFS distances from CHANGE_TYPE_DIRECT targets should be computed and included
+    // in each ChangedTarget's distance field. Independent of max_distance filtering.
     bool compute_distances = 5;
-    // Maximum BFS distance from a CHANGE_TYPE_DIRECT target to include. Only considered when compute_distances is true.
-    // 0 (default) means no limit. Positive values limit BFS: 1 = only DIRECT + immediate reverse deps, etc.
+    // Maximum BFS distance from a CHANGE_TYPE_DIRECT target to include in the response.
+    // 0 (default) means no distance filtering. Positive values limit results: 1 = only DIRECT
+    // targets, 2 = DIRECT + their immediate reverse deps, etc. Independent of compute_distances.
     int32 max_distance = 6;
 }
 

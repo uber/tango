@@ -22,25 +22,6 @@ import (
 	pb "github.com/uber/tango/tangopb"
 )
 
-func TestMaxDistanceFromOutputConfig(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  *pb.OutputConfig
-		want int32
-	}{
-		{"nil config disables filter", nil, -1},
-		{"compute_distances unset disables filter", &pb.OutputConfig{}, -1},
-		{"compute_distances unset ignores max_distance", &pb.OutputConfig{MaxDistance: 5}, -1},
-		{"compute_distances true returns max", &pb.OutputConfig{ComputeDistances: true, MaxDistance: 5}, 5},
-		{"compute_distances true returns 0", &pb.OutputConfig{ComputeDistances: true, MaxDistance: 0}, 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, maxDistanceFromOutputConfig(tt.cfg))
-		})
-	}
-}
-
 func TestResolveMaxDistance(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -49,36 +30,41 @@ func TestResolveMaxDistance(t *testing.T) {
 		want      int32
 	}{
 		{
-			name:    "neither set: no trimming",
+			name:    "neither set: no filtering",
 			repoCfg: config.RepositoryConfig{},
 			want:    -1,
 		},
 		{
-			name:    "repo config default applied when client has no compute_distances",
+			name:    "repo config default applied",
 			repoCfg: config.RepositoryConfig{MaxDistance: 3},
 			want:    3,
 		},
 		{
-			name:      "client compute_distances overrides repo config",
+			name:      "client max_distance overrides repo config",
 			repoCfg:   config.RepositoryConfig{MaxDistance: 3},
-			outputCfg: &pb.OutputConfig{ComputeDistances: true, MaxDistance: 5},
+			outputCfg: &pb.OutputConfig{MaxDistance: 5},
 			want:      5,
 		},
 		{
-			name:      "client compute_distances=true with max_distance=0 overrides repo config",
+			name:      "client max_distance=0 treated as unset, repo config applies",
 			repoCfg:   config.RepositoryConfig{MaxDistance: 3},
-			outputCfg: &pb.OutputConfig{ComputeDistances: true, MaxDistance: 0},
-			want:      0,
+			outputCfg: &pb.OutputConfig{MaxDistance: 0},
+			want:      3,
 		},
 		{
-			name:      "client compute_distances=true, no repo config",
-			outputCfg: &pb.OutputConfig{ComputeDistances: true, MaxDistance: 2},
+			name:      "client max_distance set, no repo config",
+			outputCfg: &pb.OutputConfig{MaxDistance: 2},
 			want:      2,
 		},
 		{
-			name:    "repo config=0 means unset: no trimming",
+			name:    "repo config=0 means unset: no filtering",
 			repoCfg: config.RepositoryConfig{MaxDistance: 0},
 			want:    -1,
+		},
+		{
+			name:      "compute_distances alone does not enable filtering",
+			outputCfg: &pb.OutputConfig{ComputeDistances: true},
+			want:      -1,
 		},
 	}
 	for _, tt := range tests {
