@@ -116,7 +116,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 				return nil, err
 			}
 			logger.Info("getGraph: treehash found")
-			treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes), requestOptions)
+			treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes), buildDescription.GetStrategy(), requestOptions)
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)

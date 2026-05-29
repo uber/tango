@@ -61,20 +61,24 @@ func TestGetGraphByTreeHash(t *testing.T) {
 	t.Parallel()
 	remote := "git@github:uber/tango"
 	treehash := "abcd1234"
+	strategy := pb.COMPUTATION_STRATEGY_NATIVE
 
-	// Nil/empty options ⇒ legacy path (regression: cache compatibility).
-	got := GetGraphByTreeHash(remote, treehash, nil)
-	assert.Equal(t, filepath.Join("graph", "uber/tango", treehash), got)
-	assert.Equal(t, got, GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{}))
+	// Nil/empty options ⇒ no request-options suffix.
+	got := GetGraphByTreeHash(remote, treehash, strategy, nil)
+	assert.Equal(t, filepath.Join("uber/tango", "graphs", treehash, strategy.String()), got)
+	assert.Equal(t, got, GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{}))
+
+	// Different strategies ⇒ different keys.
+	assert.NotEqual(t, got, GetGraphByTreeHash(remote, treehash, pb.COMPUTATION_STRATEGY_SHELL, nil))
 
 	// Non-empty options ⇒ suffix appended; different lists ⇒ different keys.
-	withFoo := GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}})
+	withFoo := GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}})
 	assert.NotEqual(t, got, withFoo)
-	assert.NotEqual(t, withFoo, GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"bar.*"}}))
+	assert.NotEqual(t, withFoo, GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"bar.*"}}))
 	// Order-independence: sort before hashing.
 	assert.Equal(t,
-		GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"a", "b"}}),
-		GetGraphByTreeHash(remote, treehash, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"b", "a"}}),
+		GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"a", "b"}}),
+		GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"b", "a"}}),
 	)
 }
 
@@ -94,11 +98,11 @@ func TestGetTreehashCachePath(t *testing.T) {
 	h := md5.New()
 	h.Write([]byte("custom://foo/bar"))
 	h.Write([]byte("github://org/repo/pull/1"))
-	want := filepath.Join("treehash", "uber/tango", "treehash-map-deadbeef", fmt.Sprintf("%x", h.Sum(nil))) + "-" + pb.COMPUTATION_STRATEGY_INVALID.String()
+	want := filepath.Join("uber/tango", "treehashes", "base-sha-deadbeef") + "_request-urls-" + fmt.Sprintf("%x", h.Sum(nil))
 	assert.Equal(t, want, got)
 }
 
-func TestGetReqsHash(t *testing.T) {
+func TestGetReqURLsHash(t *testing.T) {
 	t.Parallel()
 	md5hex := func(strs ...string) string {
 		h := md5.New()
@@ -136,7 +140,7 @@ func TestGetReqsHash(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, GetReqsHash(tt.in))
+			assert.Equal(t, tt.want, GetReqURLsHash(tt.in))
 		})
 	}
 }
@@ -144,7 +148,7 @@ func TestGetReqsHash(t *testing.T) {
 func TestGetComparedTargetsCachePath(t *testing.T) {
 	t.Parallel()
 	got := GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil)
-	assert.Equal(t, filepath.Join("compared-targets", "uber/tango", "abc", "def"), got)
+	assert.Equal(t, filepath.Join("uber/tango", "compared-targets", "abc_def"), got)
 
 	// Nil/empty options ⇒ legacy path.
 	assert.Equal(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{}))
@@ -156,7 +160,7 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 func TestGetChangedTargetsAndEdgesCachePath(t *testing.T) {
 	t.Parallel()
 	got := GetChangedTargetsAndEdgesCachePath("git@github:uber/tango", "abc", "def", nil)
-	assert.Equal(t, filepath.Join("compared-targets-and-edges", "uber/tango", "abc", "def"), got)
+	assert.Equal(t, filepath.Join("uber/tango", "compared-targets-and-edges", "abc_def"), got)
 
 	// Must be distinct from the GetChangedTargets cache path.
 	assert.NotEqual(t, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil), got)

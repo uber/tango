@@ -53,17 +53,28 @@ func ToShortRemote(remote string) string {
 }
 
 // GetGraphByTreeHash returns the cache path for the target graph by treehash.
+// strategy is part of the key because different computation strategies (e.g.
+// SHELL vs NATIVE) can produce different graphs from the same tree state.
 // requestOptions is folded into the key when any of its fields affect computation
 // (today: extra_exclude_files_regex). Empty/nil ⇒ legacy path unchanged.
-func GetGraphByTreeHash(remote, treehash string, requestOptions *tangopb.RequestOptions) string {
-	return filepath.Join("graph", ToShortRemote(remote), treehash) + HashRequestOptions(requestOptions)
+func GetGraphByTreeHash(remote, treehash string, strategy tangopb.ComputationStrategy, requestOptions *tangopb.RequestOptions) string {
+	path := filepath.Join(ToShortRemote(remote), "graphs", treehash, strategy.String())
+	if hash := HashRequestOptions(requestOptions); hash != "" {
+		path += "_requests-options-" + hash
+	}
+	return path
 }
 
 // GetTreehashCachePath returns the cache path for the treehash mapping.
-// The git treehash is purely a function of git state, so requestOptions is not
-// part of this key.
+// The git treehash is purely a function of git state (base SHA + applied
+// requests), so neither requestOptions nor the computation strategy is part
+// of this key.
 func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
-	return filepath.Join("treehash", ToShortRemote(buildDescription.Remote), fmt.Sprintf("treehash-map-%s", buildDescription.BaseSha), GetReqsHash(buildDescription.Requests)) + "-" + buildDescription.Strategy.String()
+	path := filepath.Join(ToShortRemote(buildDescription.Remote), "treehashes", fmt.Sprintf("base-sha-%s", buildDescription.BaseSha))
+	if len(buildDescription.Requests) > 0 {
+		path += "_request-urls-" + GetReqURLsHash(buildDescription.Requests)
+	}
+	return path
 }
 
 // GetComparedTargetsCachePath returns the cache path for a compared target graph result.
@@ -72,7 +83,11 @@ func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
 // requestOptions is folded into the key when any of its fields affect computation.
 // Empty/nil ⇒ legacy path unchanged.
 func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, requestOptions *tangopb.RequestOptions) string {
-	return filepath.Join("compared-targets", ToShortRemote(remote), treehash1, treehash2) + HashRequestOptions(requestOptions)
+	path := filepath.Join(ToShortRemote(remote), "compared-targets", treehash1+"_"+treehash2)
+	if hash := HashRequestOptions(requestOptions); hash != "" {
+		path += "_requests-options-" + hash
+	}
+	return path
 }
 
 // GetChangedTargetsAndEdgesCachePath returns the cache path for a GetChangedTargetsAndEdges result.
@@ -81,13 +96,17 @@ func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, requestOpt
 // requestOptions is folded into the key when any of its fields affect computation.
 // Empty/nil ⇒ legacy path unchanged.
 func GetChangedTargetsAndEdgesCachePath(remote, treehash1, treehash2 string, requestOptions *tangopb.RequestOptions) string {
-	return filepath.Join("compared-targets-and-edges", ToShortRemote(remote), treehash1, treehash2) + HashRequestOptions(requestOptions)
+	path := filepath.Join(ToShortRemote(remote), "compared-targets-and-edges", treehash1+"_"+treehash2)
+	if hash := HashRequestOptions(requestOptions); hash != "" {
+		path += "_requests-options-" + hash
+	}
+	return path
 }
 
-// GetReqsHash returns a fixed-length MD5 hash of the sorted request URLs.
+// GetReqURLsHash returns a fixed-length MD5 hash of the sorted request URLs.
 // Each URL's bytes are fed into the digest individually (no separator), matching
 // the Java MessageDigest.update(str.getBytes()) per-string behavior.
-func GetReqsHash(requests []*tangopb.Request) string {
+func GetReqURLsHash(requests []*tangopb.Request) string {
 	if len(requests) == 0 {
 		return ""
 	}
@@ -104,9 +123,9 @@ func GetReqsHash(requests []*tangopb.Request) string {
 }
 
 // HashRequestOptions returns "" when no field of RequestOptions contributes to
-// the cache (preserves legacy paths), otherwise "-<md5 hex>" deterministically
-// computed from the fields. As new fields are added to RequestOptions, fold
-// them into the digest here.
+// the cache (preserves legacy paths), otherwise the md5 hex digest of those
+// fields. As new fields are added to RequestOptions, fold them into the digest
+// here.
 func HashRequestOptions(opts *tangopb.RequestOptions) string {
 	if opts == nil {
 		return ""
@@ -122,7 +141,7 @@ func HashRequestOptions(opts *tangopb.RequestOptions) string {
 	for _, r := range sorted {
 		h.Write([]byte(r))
 	}
-	return fmt.Sprintf("-%x", h.Sum(nil))
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse
