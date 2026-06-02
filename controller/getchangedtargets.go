@@ -41,33 +41,19 @@ type job struct {
 // GetChangedTargets returns the changed targets between two revisions.
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets")
-	failureReason := ""
 	defer func() {
 		if retErr != nil {
 			scope.Counter("failure").Inc(1)
-			reason := failureReason
-			if reason == "" {
-				reason = classifyError(retErr)
-			}
-			ft := "user"
-			if reason != "validation" && reason != "cancelled" && reason != "deadline_exceeded" {
-				ft = "infra"
-			}
-			scope.Tagged(map[string]string{
-				"failure_type":   ft,
-				"failure_reason": reason,
-			}).Counter("failure_type").Inc(1)
+			emitFailureMetric(scope, retErr)
 		} else {
 			scope.Counter("success").Inc(1)
 		}
 	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
 		c.logger.Error("GetChangedTargets: Invalid request", zap.Error(err))
-		failureReason = "validation"
-		return err
+		return common.WithReason(failureReasonValidation, common.ErrorTypeUser, err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
-	scope.Counter("request").Inc(1)
 	ctx := stream.Context()
 	start := time.Now()
 	logger := c.logger.With(
@@ -123,8 +109,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
 					if sendErr := sendWithDistanceFilter(stream, cached, maxDist); sendErr != nil {
 						logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
-						failureReason = "send"
-						return fmt.Errorf("failed to send cached response: %w", sendErr)
+						return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send cached response: %w", sendErr))
 					}
 					totalDuration := time.Since(start)
 					logger.Info("GetChangedTargets: Successfully streamed from cache",
@@ -228,7 +213,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	if ctx.Err() != nil {
 		// If the context was cancelled by the upstream, just return the original error without additional augmentation
-		return ctx.Err()
+		return common.WithReason(failureReasonCancelled, common.ErrorTypeUser, ctx.Err())
 	}
 
 	// Process errors, only aggregating the ones that are original ones and not a result of the other job being cancelled
@@ -244,11 +229,8 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}
 
 	if err != nil {
-		failureReason = "graph_fetch"
 		return err
 	}
-
-	// At this point we should have both graphs computed successfully. Let's compare them.
 	firstGraph := jobs[0].graphStreamChunks
 	secondGraph := jobs[1].graphStreamChunks
 	// Drop job references so the GC can reclaim them once the comparison is done.
@@ -262,8 +244,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	secondGraph = nil
 	if err != nil {
 		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
-		failureReason = "compare"
-		return fmt.Errorf("failed to compare target graphs: %w", err)
+		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))
 	}
 	compareDuration := time.Since(compareStart)
 	logger.Info("GetChangedTargets: Target graphs compared",
@@ -290,8 +271,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	sendStart := time.Now()
 	if err := sendWithDistanceFilter(stream, changedTargetsResponses, maxDist); err != nil {
 		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
-		failureReason = "send"
-		return fmt.Errorf("failed to send response: %w", err)
+		return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send response: %w", err))
 	}
 	sendDuration := time.Since(sendStart)
 	scope.Timer("send_duration").Record(sendDuration)

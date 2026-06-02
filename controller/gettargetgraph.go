@@ -32,22 +32,10 @@ import (
 // GetTargetGraph returns the target graph for a given request.
 func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_target_graph")
-	failureReason := ""
 	defer func() {
 		if retErr != nil {
 			scope.Counter("failure").Inc(1)
-			reason := failureReason
-			if reason == "" {
-				reason = classifyError(retErr)
-			}
-			ft := "user"
-			if reason != "cancelled" && reason != "deadline_exceeded" {
-				ft = "infra"
-			}
-			scope.Tagged(map[string]string{
-				"failure_type":   ft,
-				"failure_reason": reason,
-			}).Counter("failure_type").Inc(1)
+			emitFailureMetric(scope, retErr)
 		} else {
 			scope.Counter("success").Inc(1)
 		}
@@ -61,7 +49,6 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	scope.Counter("request").Inc(1)
 	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
 	if err != nil {
-		failureReason = "graph_fetch"
 		return err
 	}
 	if graphReader == nil {
@@ -84,13 +71,11 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 			return nil
 		}
 		if err != nil {
-			failureReason = "graph_fetch"
-			return err
+			return common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
 		}
 		err = stream.Send(graphStreamChunk)
 		if err != nil {
-			failureReason = "send"
-			return fmt.Errorf("send graph: %w", err)
+			return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("send graph: %w", err))
 		}
 	}
 }
