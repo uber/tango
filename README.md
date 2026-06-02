@@ -163,3 +163,7 @@ This project uses GitHub Actions for continuous integration. The workflow automa
 The workflow runs on:
 - All pushes to the `main` branch
 - All pull requests (opened, reopened, or synchronized)
+
+## License
+
+This project is licensed under the [Apache 2.0 License](https://github.com/uber/tango/blob/main/LICENSE).
