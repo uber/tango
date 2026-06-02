@@ -115,7 +115,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 					)
 					scope.Counter("cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
-				if err := sendWithDistanceFilterForEdges(stream, cached, maxDist); err != nil {
+					if err := sendWithDistanceFilterForEdges(stream, cached, maxDist); err != nil {
 						logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
 						failureReason = "send"
 						return err

@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "controller.go",
         "distance_filter.go",
+        "errors.go",
         "getchangedtargetgraph.go",
         "getchangedtargets.go",
         "getchangedtargetsandedges.go",
