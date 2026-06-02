@@ -66,7 +66,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		failureReason = "validation"
 		return err
 	}
-	scope = scope.Tagged(map[string]string{"repo": request.GetFirstRevision().GetRemote()})
+	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
 	scope.Counter("request").Inc(1)
 	ctx := stream.Context()
 	start := time.Now()

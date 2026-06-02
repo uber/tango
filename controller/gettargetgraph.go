@@ -57,7 +57,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	logger := c.logger.With(
 		zap.Any("build_description", request.GetBuildDescription()),
 	)
-	scope = scope.Tagged(map[string]string{"repo": request.GetBuildDescription().GetRemote()})
+	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetBuildDescription().GetRemote())})
 	scope.Counter("request").Inc(1)
 	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
 	if err != nil {
