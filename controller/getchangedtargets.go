@@ -41,17 +41,33 @@ type job struct {
 // GetChangedTargets returns the changed targets between two revisions.
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets")
+	failureReason := ""
 	defer func() {
 		if retErr != nil {
 			scope.Counter("failure").Inc(1)
+			reason := failureReason
+			if reason == "" {
+				reason = classifyError(retErr)
+			}
+			ft := "user"
+			if reason != "validation" && reason != "cancelled" && reason != "deadline_exceeded" {
+				ft = "infra"
+			}
+			scope.Tagged(map[string]string{
+				"failure_type":   ft,
+				"failure_reason": reason,
+			}).Counter("failure_type").Inc(1)
 		} else {
 			scope.Counter("success").Inc(1)
 		}
 	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
 		c.logger.Error("GetChangedTargets: Invalid request", zap.Error(err))
+		failureReason = "validation"
 		return err
 	}
+	scope = scope.Tagged(map[string]string{"repo": request.GetFirstRevision().GetRemote()})
+	scope.Counter("request").Inc(1)
 	ctx := stream.Context()
 	start := time.Now()
 	logger := c.logger.With(
@@ -105,8 +121,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 					)
 					scope.Counter("cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
-					if sendErr := sendWithDistanceFilter(stream, cached, maxDist); sendErr != nil {
+				if sendErr := sendWithDistanceFilter(stream, cached, maxDist); sendErr != nil {
 						logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
+						failureReason = "send"
 						return fmt.Errorf("failed to send cached response: %w", sendErr)
 					}
 					totalDuration := time.Since(start)
@@ -227,6 +244,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}
 
 	if err != nil {
+		failureReason = "graph_fetch"
 		return err
 	}
 
@@ -244,6 +262,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	secondGraph = nil
 	if err != nil {
 		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
+		failureReason = "compare"
 		return fmt.Errorf("failed to compare target graphs: %w", err)
 	}
 	compareDuration := time.Since(compareStart)
@@ -271,6 +290,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	sendStart := time.Now()
 	if err := sendWithDistanceFilter(stream, changedTargetsResponses, maxDist); err != nil {
 		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
+		failureReason = "send"
 		return fmt.Errorf("failed to send response: %w", err)
 	}
 	sendDuration := time.Since(sendStart)
