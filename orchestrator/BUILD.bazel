@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "orchestrator",
     srcs = [
+        "errors.go",
         "native_orchestrator.go",
         "orchestrator.go",
     ],
@@ -18,6 +19,7 @@ go_library(
         "//core/workspace",
         "//graphrunner",
         "//tangopb",
+        "@com_github_uber_go_tally//:tally",
         "@org_uber_go_zap//:zap",
     ],
 )
