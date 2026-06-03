@@ -967,6 +967,59 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	assert.NotNil(t, sent[1].GetMetadata())
 }
 
+func TestComputeDistances_NewTargetsGetDistanceZero(t *testing.T) {
+	// Graph:
+	//   A (DIRECT)  <-  B (INDIRECT)
+	//   N (NEW, no deps)
+	//
+	// NEW targets should be treated like DIRECT: distance 0, and seed BFS.
+
+	meta := &pb.Metadata{
+		TargetIdMapping: map[int32]string{
+			1: "A", 2: "B", 3: "N",
+		},
+	}
+
+	targetsByName := map[string]*pb.OptimizedTarget{
+		"A": {Id: 1},
+		"B": {Id: 2, DirectDependencies: []int32{1}},
+		"N": {Id: 3},
+	}
+
+	changedByName := map[string]*pb.ChangedTarget{
+		"A": {ChangeType: pb.CHANGE_TYPE_DIRECT},
+		"B": {ChangeType: pb.CHANGE_TYPE_INDIRECT},
+		"N": {ChangeType: pb.CHANGE_TYPE_NEW},
+	}
+
+	computeDistances(zap.NewNop(), changedByName, targetsByName, meta, -1)
+
+	assert.Equal(t, int32(0), changedByName["A"].GetDistance(), "DIRECT target A should have distance 0")
+	assert.Equal(t, int32(1), changedByName["B"].GetDistance(), "B depends on DIRECT A, distance should be 1")
+	assert.Equal(t, int32(0), changedByName["N"].GetDistance(), "NEW target N should have distance 0")
+}
+
+func TestComputeDistances_NewTargetsWithMaxDistance(t *testing.T) {
+	// When maxDistance is set, NEW targets should still get distance 0
+	// and not be filtered out.
+
+	meta := &pb.Metadata{
+		TargetIdMapping: map[int32]string{1: "N"},
+	}
+
+	targetsByName := map[string]*pb.OptimizedTarget{
+		"N": {Id: 1},
+	}
+
+	changedByName := map[string]*pb.ChangedTarget{
+		"N": {ChangeType: pb.CHANGE_TYPE_NEW},
+	}
+
+	computeDistances(zap.NewNop(), changedByName, targetsByName, meta, 1)
+
+	assert.Equal(t, int32(0), changedByName["N"].GetDistance(), "NEW target should have distance 0 even with maxDistance set")
+}
+
 func TestComputeDistances_NilMetadata(t *testing.T) {
 	changedByName := map[string]*pb.ChangedTarget{
 		"A": {ChangeType: pb.CHANGE_TYPE_DIRECT},

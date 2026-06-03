@@ -799,11 +799,11 @@ func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTa
 		}
 	}
 
-	// initialize all distances to -1, means not set, DIRECT targets at 0.
+	// initialize all distances to -1, means not set, DIRECT and NEW targets at 0.
 	var queue []string
 	visited := make(map[string]struct{}, len(changedByName))
 	for name, ct := range changedByName {
-		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT {
+		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
 			ct.Distance = 0
 			queue = append(queue, name)
 			visited[name] = struct{}{}

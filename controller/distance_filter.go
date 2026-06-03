@@ -41,8 +41,8 @@ func resolveMaxDistance(repoConfig config.RepositoryConfig, outputConfig *pb.Out
 
 // filterChangedTargetsByDistance returns targets where 0 <= distance <= maxDist.
 // Returns the input slice unchanged when maxDist < 0 (filtering disabled).
-// Negative-distance targets (e.g. CHANGE_TYPE_NEW or unreachable from a
-// DIRECT seed) are always dropped when the filter is active.
+// Negative-distance targets (unreachable from a DIRECT/NEW seed) are always
+// dropped when the filter is active.
 func filterChangedTargetsByDistance(targets []*pb.ChangedTarget, maxDist int32) []*pb.ChangedTarget {
 	if maxDist < 0 {
 		return targets
