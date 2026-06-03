@@ -16,16 +16,16 @@ package orchestrator
 
 // failure_reason tag values emitted by the orchestrator.
 const (
-	failureReasonConfigParse      = "config_parse"
-	failureReasonNoRepoConfig     = "no_repo_config"
-	failureReasonWorkspaceLease   = "workspace_lease"
+	failureReasonConfigParse       = "config_parse"
+	failureReasonNoRepoConfig      = "no_repo_config"
+	failureReasonWorkspaceLease    = "workspace_lease"
 	failureReasonWorkspaceCheckout = "workspace_checkout"
-	failureReasonRequestCreate    = "request_create"
-	failureReasonRequestApply     = "request_apply"
-	failureReasonTreehashCompute  = "treehash_compute"
-	failureReasonBazelClient      = "bazel_client"
-	failureReasonGraphCompute     = "graph_compute"
-	failureReasonGraphConvert     = "graph_convert"
-	failureReasonStorage          = "storage"
-	failureReasonUnknown          = "unknown"
+	failureReasonRequestCreate     = "request_create"
+	failureReasonRequestApply      = "request_apply"
+	failureReasonTreehashCompute   = "treehash_compute"
+	failureReasonBazelClient       = "bazel_client"
+	failureReasonGraphCompute      = "graph_compute"
+	failureReasonGraphConvert      = "graph_convert"
+	failureReasonStorage           = "storage"
+	failureReasonUnknown           = "unknown"
 )
