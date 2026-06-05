@@ -1,0 +1,13 @@
+# zizmor (GitHub Actions security auditor) configuration.
+#
+# Every ignore below is an INTENTIONAL, reviewed exception with a concrete
+# justification — not a blanket mute. New findings outside these are expected
+# to fail the `workflow-security` CI job.
+rules:
+  # dependabot.yml intentionally disables scheduled version-update PRs
+  # (open-pull-requests-limit: 0) and relies only on security updates, which
+  # should be applied promptly. A version-update cooldown would add nothing
+  # (no version PRs are opened) and we do not want to delay security fixes.
+  dependabot-cooldown:
+    ignore:
+      - dependabot.yml

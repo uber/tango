@@ -1,0 +1,9 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    # Disable scheduled version-update PRs; we only want security updates,
+    # which run independently of this limit.
+    open-pull-requests-limit: 0

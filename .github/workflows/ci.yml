@@ -1,4 +1,9 @@
 name: CI check
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('PR-CI #{0}', github.event.pull_request.number)
+  || github.event_name == 'merge_group' && 'MergeQueue-CI'
+  || github.event_name == 'push' && 'Main-CI'
+  || 'CI' }}
 
 on:
   push:
@@ -9,99 +14,205 @@ on:
       - opened
       - reopened
       - synchronize
+      - ready_for_review
+  merge_group:
+
+# Least privilege: jobs only read the repo. Any job needing more must opt in
+# explicitly at the job level.
+permissions:
+  contents: read
+
+# Cancel superseded runs for the same PR to save runner minutes. Never cancel
+# in-progress runs for `push` (main) or `merge_group` — those must complete so
+# the default branch and merge queue always have a definitive result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-and-test:
+    name: Build and Test
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # This job executes untrusted PR code (make build/test). Don't leave
+          # the GITHUB_TOKEN in the workspace git config while it runs.
+          persist-credentials: false
 
-    - name: Build all targets
-      run: make build
+      - name: Build all targets
+        run: make build
 
-    - name: Run all tests
-      run: make test
+      - name: Run all tests
+        run: make test
 
-    - name: Display test logs on failure
-      if: failure()
-      run: |
-        echo "=== Test logs ==="
-        find . -name "test.log" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No test logs found"
+      - name: Display test logs on failure
+        if: failure()
+        run: |
+          echo "=== Test logs ==="
+          find . -name "test.log" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No test logs found"
 
   dependencies:
+    name: Dependencies
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # This job executes untrusted PR code (go mod tidy, bazel/gazelle).
+          persist-credentials: false
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: go.mod
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
 
-    - name: Run go mod tidy and bazel mod tidy
-      run: |
-        go mod tidy
-        ./tools/bazel mod tidy
+      - name: Run go mod tidy and bazel mod tidy
+        run: |
+          go mod tidy
+          ./tools/bazel mod tidy
 
-    - name: Verify no uncommitted changes from mod tidy
-      run: |
-        if [ -n "$(git status --porcelain)" ]; then
-          echo "::error::Dependencies are out of date. Please run 'go mod tidy' and 'bazel mod tidy' locally and commit the results."
-          git diff
-          exit 1
-        fi
+      - name: Verify no uncommitted changes from mod tidy
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Dependencies are out of date. Please run 'go mod tidy' and 'bazel mod tidy' locally and commit the results."
+            git diff
+            exit 1
+          fi
 
-    - name: Run gazelle
-      run: make gazelle
+      - name: Run gazelle
+        run: make gazelle
 
-    - name: Verify no uncommitted changes from gazelle
-      run: |
-        if [ -n "$(git status --porcelain)" ]; then
-          echo "::error::BUILD.bazel files are out of date. Please run 'make gazelle' locally and commit the results."
-          git diff
-          exit 1
-        fi
+      - name: Verify no uncommitted changes from gazelle
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::BUILD.bazel files are out of date. Please run 'make gazelle' locally and commit the results."
+            git diff
+            exit 1
+          fi
 
   lint:
+    name: Lint
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # This job executes untrusted PR code (gazelle, gofmt, goimports).
+          persist-credentials: false
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: go.mod
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
 
-    - name: Run gazelle
-      run: make gazelle
+      - name: Run gazelle
+        run: make gazelle
 
-    - name: Run linters
-      run: |
-        gofmt -w .
-        go install golang.org/x/tools/cmd/goimports@latest
-        goimports -w .
+      - name: Run linters
+        run: |
+          gofmt -w .
+          go install golang.org/x/tools/cmd/goimports@latest
+          goimports -w .
 
-    - name: Verify no uncommitted changes from linters
-      run: |
-        if [ -n "$(git status --porcelain)" ]; then
-          echo "::error::Code is not formatted. Please run 'make gazelle', 'gofmt -w .', and 'goimports -w .' locally and commit the results."
-          git diff
-          exit 1
-        fi
+      - name: Verify no uncommitted changes from linters
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Code is not formatted. Please run 'make gazelle', 'gofmt -w .', and 'goimports -w .' locally and commit the results."
+            git diff
+            exit 1
+          fi
 
+  # ---------------------------------------------------------------------------
+  # WORKFLOW SECURITY LINT
+  #
+  # Guards against regressions in the workflows themselves: actionlint checks
+  # general validity; zizmor audits for GitHub Actions security smells
+  # (dangerous triggers, unpinned `uses:`, credential persistence, template
+  # injection). Keeps the SHA-pinning / persist-credentials hardening from
+  # silently eroding in future edits.
+  # ---------------------------------------------------------------------------
+  workflow-security:
+    name: Workflow Security Lint
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: actionlint
+        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2.1.2
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@5f14fd08f7cf1cb1609c1e344975f152c7ee938d # v0.5.6
+        with:
+          # Pin the zizmor TOOL version (distinct from the action tag above) for
+          # reproducible audits matching local validation.
+          version: "1.25.2"
+          # Fail the job on findings without requiring GitHub Advanced Security
+          # / SARIF upload (which needs security-events: write and degrades on
+          # fork PRs). Keeps the gate self-contained.
+          advanced-security: false
+
+      # ci.yml runs untrusted PR code under the `pull_request` trigger. A
+      # repository secret referenced anywhere on that path is reachable by a
+      # malicious PR and can be exfiltrated on the PR run (before any review),
+      # so this path must stay secret-free — route any secret-bearing step
+      # through a SEPARATE trusted workflow (workflow_run / pull_request_target)
+      # that does not execute PR code.
+      #
+      # This guard catches ACCIDENTAL reintroduction by honest contributors; a
+      # malicious actor controlling ci.yml could delete the guard itself, so the
+      # real defense remains CODEOWNERS review on .github/. GITHUB_TOKEN
+      # (least-privilege, read-only here) is allowlisted.
+      - name: Guard — no repository secrets on the untrusted-code path
+        run: |
+          hits="$(grep -rnE '\$\{\{[^}]*secrets\.' \
+            .github/workflows/ci.yml \
+            | grep -vE 'secrets\.GITHUB_TOKEN' || true)"
+          if [ -n "$hits" ]; then
+            echo "::error::Repository secret referenced on the untrusted-code CI path (ci.yml):" >&2
+            echo "$hits" >&2
+            echo "Move secret-bearing steps to a separate trusted workflow that does not run PR code." >&2
+            exit 1
+          fi
+          echo "OK: no repository secrets referenced in ci.yml."
+
+  # ---------------------------------------------------------------------------
+  # REQUIRED CHECKS GATE
+  #
+  # Fan-in aggregator that must turn RED when any required job fails, is
+  # cancelled, or is skipped. `if: always()` is critical: without it, this job
+  # is skipped when any `needs` dependency fails, and GitHub treats a skipped
+  # required status check as "not failed" — which would let a PR merge through
+  # the merge queue despite failing checks.
+  # ---------------------------------------------------------------------------
   required-checks:
     name: Required Checks
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     runs-on: ubuntu-latest
     needs:
       - build-and-test
       - dependencies
       - lint
+      - workflow-security
     steps:
+      - name: Fail if any required check did not succeed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        # Pass the job-results context via env (not inline ${{ }} in the script)
+        # so there is no template expansion inside the run block.
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "One or more required checks did not succeed:" >&2
+          echo "$NEEDS_JSON" >&2
+          exit 1
+
       - name: All required checks passed
-        run: echo "All required checks passed!" >&2
+        run: echo "All required checks passed!"
