@@ -41,6 +41,7 @@ func packEdge(src, dep int32) uint64 {
 // GetChangedTargetsAndEdges returns the changed targets and edges between two revisions.
 func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndEdgesRequest, stream pb.TangoServiceGetChangedTargetsAndEdgesYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets_and_edges")
+	scope.Counter("calls").Inc(1)
 	defer func() {
 		if retErr != nil {
 			scope.Counter("failure").Inc(1)
@@ -54,7 +55,6 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 		return common.WithReason(failureReasonValidation, common.ErrorTypeUser, err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
-	scope.Counter("calls").Inc(1)
 	ctx := stream.Context()
 	start := time.Now()
 	logger := c.logger.With(

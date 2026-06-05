@@ -630,10 +630,10 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 		return []byte{}, nil
 	}
 
-	// Mark node as visited by setting it to an empty slice instead of nil slice which it got by default - to avoid
-	// cycles. It would be reset to a real hash value once dependencies are traversed.
+	// Mark node as visited by setting Hash to an empty slice (non-nil) to break cycles.
+	// HashWithoutDeps is intentionally left as-is: toTarget already computed it, and
+	// HashRecursively reuses it below to avoid calling HashRuleCommon twice per rule.
 	target.Hash = []byte{}
-	target.HashWithoutDeps = []byte{}
 
 	var hash []byte
 	var hashWithoutDeps []byte
@@ -663,11 +663,17 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 		h.Write([]byte(p.TargetName))
 		hash = h.Sum(nil)
 	default:
-		// Regular rule
+		// Regular rule: hash = sha1(ruleBody || dep1Hash || dep2Hash || ...)
+		// toTarget already called HashRuleCommon and stored the result in target.HashWithoutDeps,
+		// so reuse it here rather than re-running HashRuleCommon over all attributes again.
 		h := newHash()
-		noDepsHasher := newHash()
-		HashRuleCommon(target.Rule, noDepsHasher)
-		hashWithoutDeps = noDepsHasher.Sum(nil)
+		hashWithoutDeps = target.HashWithoutDeps
+		if len(hashWithoutDeps) == 0 {
+			// Fallback for synthetic targets that bypass toTarget (shouldn't happen in practice).
+			noDepsHasher := newHash()
+			HashRuleCommon(target.Rule, noDepsHasher)
+			hashWithoutDeps = noDepsHasher.Sum(nil)
+		}
 		h.Write(hashWithoutDeps)
 		for _, dep := range target.Deps {
 			depParam := p

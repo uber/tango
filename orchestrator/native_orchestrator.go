@@ -191,6 +191,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			GitClient:          gitModule,
 			Config:             repoCfg,
 			ExtraExcludedFiles: param.Req.GetRequestOptions().GetExtraExcludeFilesRegex(),
+			Scope:              b.scope,
 		})
 	}
 	result, err := runner.Compute(ctx, ws)

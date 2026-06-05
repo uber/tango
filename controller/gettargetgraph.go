@@ -32,6 +32,7 @@ import (
 // GetTargetGraph returns the target graph for a given request.
 func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_target_graph")
+	scope.Counter("calls").Inc(1)
 	defer func() {
 		if retErr != nil {
 			scope.Counter("failure").Inc(1)
@@ -46,7 +47,6 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 		zap.Any("build_description", request.GetBuildDescription()),
 	)
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetBuildDescription().GetRemote())})
-	scope.Counter("calls").Inc(1)
 	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
 	if err != nil {
 		return err

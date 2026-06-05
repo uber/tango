@@ -41,6 +41,7 @@ type job struct {
 // GetChangedTargets returns the changed targets between two revisions.
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets")
+	scope.Counter("calls").Inc(1)
 	defer func() {
 		if retErr != nil {
 			scope.Counter("failure").Inc(1)
@@ -54,7 +55,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		return common.WithReason(failureReasonValidation, common.ErrorTypeUser, err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
-	scope.Counter("calls").Inc(1)
 	ctx := stream.Context()
 	start := time.Now()
 	logger := c.logger.With(
