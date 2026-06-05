@@ -16,7 +16,9 @@ package graphrunner
 
 import (
 	"context"
+	"time"
 
+	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/git"
@@ -29,6 +31,7 @@ type nativeGraphRunner struct {
 	git                git.Interface
 	config             config.RepositoryConfig
 	extraExcludedFiles []string
+	scope              tally.Scope
 }
 
 type NativeGraphRunnerParams struct {
@@ -36,15 +39,21 @@ type NativeGraphRunnerParams struct {
 	GitClient          git.Interface
 	Config             config.RepositoryConfig
 	ExtraExcludedFiles []string
+	Scope              tally.Scope
 }
 
 // graph runner takes in a bazel query request and computes the graph
 func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
+	scope := p.Scope
+	if scope == nil {
+		scope = tally.NoopScope
+	}
 	return &nativeGraphRunner{
 		bazel:              p.BazelClient,
 		git:                p.GitClient,
 		config:             p.Config,
 		extraExcludedFiles: p.ExtraExcludedFiles,
+		scope:              scope.SubScope("graph_runner"),
 	}
 }
 
@@ -57,6 +66,8 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		[]string{"--order_output=no", "--proto:locations", "--noproto:default_values"},
 		g.config.BazelExtraArgs...,
 	)
+
+	bazelStart := time.Now()
 	queryResult, err := g.bazel.ExecuteQuery(ctx, &bazel.QueryRequest{
 		Query: query,
 		// --order_output=no will make Bazel execute query faster
@@ -67,13 +78,18 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 		AdditionalArgs: additionalArgs,
 	})
+	g.scope.Timer("bazel_query_duration").Record(time.Since(bazelStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
+
+	gitStart := time.Now()
 	knownSourceHashes, err := g.git.FileHashes(ctx, "HEAD")
+	g.scope.Timer("git_file_hashes_duration").Record(time.Since(gitStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
+
 	hashConfig := targethasher.HashConfig{
 		KnownSourceHashes: knownSourceHashes,
 		FullHashRepos:     g.config.FullHashRepos,
@@ -81,9 +97,13 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		UseBzlmod:         g.config.BzlmodEnabled,
 	}
 
+	hashStart := time.Now()
 	res, err := targethasher.FromProto(ctx, queryResult.Result, ws.Path(), hashConfig)
+	g.scope.Timer("target_hash_duration").Record(time.Since(hashStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
+
+	g.scope.Gauge("target_count").Update(float64(len(res.Targets)))
 	return res, nil
 }
