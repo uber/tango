@@ -262,6 +262,12 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	return nil
 }
 
+// compareTargetGraphsAndEdges diffs two target graph streams and produces a
+// chunked GetChangedTargetsAndEdgesResponse stream. In addition to the
+// per-target classification done by compareTargetGraphs, it tracks
+// per-target topology by computing added/removed targets and the set of
+// new and removed edges. Edge keys are packed into uint64 ID pairs to keep
+// the working set small for very large graphs.
 func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs_and_edges")
@@ -580,6 +586,9 @@ func sendWithDistanceFilterForEdges(
 	return nil
 }
 
+// validateGetChangedTargetsAndEdgesRequest enforces the same invariants as
+// validateGetChangedTargetsRequest: both revisions present, both populated
+// with a remote and base SHA, and both pointing at the same remote.
 func validateGetChangedTargetsAndEdgesRequest(request *pb.GetChangedTargetsAndEdgesRequest) error {
 	if request == nil {
 		return errors.New("request cannot be nil")

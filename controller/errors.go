@@ -25,13 +25,20 @@ import (
 // failure_reason tag values for errors that originate in the controller itself.
 // Errors from the orchestrator carry their own reason via common.ClassifiedError.
 const (
-	failureReasonValidation       = "validation"
-	failureReasonGraphFetch       = "graph_fetch"
-	failureReasonSend             = "send"
-	failureReasonCompare          = "compare"
-	failureReasonCancelled        = "cancelled"
+	// Request failed input validation before any work was attempted.
+	failureReasonValidation = "validation"
+	// Reading a cached target graph from storage failed.
+	failureReasonGraphFetch = "graph_fetch"
+	// Streaming a response message back to the client failed.
+	failureReasonSend = "send"
+	// Diffing two target graphs failed.
+	failureReasonCompare = "compare"
+	// The caller's context was cancelled before the RPC completed.
+	failureReasonCancelled = "cancelled"
+	// The caller's context deadline elapsed before the RPC completed.
 	failureReasonDeadlineExceeded = "deadline_exceeded"
-	failureReasonUnknown          = "unknown"
+	// Catch-all for errors that did not classify themselves.
+	failureReasonUnknown = "unknown"
 )
 
 // emitFailureMetric tags the failure counter with the reason and type from the

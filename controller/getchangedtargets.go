@@ -286,6 +286,14 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	return nil
 }
 
+// compareTargetGraphs diffs two target graph streams and produces a chunked
+// GetChangedTargetsResponse stream. Targets present only on one side are
+// classified as NEW or removed; targets present on both sides are classified
+// as DIRECT or INDIRECT based on hash, source-file dependencies, direct
+// dependency set, and attribute changes. Distances are computed when
+// requested or when filtering by distance is active. Output IDs are
+// re-mapped into a canonical per-call namespace so the response metadata
+// only carries the names actually referenced.
 func (c *controller) compareTargetGraphs(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs")
@@ -848,6 +856,9 @@ func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTa
 	}
 }
 
+// validateGetChangedTargetsRequest enforces the minimal invariants the
+// comparison pipeline relies on: both revisions present, both populated
+// with a remote and base SHA, and both pointing at the same remote.
 func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) error {
 	if request == nil {
 		return errors.New("request cannot be nil")
@@ -879,6 +890,10 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 	return nil
 }
 
+// getDefaultDistance picks the initial Distance value to store on a freshly
+// classified ChangedTarget. -1 is used when distances are neither requested
+// nor needed for filtering, so callers can cheaply skip BFS entirely. NEW
+// targets always start at 0 because they are their own seeds.
 func getDefaultDistance(maxDist int32, outputDistances bool, forNewTarget bool) int32 {
 	if maxDist < 0 && !outputDistances {
 		return -1
