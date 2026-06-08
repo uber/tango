@@ -37,6 +37,7 @@ type UpdateGraphInput struct {
 	QueryResult     *buildpb.QueryResult
 	WorkspaceRoot   string
 	FullHashRepos   StringSet
+	UseBzlmod       bool
 }
 
 // UpdateGraph updates the dependency relationships and hashes of targets in the graph.
@@ -57,7 +58,7 @@ func (g *OptimizedGraph) UpdateGraph(
 	fullHashReposSet := set.NewSet(input.FullHashRepos.UnsortedList()...)
 
 	// HashExternalTargets adds external rule targets and hashes them
-	if err := targethasher.HashExternalTargets(ctx, rawQueryResults, targets, sourceHasher, input.WorkspaceRoot, fullHashReposSet, warns); err != nil {
+	if err := targethasher.HashExternalTargets(ctx, rawQueryResults, targets, sourceHasher, input.WorkspaceRoot, fullHashReposSet, warns, input.UseBzlmod); err != nil {
 		return err
 	}
 
@@ -154,7 +155,7 @@ func computeAvailableHashes(
 		var hashWithoutDeps []byte
 		switch target.RuleType {
 		case targethasher.GeneratedFileType:
-			break
+			// skip: generated files derive their hash from their generating rule
 		case targethasher.PackageGroup:
 			h := sha1.New()
 			h.Write([]byte(name))
