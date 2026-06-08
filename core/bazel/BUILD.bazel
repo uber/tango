@@ -11,6 +11,7 @@ go_library(
     importpath = "github.com/uber/tango/core/bazel",
     visibility = ["//visibility:public"],
     deps = [
+        "//core/execcmd",
         "@com_github_bazelbuild_buildtools//build_proto",
         "@org_golang_google_protobuf//encoding/protodelim",
         "@org_golang_google_protobuf//proto",

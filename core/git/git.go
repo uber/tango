@@ -27,6 +27,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/uber/tango/core/execcmd"
 )
 
 const (
@@ -227,7 +229,7 @@ type commandRunner interface {
 type osExecRunner struct{}
 
 func (r *osExecRunner) run(ctx context.Context, dir string, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := execcmd.CommandContext(ctx, name, args...)
 	if errors.Is(cmd.Err, exec.ErrDot) {
 		cmd.Err = nil
 	}
@@ -237,7 +239,7 @@ func (r *osExecRunner) run(ctx context.Context, dir string, name string, args ..
 }
 
 func (r *osExecRunner) output(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := execcmd.CommandContext(ctx, name, args...)
 	if errors.Is(cmd.Err, exec.ErrDot) {
 		cmd.Err = nil
 	}
@@ -246,7 +248,7 @@ func (r *osExecRunner) output(ctx context.Context, dir string, name string, args
 }
 
 func (r *osExecRunner) runWithStdin(ctx context.Context, dir string, name string, stdin []byte, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := execcmd.CommandContext(ctx, name, args...)
 	if errors.Is(cmd.Err, exec.ErrDot) {
 		cmd.Err = nil
 	}

@@ -5,6 +5,7 @@ go_library(
     srcs = ["git.go"],
     importpath = "github.com/uber/tango/core/git",
     visibility = ["//visibility:public"],
+    deps = ["//core/execcmd"],
 )
 
 go_test(

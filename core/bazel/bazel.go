@@ -20,12 +20,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"time"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
+	"github.com/uber/tango/core/execcmd"
 	"go.uber.org/zap"
 )
 
@@ -71,7 +71,7 @@ func NewBazelClient(p Params) (*BazelClient, error) {
 	execCmd := p.ExecCommandContext
 	if execCmd == nil {
 		execCmd = func(ctx context.Context, name string, arg ...string) commander {
-			cmd := exec.CommandContext(ctx, name, arg...)
+			cmd := execcmd.CommandContext(ctx, name, arg...)
 			cmd.Dir = p.WorkspacePath
 			for key, value := range p.EnvVarsMap {
 				cmd.Env = append(cmd.Env, key+"="+value)
