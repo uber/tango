@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/uber/tango/core/common"
@@ -71,8 +72,12 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// either treehash is not yet available.
 	if !request.GetBypassCache() {
 		cacheStart := time.Now()
-		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
-		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
+		var treehash1, treehash2 string
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); treehash1 = readTreehash(ctx, c.storage, request.GetFirstRevision()) }()
+		go func() { defer wg.Done(); treehash2 = readTreehash(ctx, c.storage, request.GetSecondRevision()) }()
+		wg.Wait()
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
@@ -800,7 +805,7 @@ func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTa
 	}
 
 	// initialize all distances to -1, means not set, DIRECT and NEW targets at 0.
-	var queue []string
+	queue := make([]string, 0, len(changedByName))
 	visited := make(map[string]struct{}, len(changedByName))
 	for name, ct := range changedByName {
 		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
@@ -813,9 +818,8 @@ func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTa
 	}
 
 	// BFS from DIRECT targets through reverseDeps. Shortest distance wins.
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
+	for i := 0; i < len(queue); i++ {
+		current := queue[i]
 		currentDist := changedByName[current].GetDistance()
 
 		for _, revDep := range reverseDeps[current] {
