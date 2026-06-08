@@ -24,7 +24,6 @@ import (
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	pb "github.com/uber/tango/tangopb"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
 
@@ -225,7 +224,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 				// this only happens as a result of the other job failing, so we can ignore the error
 				continue
 			}
-			err = multierr.Append(err, fmt.Errorf("failed to get target graph #%d: %w", i+1, job.err))
+			err = errors.Join(err, fmt.Errorf("failed to get target graph #%d: %w", i+1, job.err))
 		}
 	}
 

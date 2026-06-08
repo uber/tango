@@ -14,7 +14,6 @@ require (
 	go.uber.org/fx v1.24.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.6.0
-	go.uber.org/multierr v1.11.0
 	go.uber.org/yarpc v1.81.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/sync v0.16.0
@@ -41,6 +40,7 @@ require (
 	github.com/uber/tchannel-go v1.34.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/dig v1.19.0 // indirect
+	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/net/metrics v1.4.0 // indirect
 	go.uber.org/thriftrw v1.32.0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20221208152030-732eee02a75a // indirect

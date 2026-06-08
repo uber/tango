@@ -5,10 +5,7 @@ go_library(
     srcs = ["changeanalyzer.go"],
     importpath = "github.com/uber/tango/core/itg/changeanalyzer",
     visibility = ["//visibility:public"],
-    deps = [
-        "//core/git",
-        "@org_uber_go_multierr//:multierr",
-    ],
+    deps = ["//core/git"],
 )
 
 go_test(

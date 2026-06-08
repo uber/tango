@@ -24,7 +24,6 @@ import (
 	"regexp"
 
 	"github.com/uber/tango/core/git"
-	"go.uber.org/multierr"
 )
 
 // ChangeComplexity represents the complexity level of changes between two refs.
@@ -152,7 +151,7 @@ func (a *analyzer) AnalyzeChange(ctx context.Context, request *AnalyzeChangeRequ
 
 		errFetch := a.git.Fetch(ctx, "origin", "main", "--no-tags")
 		if errFetch != nil {
-			return nil, multierr.Append(err, fmt.Errorf("fetch origin/main: %w", errFetch))
+			return nil, errors.Join(err, fmt.Errorf("fetch origin/main: %w", errFetch))
 		}
 		changes, err = a.git.DiffWithStatus(ctx, request.BaseRef, request.TargetRef)
 	}

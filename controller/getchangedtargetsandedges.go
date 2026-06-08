@@ -24,7 +24,6 @@ import (
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	pb "github.com/uber/tango/tangopb"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
 
@@ -204,7 +203,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 			if j.cancelled {
 				continue
 			}
-			err = multierr.Append(err, fmt.Errorf("failed to get target graph #%d: %w", i+1, j.err))
+			err = errors.Join(err, fmt.Errorf("failed to get target graph #%d: %w", i+1, j.err))
 		}
 	}
 	if err != nil {
