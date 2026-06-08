@@ -56,7 +56,7 @@ func TestExecuteQuery_Success(t *testing.T) {
 		mockCmd.EXPECT().Start().Return(nil),
 		mockCmd.EXPECT().Wait().Return(nil),
 	)
-	client, err := NewBazelClient(Params{
+	client, err := NewBazelClient(context.Background(), Params{
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
@@ -100,7 +100,7 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 		mockCmd.EXPECT().Start().Return(nil),
 		mockCmd.EXPECT().Wait().Return(nil),
 	)
-	client, err := NewBazelClient(Params{
+	client, err := NewBazelClient(context.Background(), Params{
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
@@ -149,7 +149,7 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 		}),
 	)
 
-	client, err := NewBazelClient(Params{
+	client, err := NewBazelClient(context.Background(), Params{
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		Logger:        zap.NewNop().Sugar(),
@@ -229,7 +229,7 @@ func TestExecuteQueryInternal_Failures(t *testing.T) {
 			mockCmd := commandermock.NewMockcommander(ctrl)
 			tt.setupMock(mockCmd)
 
-			client, err := NewBazelClient(Params{
+			client, err := NewBazelClient(context.Background(), Params{
 				BazelCommand:  "bazel",
 				WorkspacePath: "/tmp/test",
 				EnvVarsMap:    map[string]string{},
@@ -258,7 +258,7 @@ func TestExecuteQuery_ErrorCase(t *testing.T) {
 
 	mockCmd.EXPECT().StdoutPipe().Return(nil, errors.New("stdout pipe failed"))
 
-	client, err := NewBazelClient(Params{
+	client, err := NewBazelClient(context.Background(), Params{
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},

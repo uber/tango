@@ -67,7 +67,7 @@ type Params struct {
 	QueryTimeout       time.Duration
 }
 
-func NewBazelClient(p Params) (*BazelClient, error) {
+func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 	execCmd := p.ExecCommandContext
 	if execCmd == nil {
 		execCmd = func(ctx context.Context, name string, arg ...string) commander {
@@ -84,7 +84,7 @@ func NewBazelClient(p Params) (*BazelClient, error) {
 	if timeout == 0 {
 		timeout = _queryTimeout
 	}
-	bazelCommand, err := detectBazelExecutable(p.BazelCommand)
+	bazelCommand, err := detectBazelExecutable(ctx, p.BazelCommand)
 	if err != nil {
 		p.Logger.Errorw("NewBazelClient: Error detecting bazel executable", zap.Error(err))
 		return nil, err
@@ -103,15 +103,15 @@ func NewBazelClient(p Params) (*BazelClient, error) {
 // detectBazelExecutable returns the path to a bazelisk binary.
 // If bazelCommand is explicitly provided, it is used as-is.
 // Otherwise, bazelisk is downloaded from GitHub into a local cache directory.
-func detectBazelExecutable(bazelCommand string) (string, error) {
+func detectBazelExecutable(ctx context.Context, bazelCommand string) (string, error) {
 	if bazelCommand != "" {
 		return bazelCommand, nil
 	}
-	return ensureBazelisk()
+	return ensureBazelisk(ctx)
 }
 
 // ensureBazelisk returns the path to a cached bazelisk binary,
-func ensureBazelisk() (string, error) {
+func ensureBazelisk(ctx context.Context) (string, error) {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("cache dir: %w", err)
@@ -128,7 +128,11 @@ func ensureBazelisk() (string, error) {
 		"https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-%s-%s",
 		runtime.GOOS, runtime.GOARCH,
 	)
-	resp, err := http.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("build bazelisk request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download bazelisk: %w", err)
 	}

@@ -51,7 +51,7 @@ func (m *memoryStorage) Put(ctx context.Context, req UploadRequest) error {
 		return errors.New("nil reader")
 	}
 	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, req.Reader); err != nil {
+	if _, err := io.Copy(&buf, &CtxReader{Ctx: ctx, R: req.Reader}); err != nil {
 		return err
 	}
 	m.mu.Lock()

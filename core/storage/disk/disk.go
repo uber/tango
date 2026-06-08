@@ -79,7 +79,7 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmp, req.Reader); err != nil {
+	if _, err := io.Copy(tmp, &storage.CtxReader{Ctx: ctx, R: req.Reader}); err != nil {
 		tmp.Close()
 		return err
 	}

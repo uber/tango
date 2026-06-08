@@ -15,6 +15,7 @@
 package common
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -131,8 +132,13 @@ func HashRequestOptions(opts *tangopb.RequestOptions) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
+// cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
+// Picked to keep overhead negligible while still surfacing cancellation in <100ms
+// for typical target rates.
+const cancelCheckInterval = 4096
+
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse
-func ResultToGetTargetGraphResponse(result targethasher.Result) ([]*tangopb.GetTargetGraphResponse, error) {
+func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result) ([]*tangopb.GetTargetGraphResponse, error) {
 	// Map target names to ids. This list is topologically sorted, so the ids are stable.
 	// IDs start at 1 — 0 is reserved as the proto3 "unset" sentinel so consumers using
 	// encoding/json (which honors `omitempty` on int32 fields) never silently lose a target.
@@ -156,7 +162,14 @@ func ResultToGetTargetGraphResponse(result targethasher.Result) ([]*tangopb.GetT
 	// Build the optimized targets slice
 	optimizedTargets := make([]*tangopb.OptimizedTarget, 0, len(result.Targets))
 
+	n := 0
 	for _, t := range result.Targets {
+		if n%cancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		n++
 		nameID := targetNamesMapping[t.Name]
 
 		depIDs := make([]int32, 0, len(t.Deps))

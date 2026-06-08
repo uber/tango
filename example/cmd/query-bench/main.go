@@ -68,7 +68,9 @@ func run() error {
 	}
 	defer logger.Sync()
 
-	client, err := bazel.NewBazelClient(bazel.Params{
+	parentCtx := context.Background()
+
+	client, err := bazel.NewBazelClient(parentCtx, bazel.Params{
 		BazelCommand:  *bazelCmd,
 		WorkspacePath: *workspace,
 		Logger:        logger.Sugar(),
@@ -89,7 +91,7 @@ func run() error {
 
 	var totalDuration time.Duration
 	for i := range *runs {
-		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+		ctx, cancel := context.WithTimeout(parentCtx, *timeout)
 		start := time.Now()
 		resp, err := client.ExecuteQuery(ctx, req)
 		elapsed := time.Since(start)
@@ -110,7 +112,7 @@ func run() error {
 		totalDuration += elapsed
 		fmt.Printf("run %d: targethasher: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(targethasherResult.TargetNames))
 		start = time.Now()
-		response, err := common.ResultToGetTargetGraphResponse(targethasherResult) // also print the time to convert to GetTargetGraphResponse format
+		response, err := common.ResultToGetTargetGraphResponse(ctx, targethasherResult) // also print the time to convert to GetTargetGraphResponse format
 		if err != nil {
 			return fmt.Errorf("run %d: converting to GetTargetGraphResponse: %w", i+1, err)
 		}

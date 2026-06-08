@@ -15,6 +15,7 @@
 package common
 
 import (
+	"context"
 	"crypto/md5"
 	"fmt"
 	"path/filepath"
@@ -197,7 +198,7 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 		result.Targets[name] = &targethasher.Target{Name: name, Hash: []byte{0}, RuleType: "go_library"}
 	}
 
-	responses, err := ResultToGetTargetGraphResponse(result)
+	responses, err := ResultToGetTargetGraphResponse(context.Background(), result)
 	require.NoError(t, err)
 
 	// 2 target chunks + 1 metadata chunk (500 targets well under DefaultMetadataMapChunkSize)

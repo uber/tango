@@ -58,6 +58,11 @@ func streamAndParseTargets(ctx context.Context, src io.Reader, dst io.Writer) (*
 	}
 }
 
+// cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
+// Picked to keep overhead negligible while still surfacing cancellation in <100ms
+// for typical target rates.
+const cancelCheckInterval = 1024
+
 // getQueryResult reads a QueryResult containing targets from the stream and returns it.
 func getQueryResult(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb.QueryResult, error) {
 	result := &buildpb.QueryResult{
@@ -69,7 +74,12 @@ func getQueryResult(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb
 		MaxSize: 64 * 1024 * 1024, // 64MB limit
 	}
 	var parseErr error
-	for {
+	for i := 0; ; i++ {
+		if i%cancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return result, err
+			}
+		}
 		var target buildpb.Target
 		err := unmarshalOpts.UnmarshalFrom(br, &target)
 		if err == io.EOF {

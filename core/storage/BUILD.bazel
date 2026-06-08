@@ -4,6 +4,7 @@ go_library(
     name = "storage",
     srcs = [
         "changedtargetsreader.go",
+        "ctxreader.go",
         "graphreader.go",
         "graphwriter.go",
         "memstorage.go",

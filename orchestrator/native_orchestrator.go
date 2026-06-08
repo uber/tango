@@ -175,7 +175,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	// Compute the target graph and store it in storage.
 	runner := b.graphRunner
 	if runner == nil {
-		client, err := bazel.NewBazelClient(bazel.Params{
+		client, err := bazel.NewBazelClient(ctx, bazel.Params{
 			WorkspacePath: ws.Path(),
 			Logger:        b.logger,
 			BazelCommand:  repoCfg.BazelCommand,
@@ -199,7 +199,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		logger.Errorw("GetTargetGraph: Error computing target graph", zap.Error(err))
 		return nil, common.WithReason(failureReasonGraphCompute, common.ErrorTypeInfra, err)
 	}
-	responses, err := common.ResultToGetTargetGraphResponse(result)
+	responses, err := common.ResultToGetTargetGraphResponse(ctx, result)
 	if err != nil {
 		logger.Errorw("GetTargetGraph: Error converting target graph to response", zap.Error(err))
 		return nil, common.WithReason(failureReasonGraphConvert, common.ErrorTypeInfra, err)

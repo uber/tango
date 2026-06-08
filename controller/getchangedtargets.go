@@ -92,6 +92,11 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 				var cached []*pb.GetChangedTargetsResponse
 				var readErr error
 				for {
+					if err := ctx.Err(); err != nil {
+						cachedReader.Close()
+						// Client gave up while we were draining the cache. Surface as a user-cancelled error.
+						return common.WithReason(failureReasonCancelled, common.ErrorTypeUser, err)
+					}
 					var resp *pb.GetChangedTargetsResponse
 					resp, readErr = cachedReader.Read()
 					if readErr == io.EOF {
