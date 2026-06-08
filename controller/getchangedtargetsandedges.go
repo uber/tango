@@ -218,7 +218,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	responses, err := c.compareTargetGraphsAndEdges(logger, firstGraph, secondGraph, maxDist, request.GetOutputConfig().GetComputeDistances())
+	responses, err := c.compareTargetGraphsAndEdges(ctx, logger, firstGraph, secondGraph, maxDist, request.GetOutputConfig().GetComputeDistances())
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -268,20 +268,35 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 // per-target topology by computing added/removed targets and the set of
 // new and removed edges. Edge keys are packed into uint64 ID pairs to keep
 // the working set small for very large graphs.
-func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
+func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs_and_edges")
 	logger.Info("compareTargetGraphsAndEdges: Computing differences between target graphs")
 
 	// 1) Extract targets and metadata; index by canonical names.
-	firstTargetsByID, firstMetadata := getTargetsAndMetadata(firstGraph)
-	secondTargetsByID, secondMetadata := getTargetsAndMetadata(secondGraph)
+	firstTargetsByID, firstMetadata, err := getTargetsAndMetadata(ctx, firstGraph)
+	if err != nil {
+		return nil, err
+	}
+
+	secondTargetsByID, secondMetadata, err := getTargetsAndMetadata(ctx, secondGraph)
+	if err != nil {
+		return nil, err
+	}
+
 	// Release raw chunk slices — individual target protos are now held by the ID maps.
 	firstGraph = nil
 	secondGraph = nil
-	firstByName := buildNameIndex(firstTargetsByID, firstMetadata)
+	firstByName, err := buildNameIndex(ctx, firstTargetsByID, firstMetadata)
+	if err != nil {
+		return nil, err
+	}
 	firstTargetsByID = nil // all pointers are now in firstByName; drop the duplicate map
-	secondByName := buildNameIndex(secondTargetsByID, secondMetadata)
+
+	secondByName, err := buildNameIndex(ctx, secondTargetsByID, secondMetadata)
+	if err != nil {
+		return nil, err
+	}
 	secondTargetsByID = nil
 
 	sourceFileRuleTypeID := detectSourceFileID(secondMetadata)
@@ -311,7 +326,12 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 	secondEdges := make(map[uint64]struct{})
 
 	// 3) Single pass over second graph: identify changed/new/added targets and build second edge set.
+	scanIter := 0
 	for name, newT := range secondByName {
+		if scanIter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		scanIter++
 		// Build second edge set inline to avoid a separate iteration.
 		for _, depID := range newT.GetDirectDependencies() {
 			if depName := secondIDMapping[depID]; depName != "" {
@@ -375,7 +395,12 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 	}
 
 	// 4) Classify INDIRECT changes as DIRECT where appropriate.
+	classifyIter := 0
 	for name, ct := range changedByName {
+		if classifyIter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		classifyIter++
 		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
 			continue
 		}
@@ -405,7 +430,9 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 
 	// 5) Compute BFS distances when filtering is active or the client requested distance output.
 	if maxDist >= 0 || outputDistances {
-		computeDistances(logger, changedByName, secondByName, secondMetadata, maxDist)
+		if err := computeDistances(ctx, logger, changedByName, secondByName, secondMetadata, maxDist); err != nil {
+			return nil, err
+		}
 	}
 
 	// 6) Collect changed targets.
@@ -418,7 +445,12 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 	firstIDMapping := firstMetadata.GetTargetIdMapping()
 	firstEdges := make(map[uint64]struct{})
 	var removedTargets []*pb.OptimizedTarget
+	removedIter := 0
 	for name, oldT := range firstByName {
+		if removedIter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		removedIter++
 		// Build first edge set inline to avoid a separate iteration.
 		for _, depID := range oldT.GetDirectDependencies() {
 			if depName := firstIDMapping[depID]; depName != "" {
@@ -442,7 +474,12 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 	// Invert edgeMapper once to resolve packed IDs back to names for the output edges.
 	edgeNames := edgeMapper.Invert()
 	var newEdges []*pb.Edge
+	newEdgeIter := 0
 	for e := range secondEdges {
+		if newEdgeIter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		newEdgeIter++
 		if _, exists := firstEdges[e]; !exists {
 			srcName := edgeNames[int32(e>>32)]
 			depName := edgeNames[int32(e&0xFFFFFFFF)]
@@ -453,7 +490,12 @@ func (c *controller) compareTargetGraphsAndEdges(logger *zap.Logger, firstGraph,
 		}
 	}
 	var removedEdges []*pb.Edge
+	removedEdgeIter := 0
 	for e := range firstEdges {
+		if removedEdgeIter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		removedEdgeIter++
 		if _, exists := secondEdges[e]; !exists {
 			srcName := edgeNames[int32(e>>32)]
 			depName := edgeNames[int32(e&0xFFFFFFFF)]

@@ -841,7 +841,7 @@ func TestComputeDistances(t *testing.T) {
 		"E": {ChangeType: pb.CHANGE_TYPE_INDIRECT},
 	}
 
-	computeDistances(zap.NewNop(), changedByName, targetsByName, meta, -1)
+	require.NoError(t, computeDistances(context.Background(), zap.NewNop(), changedByName, targetsByName, meta, -1))
 
 	assert.Equal(t, int32(0), changedByName["A"].GetDistance(), "DIRECT target A should have distance 0")
 	assert.Equal(t, int32(1), changedByName["B"].GetDistance(), "B depends on DIRECT A, distance should be 1")
@@ -992,7 +992,7 @@ func TestComputeDistances_NewTargetsGetDistanceZero(t *testing.T) {
 		"N": {ChangeType: pb.CHANGE_TYPE_NEW},
 	}
 
-	computeDistances(zap.NewNop(), changedByName, targetsByName, meta, -1)
+	require.NoError(t, computeDistances(context.Background(), zap.NewNop(), changedByName, targetsByName, meta, -1))
 
 	assert.Equal(t, int32(0), changedByName["A"].GetDistance(), "DIRECT target A should have distance 0")
 	assert.Equal(t, int32(1), changedByName["B"].GetDistance(), "B depends on DIRECT A, distance should be 1")
@@ -1015,7 +1015,7 @@ func TestComputeDistances_NewTargetsWithMaxDistance(t *testing.T) {
 		"N": {ChangeType: pb.CHANGE_TYPE_NEW},
 	}
 
-	computeDistances(zap.NewNop(), changedByName, targetsByName, meta, 1)
+	require.NoError(t, computeDistances(context.Background(), zap.NewNop(), changedByName, targetsByName, meta, 1))
 
 	assert.Equal(t, int32(0), changedByName["N"].GetDistance(), "NEW target should have distance 0 even with maxDistance set")
 }
@@ -1024,7 +1024,7 @@ func TestComputeDistances_NilMetadata(t *testing.T) {
 	changedByName := map[string]*pb.ChangedTarget{
 		"A": {ChangeType: pb.CHANGE_TYPE_DIRECT},
 	}
-	computeDistances(zap.NewNop(), changedByName, nil, nil, -1)
+	require.NoError(t, computeDistances(context.Background(), zap.NewNop(), changedByName, nil, nil, -1))
 	assert.Equal(t, int32(0), changedByName["A"].GetDistance())
 }
 

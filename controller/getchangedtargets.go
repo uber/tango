@@ -303,29 +303,26 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 
 	// 1) Extract targets and metadata; index by canonical names
 	indexStart := time.Now()
-	firstTargetsByID, firstMetadata := getTargetsAndMetadata(firstGraph)
-
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	firstTargetsByID, firstMetadata, err := getTargetsAndMetadata(ctx, firstGraph)
+	if err != nil {
+		return nil, err
 	}
-
-	secondTargetsByID, secondMetadata := getTargetsAndMetadata(secondGraph)
-
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	secondTargetsByID, secondMetadata, err := getTargetsAndMetadata(ctx, secondGraph)
+	if err != nil {
+		return nil, err
 	}
-
 	// Release raw chunk slices — individual target protos are now held by the ID maps.
 	firstGraph = nil
 	secondGraph = nil
-	firstByName := buildNameIndex(firstTargetsByID, firstMetadata)
-	firstTargetsByID = nil // all pointers are now in firstByName; drop the duplicate map
-
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	firstByName, err := buildNameIndex(ctx, firstTargetsByID, firstMetadata)
+	if err != nil {
+		return nil, err
 	}
-
-	secondByName := buildNameIndex(secondTargetsByID, secondMetadata)
+	firstTargetsByID = nil // all pointers are now in firstByName; drop the duplicate map
+	secondByName, err := buildNameIndex(ctx, secondTargetsByID, secondMetadata)
+	if err != nil {
+		return nil, err
+	}
 	secondTargetsByID = nil
 	indexDuration := time.Since(indexStart)
 	scope.Timer("index_duration").Record(indexDuration)
@@ -472,7 +469,9 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 	// Compute BFS distances when filtering is active or the client requested distance output.
 	if maxDist >= 0 || outputDistances {
 		distancesStart := time.Now()
-		computeDistances(c.logger, changedByName, secondByName, secondMetadata, maxDist)
+		if err := computeDistances(ctx, c.logger, changedByName, secondByName, secondMetadata, maxDist); err != nil {
+			return nil, err
+		}
 		distancesDuration := time.Since(distancesStart)
 		scope.Timer("distances_duration").Record(distancesDuration)
 	}
@@ -531,10 +530,13 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 	return results, nil
 }
 
+// cancelCheckInterval is how often long-running loops check ctx.Err().
+const cancelCheckInterval = 4096
+
 // getTargetsAndMetadata builds ID->target maps and merges metadata from a target graph stream.
 // Metadata may arrive in multiple chunks (e.g. when target_id_mapping exceeds the gRPC message
 // size limit); all chunks are merged into a single Metadata so callers can use it uniformly.
-func getTargetsAndMetadata(graph []*pb.GetTargetGraphResponse) (map[int32]*pb.OptimizedTarget, *pb.Metadata) {
+func getTargetsAndMetadata(ctx context.Context, graph []*pb.GetTargetGraphResponse) (map[int32]*pb.OptimizedTarget, *pb.Metadata, error) {
 	targets := make(map[int32]*pb.OptimizedTarget)
 	merged := &pb.Metadata{
 		TargetIdMapping:             make(map[int32]string),
@@ -544,6 +546,9 @@ func getTargetsAndMetadata(graph []*pb.GetTargetGraphResponse) (map[int32]*pb.Op
 		AttributeStringValueMapping: make(map[int32]string),
 	}
 	for _, chunk := range graph {
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
 		switch item := chunk.GetItem().(type) {
 		case *pb.GetTargetGraphResponse_Targets:
 			for _, t := range item.Targets.GetTargets() {
@@ -568,13 +573,18 @@ func getTargetsAndMetadata(graph []*pb.GetTargetGraphResponse) (map[int32]*pb.Op
 			}
 		}
 	}
-	return targets, merged
+	return targets, merged, nil
 }
 
 // buildNameIndex creates name->target maps using the provided metadata information.
-func buildNameIndex(targetsByID map[int32]*pb.OptimizedTarget, meta *pb.Metadata) map[string]*pb.OptimizedTarget {
+func buildNameIndex(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarget, meta *pb.Metadata) (map[string]*pb.OptimizedTarget, error) {
 	byName := make(map[string]*pb.OptimizedTarget, len(targetsByID))
+	i := 0
 	for id, t := range targetsByID {
+		if i%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		i++
 		name, err := canonicalTargetName(id, meta)
 		if err != nil {
 			// If a target ID is missing in metadata, skip it.
@@ -582,7 +592,7 @@ func buildNameIndex(targetsByID map[int32]*pb.OptimizedTarget, meta *pb.Metadata
 		}
 		byName[name] = t
 	}
-	return byName
+	return byName, nil
 }
 
 // detectSourceFileID returns the literal rule type name for source file if present.
@@ -826,16 +836,21 @@ func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, 
 // enqueued, so they keep their initial distance of -1 (out-of-range).
 //
 // Targets unreachable from any DIRECT target keep the initial distance of -1.
-func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTarget, targetsByName map[string]*pb.OptimizedTarget, meta *pb.Metadata, maxDistance int32) {
+func computeDistances(ctx context.Context, logger *zap.Logger, changedByName map[string]*pb.ChangedTarget, targetsByName map[string]*pb.OptimizedTarget, meta *pb.Metadata, maxDistance int32) error {
 	if meta == nil {
-		return
+		return nil
 	}
 
 	targetIDMapping := meta.GetTargetIdMapping()
 
 	// Build reverse dependency graph: if B depends on A, then A -> B.
 	reverseDeps := make(map[string][]string, len(targetsByName))
+	revDepIter := 0
 	for name, t := range targetsByName {
+		if revDepIter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		revDepIter++
 		for _, depID := range t.GetDirectDependencies() {
 			depName := targetIDMapping[depID]
 			if depName != "" {
@@ -858,7 +873,12 @@ func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTa
 	}
 
 	// BFS from DIRECT targets through reverseDeps. Shortest distance wins.
+	bfsIter := 0
 	for len(queue) > 0 {
+		if bfsIter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		bfsIter++
 		current := queue[0]
 		queue = queue[1:]
 		currentDist := changedByName[current].GetDistance()
@@ -891,6 +911,7 @@ func computeDistances(logger *zap.Logger, changedByName map[string]*pb.ChangedTa
 			)
 		}
 	}
+	return nil
 }
 
 // validateGetChangedTargetsRequest enforces the minimal invariants the
