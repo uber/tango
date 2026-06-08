@@ -117,17 +117,14 @@ func (c *storageCache) Get(ctx context.Context, key Key) (*graph.OptimizedGraph,
 }
 
 func (c *storageCache) FloorKey(ctx context.Context, remote string, targetTimeSecond int64) (Key, error) {
-	allKeys, err := c.storage.List(ctx)
+	remotePrefix := keyPrefix + remote + "/"
+	allKeys, err := c.storage.List(ctx, remotePrefix)
 	if err != nil {
 		return EmptyKey, err
 	}
 
-	remotePrefix := keyPrefix + remote + "/"
 	cacheKeys := make([]Key, 0, len(allKeys))
 	for _, k := range allKeys {
-		if !strings.HasPrefix(k, remotePrefix) {
-			continue
-		}
 		cacheKey, err := parseCacheFileName(strings.TrimPrefix(k, remotePrefix))
 		if err != nil {
 			continue
