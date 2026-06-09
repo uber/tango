@@ -1,0 +1,134 @@
+# =============================================================================
+# Moncon Dashboard: Tango Service
+# =============================================================================
+#
+# Deployment Instructions:
+# ------------------------
+# Staging:
+#   moncon apply --input moncon/dashboards/tango.yaml
+#
+# Production:
+#   moncon apply --input moncon/dashboards/tango.yaml -e production
+# =============================================================================
+dialect:
+  slug: grafana-dashboard
+  version: v1
+
+spec:
+  title: tango
+  editable: true
+  tags: ["tango"]
+  time:
+    from: now-3h
+    to: now
+
+  templating:
+    list:
+      - type: query
+        name: dc
+        query: name:controller.get_changed_targets.total_duration service:tango type:timer | tag dc
+        datasource: M3QL
+        includeAll: true
+        sort: true
+        multi: true
+        refresh: 1
+
+  rows:
+    - row:
+        title: get_changed_targets — Total Duration
+        showTitle: true
+        collapse: false
+        panels:
+          - panel:
+              type: graph
+              linewidth: 2
+              fill: 1
+              span: 12
+              datasource: M3QL
+              title: Total Duration — p50 / p95 / p99
+              targets:
+                - target: fetch dc:$dc service:tango name:controller.get_changed_targets.total_duration
+                    type:timer timertype:p50 | transformNull 0 | maxSeries | moving 1m avg
+                    | alias p50
+                - target: fetch dc:$dc service:tango name:controller.get_changed_targets.total_duration
+                    type:timer timertype:p95 | transformNull 0 | maxSeries | moving 1m avg
+                    | alias p95
+                - target: fetch dc:$dc service:tango name:controller.get_changed_targets.total_duration
+                    type:timer timertype:p99 | transformNull 0 | maxSeries | moving 1m avg
+                    | alias p99
+              yAxis:
+                format: ms
+              legend:
+                show: true
+                alignAsTable: true
+                current: true
+                avg: true
+                max: true
+
+    - row:
+        title: get_changed_targets — Step Breakdown
+        showTitle: true
+        collapse: true
+        panels:
+          - panel:
+              type: graph
+              linewidth: 2
+              fill: 1
+              span: 4
+              datasource: M3QL
+              title: Cache Read Duration p99
+              targets:
+                - target: fetch dc:$dc service:tango name:controller.get_changed_targets.cache_read_duration
+                    type:timer timertype:p99 | transformNull 0 | maxSeries | moving 1m avg
+              yAxis:
+                format: ms
+              legend:
+                show: false
+
+          - panel:
+              type: graph
+              linewidth: 2
+              fill: 1
+              span: 4
+              datasource: M3QL
+              title: Graph Fetch Duration p99
+              targets:
+                - target: fetch dc:$dc service:tango name:controller.get_changed_targets.graph_fetch_duration
+                    type:timer timertype:p99 | transformNull 0 | maxSeries | moving 1m avg
+              yAxis:
+                format: ms
+              legend:
+                show: false
+
+          - panel:
+              type: graph
+              linewidth: 2
+              fill: 1
+              span: 4
+              datasource: M3QL
+              title: Compare Duration p99
+              targets:
+                - target: fetch dc:$dc service:tango name:controller.get_changed_targets.compare_duration
+                    type:timer timertype:p99 | transformNull 0 | maxSeries | moving 1m avg
+              yAxis:
+                format: ms
+              legend:
+                show: false
+
+    - row:
+        title: get_changed_targets — Latency Heatmap
+        showTitle: true
+        collapse: true
+        panels:
+          - panel:
+              type: heatmap
+              span: 12
+              datasource: M3QL
+              title: Total Duration Heatmap
+              targets:
+                - target: fetch dc:$dc service:tango name:controller.get_changed_targets.total_duration
+                    type:timer | transformNull 0 | sumSeries timertype | moving 1m avg
+              yAxis:
+                format: ms
+              legend:
+                show: false

@@ -25,17 +25,19 @@ import (
 
 type gitRequest struct {
 	git       git.Interface
+	remote    string
 	requestID string
 	baseRef   string
 	commit    string
 	logger    *zap.SugaredLogger
 }
 
-func NewGitRequest(git git.Interface, requestPath string, baseRef string, commit string, logger *zap.SugaredLogger) Request {
+func NewGitRequest(git git.Interface, requestPath string, remote string, baseRef string, commit string, logger *zap.SugaredLogger) Request {
 	// get the last part of the request path
 	requestID := filepath.Base(requestPath)
 	return &gitRequest{
 		git:       git,
+		remote:    remote,
 		requestID: requestID,
 		baseRef:   baseRef,
 		commit:    commit,
@@ -46,8 +48,8 @@ func NewGitRequest(git git.Interface, requestPath string, baseRef string, commit
 // Apply applies the change request to the workspace.
 func (r *gitRequest) Apply(ctx context.Context) error {
 	r.logger.Infow("gitRequest: Applying PR", zap.String("request_id", r.requestID), zap.String("base_ref", r.baseRef), zap.String("commit", r.commit))
-	ref := fmt.Sprintf("+pull/%s/head:pull/%s/head", r.requestID, r.requestID)
-	err := r.git.Fetch(ctx, "origin", ref, "--force", "--no-tags")
+	ref := fmt.Sprintf("+refs/pull/%s/head:refs/pull/%s/head", r.requestID, r.requestID)
+	err := r.git.Fetch(ctx, r.remote, ref, "--force", "--no-tags")
 	if err != nil {
 		r.logger.Errorw("gitRequest: Failed to fetch PR", zap.String("request_id", r.requestID), zap.Error(err))
 		return err

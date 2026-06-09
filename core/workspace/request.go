@@ -28,14 +28,14 @@ type Request interface {
 }
 
 // NewRequest creates a new request based on the request URL.
-func NewRequest(rawURL string, g git.Interface, baseRef string, commit string, logger *zap.SugaredLogger) (Request, error) {
+func NewRequest(rawURL string, g git.Interface, remote string, baseRef string, commit string, logger *zap.SugaredLogger) (Request, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
 	}
 	switch u.Scheme {
 	case "github":
-		return NewGitRequest(g, u.Path, baseRef, commit, logger), nil
+		return NewGitRequest(g, u.Path, remote, baseRef, commit, logger), nil
 	}
 	return nil, nil
 }

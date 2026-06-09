@@ -137,7 +137,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 
 	gitModule := factory(ws.Path())
 	for _, req := range param.Req.BuildDescription.Requests {
-		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.BaseSha, req.GetCommit(), logger)
+		request, err := workspace.NewRequest(req.GetUrl(), gitModule, remote, param.Req.BuildDescription.BaseSha, req.GetCommit(), logger)
 		if err != nil {
 			logger.Errorw("GetTargetGraph: Error creating request", zap.String("url", req.GetUrl()), zap.Error(err))
 			return nil, common.WithReason(failureReasonRequestCreate, common.ErrorTypeInfra, err)
