@@ -15,6 +15,8 @@
 package controller
 
 import (
+	"time"
+
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/common"
@@ -36,6 +38,9 @@ type Params struct {
 	RepoConfigProvider config.RepositoryConfigProvider `optional:"true"`
 }
 
+// _totalDurationBuckets covers 0–15 minutes in 10-second linear intervals.
+var _totalDurationBuckets = tally.MustMakeLinearDurationBuckets(10*time.Second, 10*time.Second, 90)
+
 type controller struct {
 	logger                 *zap.Logger
 	storage                storage.Storage
@@ -45,6 +50,7 @@ type controller struct {
 	changedTargetChunkSize int
 	metadataMapChunkSize   int
 	repoConfigProvider     config.RepositoryConfigProvider
+	totalDurationBuckets   tally.Buckets
 }
 
 // NewController creates a new controller.
@@ -74,6 +80,7 @@ func NewController(p Params) pb.TangoYARPCServer {
 		changedTargetChunkSize: changedTargetChunkSize,
 		metadataMapChunkSize:   metadataMapChunkSize,
 		repoConfigProvider:     p.RepoConfigProvider,
+		totalDurationBuckets:   _totalDurationBuckets,
 	}
 }
 

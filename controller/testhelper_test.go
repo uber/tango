@@ -27,5 +27,6 @@ func newTestController(logger *zap.Logger) *controller {
 		targetChunkSize:        common.DefaultTargetChunkSize,
 		changedTargetChunkSize: common.DefaultChangedTargetChunkSize,
 		metadataMapChunkSize:   common.DefaultMetadataMapChunkSize,
+		totalDurationBuckets:   _totalDurationBuckets,
 	}
 }
