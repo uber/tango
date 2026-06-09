@@ -187,12 +187,6 @@ func (r *repoManager) createWorker(ctx context.Context, originDir, workerDir str
 	return r.git.Clone(ctx, originDir, workerDir, "--local", "-c", "gc.auto=0")
 }
 
-// OriginClonePath returns the directory where the origin clone for the given
-// remote is stored under cloneRoot. It mirrors the path chosen by repoManager.
-func OriginClonePath(cloneRoot, remote string) string {
-	return filepath.Join(cloneRoot, toShortRemote(remote))
-}
-
 func toShortRemote(remote string) string {
 	strs := strings.Split(remote, ":")
 	return strs[len(strs)-1]
