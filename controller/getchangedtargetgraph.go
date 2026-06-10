@@ -23,12 +23,6 @@ import (
 // stub: it records success/failure metrics and returns no data.
 func (c *controller) GetChangedTargetGraph(request *pb.GetChangedTargetGraphRequest, stream pb.TangoServiceGetChangedTargetGraphYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_target_graph")
-	defer func() {
-		if retErr != nil {
-			scope.Counter("failure").Inc(1)
-		} else {
-			scope.Counter("success").Inc(1)
-		}
-	}()
+	defer recordRPCResult(scope, &retErr)
 	return nil
 }

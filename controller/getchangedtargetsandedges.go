@@ -18,9 +18,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"time"
 
+	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	pb "github.com/uber/tango/tangopb"
@@ -37,190 +37,60 @@ func packEdge(src, dep int32) uint64 {
 	return uint64(uint32(src))<<32 | uint64(uint32(dep))
 }
 
+// unpackEdge inverts packEdge.
+func unpackEdge(packed uint64) (src, dep int32) {
+	return int32(packed >> 32), int32(packed & 0xFFFFFFFF)
+}
+
 // GetChangedTargetsAndEdges returns the changed targets and edges between two revisions.
 func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndEdgesRequest, stream pb.TangoServiceGetChangedTargetsAndEdgesYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets_and_edges")
 	scope.Counter("calls").Inc(1)
-	defer func() {
-		if retErr != nil {
-			scope.Counter("failure").Inc(1)
-			emitFailureMetric(scope, retErr)
-		} else {
-			scope.Counter("success").Inc(1)
-		}
-	}()
+	defer recordRPCResult(scope, &retErr)
+
 	if err := validateGetChangedTargetsAndEdgesRequest(request); err != nil {
 		c.logger.Error("GetChangedTargetsAndEdges: Invalid request", zap.Error(err))
 		return common.WithReason(failureReasonValidation, common.ErrorTypeUser, err)
 	}
-	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
+
+	first, second := request.GetFirstRevision(), request.GetSecondRevision()
+	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(first.GetRemote())})
 	ctx := stream.Context()
 	start := time.Now()
 	logger := c.logger.With(
-		zap.Any("first_revision", request.GetFirstRevision()),
-		zap.Any("second_revision", request.GetSecondRevision()),
+		zap.Any("first_revision", first),
+		zap.Any("second_revision", second),
 	)
-
 	logger.Info("GetChangedTargetsAndEdges: Processing request")
 
-	maxDist := resolveMaxDistance(c.getRepoConfig(request.GetFirstRevision().GetRemote()), request.GetOutputConfig())
+	maxDist := resolveMaxDistance(c.getRepoConfig(first.GetRemote()), request.GetOutputConfig())
 
-	// Try to serve from cache first.
 	if !request.GetBypassCache() {
-		cacheStart := time.Now()
-		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
-		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
-		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
-			cachedReader, cacheErr := storage.NewChangedTargetsAndEdgesReader(ctx, c.storage, cacheKey)
-			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
-				logger.Warn("GetChangedTargetsAndEdges: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
-			} else if cachedReader != nil {
-				var cached []*pb.GetChangedTargetsAndEdgesResponse
-				var readErr error
-				for {
-					var resp *pb.GetChangedTargetsAndEdgesResponse
-					resp, readErr = cachedReader.Read()
-					if readErr == io.EOF {
-						readErr = nil
-						break
-					}
-					if readErr != nil {
-						break
-					}
-					cached = append(cached, resp)
-				}
-				cachedReader.Close()
-
-				if readErr != nil {
-					logger.Warn("GetChangedTargetsAndEdges: Cached result is incomplete, recomputing", zap.Error(readErr))
-				} else {
-					cacheReadDuration := time.Since(cacheStart)
-					logger.Info("GetChangedTargetsAndEdges: Cache hit, streaming from storage",
-						zap.Duration("cache_read_duration", cacheReadDuration),
-					)
-					scope.Counter("cache_hit").Inc(1)
-					scope.Timer("cache_read_duration").Record(cacheReadDuration)
-					if err := sendWithDistanceFilterForEdges(stream, cached, maxDist); err != nil {
-						logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
-						return common.WithReason(failureReasonSend, common.ErrorTypeInfra, err)
-					}
-					totalDuration := time.Since(start)
-					logger.Info("GetChangedTargetsAndEdges: Successfully streamed from cache",
-						zap.Duration("total_duration", totalDuration),
-					)
-					scope.Timer("total_duration").Record(totalDuration)
-					return nil
-				}
-			}
+		if served, err := c.tryServeChangedTargetsAndEdgesFromCache(ctx, logger, scope, stream, request, maxDist); err != nil {
+			return err
+		} else if served {
+			scope.Timer("total_duration").Record(time.Since(start))
+			return nil
 		}
 	}
 
-	jobs := make([]*job, 2)
-	for i := 0; i < 2; i++ {
-		ctxNew, cancelNew := context.WithCancel(ctx)
-		defer cancelNew()
-		jobs[i] = &job{ctx: ctxNew, cancel: cancelNew}
-	}
-
-	type graphResult struct {
-		order  int
-		chunks []*pb.GetTargetGraphResponse
-		err    error
-	}
-	results := make(chan graphResult, len(jobs))
-	graphFetchStart := time.Now()
-
-	for i := 0; i < len(jobs); i++ {
-		i := i
-		go func(idx int) {
-			defer func() {
-				if r := recover(); r != nil {
-					results <- graphResult{order: idx, err: fmt.Errorf("panic in graph fetch: %v", r)}
-				}
-			}()
-			var revision *pb.BuildDescription
-			if idx == 0 {
-				revision = request.GetFirstRevision()
-			} else {
-				revision = request.GetSecondRevision()
-			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
-			if err != nil || graphReader == nil {
-				results <- graphResult{order: idx, err: err}
-				return
-			}
-			defer graphReader.Close()
-
-			var chunks []*pb.GetTargetGraphResponse
-			for {
-				chunk, err := graphReader.Read()
-				if err == io.EOF {
-					results <- graphResult{order: idx, chunks: chunks}
-					return
-				}
-				if err != nil {
-					results <- graphResult{order: idx, err: err}
-					return
-				}
-				chunks = append(chunks, chunk)
-			}
-		}(i)
-	}
-
-	for range jobs {
-		select {
-		case res := <-results:
-			jobs[res.order].graphStreamChunks = res.chunks
-			jobs[res.order].completed = true
-			jobs[res.order].err = res.err
-			if res.chunks == nil && res.err == nil {
-				jobs[res.order].err = errors.New("no chunks returned")
-			}
-			if jobs[res.order].err != nil {
-				other := (res.order + 1) % 2
-				if !jobs[other].completed {
-					jobs[other].cancel()
-					jobs[other].cancelled = true
-				}
-			}
+	graphs, err := c.fetchTwoGraphs(ctx, first, second, request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return common.WithReason(failureReasonCancelled, common.ErrorTypeUser, err)
 		}
+		return err
 	}
-
-	graphFetchDuration := time.Since(graphFetchStart)
+	graphFetchDuration := time.Since(start)
 	logger.Info("GetChangedTargetsAndEdges: Both graphs fetched",
 		zap.Duration("graph_fetch_duration", graphFetchDuration),
 	)
 	scope.Timer("graph_fetch_duration").Record(graphFetchDuration)
 
-	if ctx.Err() != nil {
-		return common.WithReason(failureReasonCancelled, common.ErrorTypeUser, ctx.Err())
-	}
-
-	var err error
-	for i, j := range jobs {
-		if j.err != nil {
-			if j.cancelled {
-				continue
-			}
-			err = errors.Join(err, fmt.Errorf("failed to get target graph #%d: %w", i+1, j.err))
-		}
-	}
-	if err != nil {
-		return err
-	}
-
-	firstGraph := jobs[0].graphStreamChunks
-	secondGraph := jobs[1].graphStreamChunks
-	// Drop job references so the GC can reclaim them once the comparison is done.
-	jobs[0].graphStreamChunks = nil
-	jobs[1].graphStreamChunks = nil
-
 	compareStart := time.Now()
-	responses, err := c.compareTargetGraphsAndEdges(ctx, logger, firstGraph, secondGraph, maxDist, request.GetOutputConfig().GetComputeDistances())
-	// Allow GC of raw graph data while the caching goroutine runs.
-	firstGraph = nil
-	secondGraph = nil
+	responses, err := c.compareTargetGraphsAndEdges(ctx, logger, graphs[0], graphs[1], maxDist, request.GetOutputConfig().GetComputeDistances())
+	graphs[0] = nil
+	graphs[1] = nil
 	if err != nil {
 		logger.Error("GetChangedTargetsAndEdges: Failed to compare target graphs", zap.Error(err))
 		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))
@@ -231,18 +101,7 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 	)
 	scope.Timer("compare_duration").Record(compareDuration)
 
-	// Cache the computed result concurrently so it doesn't block the stream send.
-	go func() {
-		cacheCtx := context.Background()
-		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision())
-		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision())
-		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetChangedTargetsAndEdgesCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
-			if writeErr := storage.WriteChangedTargetsAndEdgesStream(cacheCtx, c.storage, cacheKey, responses); writeErr != nil {
-				logger.Warn("GetChangedTargetsAndEdges: Failed to cache result", zap.Error(writeErr))
-			}
-		}
-	}()
+	go c.cacheChangedTargetsAndEdgesAsync(logger, first, second, request.GetRequestOptions(), responses)
 
 	sendStart := time.Now()
 	if err := sendWithDistanceFilterForEdges(stream, responses, maxDist); err != nil {
@@ -250,15 +109,71 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 		return common.WithReason(failureReasonSend, common.ErrorTypeInfra, err)
 	}
 	sendDuration := time.Since(sendStart)
-	scope.Timer("send_duration").Record(sendDuration)
-
 	totalDuration := time.Since(start)
 	logger.Info("GetChangedTargetsAndEdges: Successfully processed request",
 		zap.Duration("send_duration", sendDuration),
 		zap.Duration("total_duration", totalDuration),
 	)
+	scope.Timer("send_duration").Record(sendDuration)
 	scope.Timer("total_duration").Record(totalDuration)
 	return nil
+}
+
+// tryServeChangedTargetsAndEdgesFromCache returns (true, nil) on a hit served
+// end-to-end. (false, nil) means the caller should fall through and recompute.
+func (c *controller) tryServeChangedTargetsAndEdgesFromCache(
+	ctx context.Context,
+	logger *zap.Logger,
+	scope tally.Scope,
+	stream pb.TangoServiceGetChangedTargetsAndEdgesYARPCServer,
+	request *pb.GetChangedTargetsAndEdgesRequest,
+	maxDist int32,
+) (bool, error) {
+	first, second := request.GetFirstRevision(), request.GetSecondRevision()
+	treehash1, treehash2, ok := readTreehashPair(ctx, c.storage, first, second)
+	if !ok {
+		return false, nil
+	}
+	cacheStart := time.Now()
+	cacheKey := common.GetChangedTargetsAndEdgesCachePath(first.GetRemote(), treehash1, treehash2, request.GetRequestOptions())
+
+	cached, hit := loadCachedResponses(ctx, logger, "GetChangedTargetsAndEdges", func(ctx context.Context) (cacheReader[*pb.GetChangedTargetsAndEdgesResponse], error) {
+		return storage.NewChangedTargetsAndEdgesReader(ctx, c.storage, cacheKey)
+	})
+	if !hit {
+		return false, nil
+	}
+	cacheReadDuration := time.Since(cacheStart)
+	logger.Info("GetChangedTargetsAndEdges: Cache hit, streaming from storage",
+		zap.Duration("cache_read_duration", cacheReadDuration),
+	)
+	scope.Counter("cache_hit").Inc(1)
+	scope.Timer("cache_read_duration").Record(cacheReadDuration)
+	if err := sendWithDistanceFilterForEdges(stream, cached, maxDist); err != nil {
+		logger.Error("GetChangedTargetsAndEdges: Failed to send cached response", zap.Error(err))
+		return false, common.WithReason(failureReasonSend, common.ErrorTypeInfra, err)
+	}
+	logger.Info("GetChangedTargetsAndEdges: Successfully streamed from cache")
+	return true, nil
+}
+
+// cacheChangedTargetsAndEdgesAsync writes the computed result back to storage
+// without blocking the response stream. Failures are logged and ignored.
+func (c *controller) cacheChangedTargetsAndEdgesAsync(
+	logger *zap.Logger,
+	first, second *pb.BuildDescription,
+	requestOptions *pb.RequestOptions,
+	responses []*pb.GetChangedTargetsAndEdgesResponse,
+) {
+	cacheCtx := context.Background()
+	treehash1, treehash2, ok := readTreehashPair(cacheCtx, c.storage, first, second)
+	if !ok {
+		return
+	}
+	cacheKey := common.GetChangedTargetsAndEdgesCachePath(first.GetRemote(), treehash1, treehash2, requestOptions)
+	if err := storage.WriteChangedTargetsAndEdgesStream(cacheCtx, c.storage, cacheKey, responses); err != nil {
+		logger.Warn("GetChangedTargetsAndEdges: Failed to cache result", zap.Error(err))
+	}
 }
 
 // compareTargetGraphsAndEdges diffs two target graph streams and produces a
@@ -267,311 +182,268 @@ func (c *controller) GetChangedTargetsAndEdges(request *pb.GetChangedTargetsAndE
 // per-target topology by computing added/removed targets and the set of
 // new and removed edges. Edge keys are packed into uint64 ID pairs to keep
 // the working set small for very large graphs.
-func (c *controller) compareTargetGraphsAndEdges(ctx context.Context, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
+func (c *controller) compareTargetGraphsAndEdges(
+	ctx context.Context,
+	logger *zap.Logger,
+	firstGraph, secondGraph []*pb.GetTargetGraphResponse,
+	maxDist int32,
+	outputDistances bool,
+) ([]*pb.GetChangedTargetsAndEdgesResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs_and_edges")
 	logger.Info("compareTargetGraphsAndEdges: Computing differences between target graphs")
 
-	// 1) Extract targets and metadata; index by canonical names.
-	firstTargetsByID, firstMetadata, err := getTargetsAndMetadata(ctx, firstGraph)
+	firstByName, firstMetadata, secondByName, secondMetadata, err := indexGraphsByName(ctx, scope, firstGraph, secondGraph)
 	if err != nil {
 		return nil, err
 	}
-
-	secondTargetsByID, secondMetadata, err := getTargetsAndMetadata(ctx, secondGraph)
-	if err != nil {
-		return nil, err
-	}
-
-	// Release raw chunk slices — individual target protos are now held by the ID maps.
+	// Raw chunk slices are no longer referenced once both graphs are indexed.
 	firstGraph = nil
 	secondGraph = nil
-	firstByName, err := buildNameIndex(ctx, firstTargetsByID, firstMetadata)
-	if err != nil {
-		return nil, err
-	}
-	firstTargetsByID = nil // all pointers are now in firstByName; drop the duplicate map
-
-	secondByName, err := buildNameIndex(ctx, secondTargetsByID, secondMetadata)
-	if err != nil {
-		return nil, err
-	}
-	secondTargetsByID = nil
 
 	sourceFileRuleTypeID := detectSourceFileID(secondMetadata)
 
-	// 2) Create canonical ID mappers shared across all output fields.
-	targetMapper := common.NewNameIDMapper()
-	ruleTypeMapper := common.NewNameIDMapper()
-	tagMapper := common.NewNameIDMapper()
-	attrNameMapper := common.NewNameIDMapper()
-	attrValMapper := common.NewNameIDMapper()
-	getTargetId := func(name string) int32 { return targetMapper.ID(name) }
-	getRuleTypeId := func(name string) int32 { return ruleTypeMapper.ID(name) }
-	getTagId := func(name string) int32 { return tagMapper.ID(name) }
-	getAttrNameId := func(name string) int32 { return attrNameMapper.ID(name) }
-	getAttrValId := func(name string) int32 { return attrValMapper.ID(name) }
-
-	// edgeMapper assigns compact int32 IDs to target names for edge comparison only.
-	// Kept separate from targetMapper so the output metadata isn't polluted with
-	// every target name in the graph (only changed/added/removed targets belong there).
+	mappers := newIDMappers()
+	// edgeMapper assigns compact int32 IDs for edge comparison only. Kept separate
+	// from the output mappers so response metadata is not polluted with every
+	// target name in the graph.
 	edgeMapper := common.NewNameIDMapper()
-	getEdgeID := func(name string) int32 { return edgeMapper.ID(name) }
 
 	changedByName := make(map[string]*pb.ChangedTarget)
 	changedSourceFileTargets := make(map[string]struct{})
 	var addedTargets []*pb.OptimizedTarget
-	secondIDMapping := secondMetadata.GetTargetIdMapping()
 	secondEdges := make(map[uint64]struct{})
 
-	// 3) Single pass over second graph: identify changed/new/added targets and build second edge set.
-	scanIter := 0
-	for name, newT := range secondByName {
-		if scanIter%cancelCheckInterval == 0 && ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		scanIter++
-		// Build second edge set inline to avoid a separate iteration.
-		for _, depID := range newT.GetDirectDependencies() {
-			if depName := secondIDMapping[depID]; depName != "" {
-				secondEdges[packEdge(getEdgeID(name), getEdgeID(depName))] = struct{}{}
-			}
-		}
-
-		oldT, exists := firstByName[name]
-		if !exists {
-			// Transpose once; share the pointer between changedByName and addedTargets.
-			transposed := transposeOptimizedTarget(
-				newT,
-				secondIDMapping,
-				secondMetadata.GetRuleTypeMapping(),
-				secondMetadata.GetTagMapping(),
-				secondMetadata.GetAttributeNameMapping(),
-				secondMetadata.GetAttributeStringValueMapping(),
-				getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
-			)
-			changedByName[name] = &pb.ChangedTarget{
-				ChangeType: pb.CHANGE_TYPE_NEW,
-				NewTarget:  transposed,
-				Distance:   getDefaultDistance(maxDist, outputDistances, true),
-			}
-			addedTargets = append(addedTargets, transposed)
-			continue
-		}
-		if oldT.GetHash() == newT.GetHash() {
-			continue
-		}
-		initial := pb.CHANGE_TYPE_INDIRECT
-		isSource := newT.GetRuleType() == sourceFileRuleTypeID && sourceFileRuleTypeID != -1
-		if isSource {
-			initial = pb.CHANGE_TYPE_DIRECT
-			changedSourceFileTargets[name] = struct{}{}
-		}
-		newTarget := transposeOptimizedTarget(
-			newT,
-			secondIDMapping,
-			secondMetadata.GetRuleTypeMapping(),
-			secondMetadata.GetTagMapping(),
-			secondMetadata.GetAttributeNameMapping(),
-			secondMetadata.GetAttributeStringValueMapping(),
-			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
-		)
-		oldTarget := transposeOptimizedTarget(
-			oldT,
-			firstMetadata.GetTargetIdMapping(),
-			firstMetadata.GetRuleTypeMapping(),
-			firstMetadata.GetTagMapping(),
-			firstMetadata.GetAttributeNameMapping(),
-			firstMetadata.GetAttributeStringValueMapping(),
-			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
-		)
-		changedByName[name] = &pb.ChangedTarget{
-			ChangeType: initial,
-			OldTarget:  oldTarget,
-			NewTarget:  newTarget,
-			Distance:   getDefaultDistance(maxDist, outputDistances, false),
-		}
+	// Single pass over the second graph: build edges, identify changed/new targets.
+	if err := scanSecondGraph(ctx, secondByName, firstByName, secondMetadata, sourceFileRuleTypeID,
+		mappers, firstMetadata, edgeMapper, maxDist, outputDistances,
+		changedByName, changedSourceFileTargets, secondEdges, &addedTargets); err != nil {
+		return nil, err
 	}
 
-	// 4) Classify INDIRECT changes as DIRECT where appropriate.
+	// Promote eligible INDIRECT changes to DIRECT.
 	classifyIter := 0
 	for name, ct := range changedByName {
 		if classifyIter%cancelCheckInterval == 0 && ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		classifyIter++
-		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
-			continue
-		}
-		newT := secondByName[name]
-		oldT := firstByName[name]
-
-		if hasDepInChangedSourceFileTargets(newT.GetDirectDependencies(), secondMetadata, changedSourceFileTargets) {
-			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
-			continue
-		}
-		depsChanged, err := dependenciesChanged(oldT, firstMetadata, newT, secondMetadata)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check dependencies changed: %w", err)
-		}
-		if depsChanged {
-			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
-			continue
-		}
-		attrsChanged, err := attributesChanged(oldT, firstMetadata, newT, secondMetadata)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check attributes changed: %w", err)
-		}
-		if attrsChanged {
-			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
+		if err := promoteToDirectIfNeeded(ct, firstByName[name], secondByName[name], firstMetadata, secondMetadata, changedSourceFileTargets); err != nil {
+			return nil, err
 		}
 	}
 
-	// 5) Compute BFS distances when filtering is active or the client requested distance output.
 	if maxDist >= 0 || outputDistances {
 		if err := computeDistances(ctx, logger, changedByName, secondByName, secondMetadata, maxDist); err != nil {
 			return nil, err
 		}
 	}
 
-	// 6) Collect changed targets.
+	// Single pass over the first graph: collect removed targets and build the first edge set.
+	firstEdges := make(map[uint64]struct{})
+	var removedTargets []*pb.OptimizedTarget
+	if err := scanFirstGraph(ctx, firstByName, secondByName, firstMetadata, mappers, edgeMapper, firstEdges, &removedTargets); err != nil {
+		return nil, err
+	}
+
+	newEdges, removedEdges, err := diffEdges(ctx, secondEdges, firstEdges, edgeMapper, mappers)
+	if err != nil {
+		return nil, err
+	}
+	// Drop intermediates eagerly so the response assembly works with a smaller heap.
+	secondEdges = nil
+	firstEdges = nil
+
+	totalDuration := time.Since(start)
+	logger.Info("compareTargetGraphsAndEdges: Done", zap.Duration("total_duration", totalDuration))
+	scope.Timer("total_duration").Record(totalDuration)
+
+	return c.assembleChangedTargetsAndEdgesResponse(changedByName, addedTargets, removedTargets, newEdges, removedEdges, mappers), nil
+}
+
+// scanSecondGraph builds the second edge set and classifies each target as
+// NEW, INDIRECT (default), DIRECT (when the rule type is source file), or
+// unchanged. Pointers to addedTargets and the result maps are mutated in place.
+func scanSecondGraph(
+	ctx context.Context,
+	secondByName, firstByName map[string]*pb.OptimizedTarget,
+	secondMetadata *pb.Metadata,
+	sourceFileRuleTypeID int32,
+	mappers *idMappers,
+	firstMetadata *pb.Metadata,
+	edgeMapper *common.NameIDMapper,
+	maxDist int32,
+	outputDistances bool,
+	changedByName map[string]*pb.ChangedTarget,
+	changedSourceFileTargets map[string]struct{},
+	secondEdges map[uint64]struct{},
+	addedTargets *[]*pb.OptimizedTarget,
+) error {
+	secondIDMapping := secondMetadata.GetTargetIdMapping()
+	iter := 0
+	for name, newT := range secondByName {
+		if iter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		iter++
+		for _, depID := range newT.GetDirectDependencies() {
+			if depName := secondIDMapping[depID]; depName != "" {
+				secondEdges[packEdge(edgeMapper.ID(name), edgeMapper.ID(depName))] = struct{}{}
+			}
+		}
+
+		oldT, exists := firstByName[name]
+		if !exists {
+			transposed := mappers.transpose(newT, secondMetadata)
+			changedByName[name] = &pb.ChangedTarget{
+				ChangeType: pb.CHANGE_TYPE_NEW,
+				NewTarget:  transposed,
+				Distance:   getDefaultDistance(maxDist, outputDistances, true),
+			}
+			*addedTargets = append(*addedTargets, transposed)
+			continue
+		}
+		if oldT.GetHash() == newT.GetHash() {
+			continue
+		}
+		initial := pb.CHANGE_TYPE_INDIRECT
+		if sourceFileRuleTypeID != -1 && newT.GetRuleType() == sourceFileRuleTypeID {
+			initial = pb.CHANGE_TYPE_DIRECT
+			changedSourceFileTargets[name] = struct{}{}
+		}
+		changedByName[name] = &pb.ChangedTarget{
+			ChangeType: initial,
+			OldTarget:  mappers.transpose(oldT, firstMetadata),
+			NewTarget:  mappers.transpose(newT, secondMetadata),
+			Distance:   getDefaultDistance(maxDist, outputDistances, false),
+		}
+	}
+	return nil
+}
+
+// scanFirstGraph builds the first edge set and collects targets present in
+// the first revision but missing from the second (i.e. removed).
+func scanFirstGraph(
+	ctx context.Context,
+	firstByName, secondByName map[string]*pb.OptimizedTarget,
+	firstMetadata *pb.Metadata,
+	mappers *idMappers,
+	edgeMapper *common.NameIDMapper,
+	firstEdges map[uint64]struct{},
+	removedTargets *[]*pb.OptimizedTarget,
+) error {
+	firstIDMapping := firstMetadata.GetTargetIdMapping()
+	iter := 0
+	for name, oldT := range firstByName {
+		if iter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		iter++
+		for _, depID := range oldT.GetDirectDependencies() {
+			if depName := firstIDMapping[depID]; depName != "" {
+				firstEdges[packEdge(edgeMapper.ID(name), edgeMapper.ID(depName))] = struct{}{}
+			}
+		}
+		if _, exists := secondByName[name]; !exists {
+			*removedTargets = append(*removedTargets, mappers.transpose(oldT, firstMetadata))
+		}
+	}
+	return nil
+}
+
+// diffEdges returns (added, removed) edge lists from the two packed edge sets.
+// Packed IDs are resolved back to names via edgeMapper, then re-projected
+// through the output target mapper so edge endpoints share the response
+// namespace.
+func diffEdges(
+	ctx context.Context,
+	secondEdges, firstEdges map[uint64]struct{},
+	edgeMapper *common.NameIDMapper,
+	mappers *idMappers,
+) (newEdges, removedEdges []*pb.Edge, err error) {
+	edgeNames := edgeMapper.Invert()
+
+	if newEdges, err = collectEdgeDelta(ctx, secondEdges, firstEdges, edgeNames, mappers); err != nil {
+		return nil, nil, err
+	}
+	if removedEdges, err = collectEdgeDelta(ctx, firstEdges, secondEdges, edgeNames, mappers); err != nil {
+		return nil, nil, err
+	}
+	return newEdges, removedEdges, nil
+}
+
+// collectEdgeDelta returns edges in `from` that are not in `to`, projected
+// into the output target ID namespace.
+func collectEdgeDelta(
+	ctx context.Context,
+	from, to map[uint64]struct{},
+	edgeNames map[int32]string,
+	mappers *idMappers,
+) ([]*pb.Edge, error) {
+	var out []*pb.Edge
+	iter := 0
+	for e := range from {
+		if iter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		iter++
+		if _, exists := to[e]; exists {
+			continue
+		}
+		srcID, depID := unpackEdge(e)
+		out = append(out, &pb.Edge{
+			SourceId: mappers.targets.ID(edgeNames[srcID]),
+			TargetId: mappers.targets.ID(edgeNames[depID]),
+		})
+	}
+	return out, nil
+}
+
+// assembleChangedTargetsAndEdgesResponse chunks targets/edges and appends the
+// canonical metadata. Edges are tiny and always fit in a single envelope.
+func (c *controller) assembleChangedTargetsAndEdgesResponse(
+	changedByName map[string]*pb.ChangedTarget,
+	addedTargets, removedTargets []*pb.OptimizedTarget,
+	newEdges, removedEdges []*pb.Edge,
+	mappers *idMappers,
+) []*pb.GetChangedTargetsAndEdgesResponse {
 	changed := make([]*pb.ChangedTarget, 0, len(changedByName))
 	for _, ct := range changedByName {
 		changed = append(changed, ct)
 	}
 
-	// 7) Single pass over first graph: collect removed targets and build first edge set.
-	firstIDMapping := firstMetadata.GetTargetIdMapping()
-	firstEdges := make(map[uint64]struct{})
-	var removedTargets []*pb.OptimizedTarget
-	removedIter := 0
-	for name, oldT := range firstByName {
-		if removedIter%cancelCheckInterval == 0 && ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		removedIter++
-		// Build first edge set inline to avoid a separate iteration.
-		for _, depID := range oldT.GetDirectDependencies() {
-			if depName := firstIDMapping[depID]; depName != "" {
-				firstEdges[packEdge(getEdgeID(name), getEdgeID(depName))] = struct{}{}
-			}
-		}
-		if _, exists := secondByName[name]; !exists {
-			removedTargets = append(removedTargets, transposeOptimizedTarget(
-				oldT,
-				firstIDMapping,
-				firstMetadata.GetRuleTypeMapping(),
-				firstMetadata.GetTagMapping(),
-				firstMetadata.GetAttributeNameMapping(),
-				firstMetadata.GetAttributeStringValueMapping(),
-				getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
-			))
-		}
-	}
-
-	// 8) Compute new and removed edges from the sets built above.
-	// Invert edgeMapper once to resolve packed IDs back to names for the output edges.
-	edgeNames := edgeMapper.Invert()
-	var newEdges []*pb.Edge
-	newEdgeIter := 0
-	for e := range secondEdges {
-		if newEdgeIter%cancelCheckInterval == 0 && ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		newEdgeIter++
-		if _, exists := firstEdges[e]; !exists {
-			srcName := edgeNames[int32(e>>32)]
-			depName := edgeNames[int32(e&0xFFFFFFFF)]
-			newEdges = append(newEdges, &pb.Edge{
-				SourceId: getTargetId(srcName),
-				TargetId: getTargetId(depName),
-			})
-		}
-	}
-	var removedEdges []*pb.Edge
-	removedEdgeIter := 0
-	for e := range firstEdges {
-		if removedEdgeIter%cancelCheckInterval == 0 && ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		removedEdgeIter++
-		if _, exists := secondEdges[e]; !exists {
-			srcName := edgeNames[int32(e>>32)]
-			depName := edgeNames[int32(e&0xFFFFFFFF)]
-			removedEdges = append(removedEdges, &pb.Edge{
-				SourceId: getTargetId(srcName),
-				TargetId: getTargetId(depName),
-			})
-		}
-	}
-	// Release edge maps and name table — no longer needed.
-	secondEdges = nil
-	firstEdges = nil
-
-	// 10) Build canonical metadata.
-
-	totalDuration := time.Since(start)
-	logger.Info("compareTargetGraphsAndEdges: Done",
-		zap.Duration("total_duration", totalDuration),
-	)
-	scope.Timer("total_duration").Record(totalDuration)
-
-	// Chunk changed/added/removed targets to stay within the 64MB default gRPC per-message limit.
 	var responses []*pb.GetChangedTargetsAndEdgesResponse
+	appendCTEPayload := func(p *pb.ChangedTargetsAndEdges) {
+		responses = append(responses, &pb.GetChangedTargetsAndEdgesResponse{
+			Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{ChangedTargetsAndEdges: p},
+		})
+	}
+
 	for i := 0; i < len(changed); i += c.changedTargetChunkSize {
 		end := min(i+c.changedTargetChunkSize, len(changed))
-		responses = append(responses, &pb.GetChangedTargetsAndEdgesResponse{
-			Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
-				ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{ChangedTargets: changed[i:end]},
-			},
-		})
+		appendCTEPayload(&pb.ChangedTargetsAndEdges{ChangedTargets: changed[i:end]})
 	}
 	for i := 0; i < len(addedTargets); i += c.targetChunkSize {
 		end := min(i+c.targetChunkSize, len(addedTargets))
-		responses = append(responses, &pb.GetChangedTargetsAndEdgesResponse{
-			Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
-				ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{AddedTargets: addedTargets[i:end]},
-			},
-		})
+		appendCTEPayload(&pb.ChangedTargetsAndEdges{AddedTargets: addedTargets[i:end]})
 	}
 	for i := 0; i < len(removedTargets); i += c.targetChunkSize {
 		end := min(i+c.targetChunkSize, len(removedTargets))
-		responses = append(responses, &pb.GetChangedTargetsAndEdgesResponse{
-			Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
-				ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{RemovedTargets: removedTargets[i:end]},
-			},
-		})
+		appendCTEPayload(&pb.ChangedTargetsAndEdges{RemovedTargets: removedTargets[i:end]})
 	}
-	// Edges are tiny (2 int32s each) and always fit in one message.
 	if len(newEdges) > 0 || len(removedEdges) > 0 {
-		responses = append(responses, &pb.GetChangedTargetsAndEdgesResponse{
-			Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
-				ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{NewEdges: newEdges, RemovedEdges: removedEdges},
-			},
-		})
+		appendCTEPayload(&pb.ChangedTargetsAndEdges{NewEdges: newEdges, RemovedEdges: removedEdges})
 	}
-	// Emit an empty chunk when there are no changes at all, so the stream is never empty.
 	if len(responses) == 0 {
-		responses = append(responses, &pb.GetChangedTargetsAndEdgesResponse{
-			Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
-				ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{},
-			},
-		})
+		// Emit an empty chunk when there are no changes at all, so the stream is never empty.
+		appendCTEPayload(&pb.ChangedTargetsAndEdges{})
 	}
-	for _, meta := range common.ChunkMetadata(
-		targetMapper.Invert(),
-		ruleTypeMapper.Invert(),
-		tagMapper.Invert(),
-		attrNameMapper.Invert(),
-		attrValMapper.Invert(),
-		c.metadataMapChunkSize,
-	) {
+	for _, meta := range mappers.chunkMetadata(c.metadataMapChunkSize) {
 		responses = append(responses, &pb.GetChangedTargetsAndEdgesResponse{
 			Item: &pb.GetChangedTargetsAndEdgesResponse_Metadata{Metadata: meta},
 		})
 	}
-
-	return responses, nil
+	return responses
 }
 
 // buildEdgeSet constructs a set of (source, dep) name pairs from all direct dependencies in the graph.
@@ -593,9 +465,9 @@ func buildEdgeSet(byName map[string]*pb.OptimizedTarget, meta *pb.Metadata) map[
 }
 
 // sendWithDistanceFilterForEdges streams responses, filtering changed_targets by
-// BFS distance when maxDist >= 0. Added/removed targets
-// and edges pass through unchanged — they represent graph topology deltas that
-// are not ranked by distance from a CHANGE_TYPE_DIRECT seed.
+// BFS distance when maxDist >= 0. Added/removed targets and edges pass through
+// unchanged — they represent graph topology deltas that are not ranked by
+// distance from a CHANGE_TYPE_DIRECT seed.
 func sendWithDistanceFilterForEdges(
 	stream pb.TangoServiceGetChangedTargetsAndEdgesYARPCServer,
 	responses []*pb.GetChangedTargetsAndEdgesResponse,
@@ -606,11 +478,10 @@ func sendWithDistanceFilterForEdges(
 		if maxDist >= 0 {
 			if cte, ok := resp.GetItem().(*pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges); ok {
 				payload := cte.ChangedTargetsAndEdges
-				kept := filterChangedTargetsByDistance(payload.GetChangedTargets(), maxDist)
 				toSend = &pb.GetChangedTargetsAndEdgesResponse{
 					Item: &pb.GetChangedTargetsAndEdgesResponse_ChangedTargetsAndEdges{
 						ChangedTargetsAndEdges: &pb.ChangedTargetsAndEdges{
-							ChangedTargets: kept,
+							ChangedTargets: filterChangedTargetsByDistance(payload.GetChangedTargets(), maxDist),
 							AddedTargets:   payload.GetAddedTargets(),
 							RemovedTargets: payload.GetRemovedTargets(),
 							NewEdges:       payload.GetNewEdges(),
@@ -628,34 +499,10 @@ func sendWithDistanceFilterForEdges(
 }
 
 // validateGetChangedTargetsAndEdgesRequest enforces the same invariants as
-// validateGetChangedTargetsRequest: both revisions present, both populated
-// with a remote and base SHA, and both pointing at the same remote.
+// validateGetChangedTargetsRequest by delegating to validateRevisionPair.
 func validateGetChangedTargetsAndEdgesRequest(request *pb.GetChangedTargetsAndEdgesRequest) error {
 	if request == nil {
 		return errors.New("request cannot be nil")
 	}
-	if request.GetFirstRevision() == nil {
-		return errors.New("first revision is required")
-	}
-	if request.GetSecondRevision() == nil {
-		return errors.New("second revision is required")
-	}
-	firstRevision := request.GetFirstRevision()
-	if firstRevision.GetRemote() == "" {
-		return errors.New("first revision remote is required")
-	}
-	if firstRevision.GetBaseSha() == "" {
-		return errors.New("first revision base_sha is required")
-	}
-	secondRevision := request.GetSecondRevision()
-	if secondRevision.GetRemote() == "" {
-		return errors.New("second revision remote is required")
-	}
-	if secondRevision.GetBaseSha() == "" {
-		return errors.New("second revision base_sha is required")
-	}
-	if firstRevision.GetRemote() != secondRevision.GetRemote() {
-		return errors.New("first and second revision must have the same remote")
-	}
-	return nil
+	return validateRevisionPair(request.GetFirstRevision(), request.GetSecondRevision())
 }

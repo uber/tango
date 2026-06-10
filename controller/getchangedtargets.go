@@ -18,24 +18,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"time"
 
+	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
-
-// job represents a single goroutine of getting a target graph
-type job struct {
-	graphStreamChunks []*pb.GetTargetGraphResponse
-	err               error
-	cancelled         bool
-	completed         bool
-	ctx               context.Context
-	cancel            context.CancelFunc
-}
 
 // GetChangedTargets returns the changed targets between two revisions. If the
 // client disconnects, the stream's context is cancelled and the function
@@ -43,207 +33,53 @@ type job struct {
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets")
 	scope.Counter("calls").Inc(1)
-	defer func() {
-		if retErr != nil {
-			scope.Counter("failure").Inc(1)
-			emitFailureMetric(scope, retErr)
-		} else {
-			scope.Counter("success").Inc(1)
-		}
-	}()
+	defer recordRPCResult(scope, &retErr)
+
 	if err := validateGetChangedTargetsRequest(request); err != nil {
 		c.logger.Error("GetChangedTargets: Invalid request", zap.Error(err))
 		return common.WithReason(failureReasonValidation, common.ErrorTypeUser, err)
 	}
-	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
+
+	first, second := request.GetFirstRevision(), request.GetSecondRevision()
+	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(first.GetRemote())})
 	ctx := stream.Context()
 	start := time.Now()
 	logger := c.logger.With(
-		zap.Any("first_revision", request.GetFirstRevision()),
-		zap.Any("second_revision", request.GetSecondRevision()),
+		zap.Any("first_revision", first),
+		zap.Any("second_revision", second),
 	)
-
 	logger.Info("GetChangedTargets: Processing request")
 
-	maxDist := resolveMaxDistance(c.getRepoConfig(request.GetFirstRevision().GetRemote()), request.GetOutputConfig())
+	maxDist := resolveMaxDistance(c.getRepoConfig(first.GetRemote()), request.GetOutputConfig())
 
 	// Try to serve from cache first using the stored treehashes for both revisions.
-	// readTreehash returns "" on any miss/error so we silently skip the cache when
-	// either treehash is not yet available.
 	if !request.GetBypassCache() {
-		cacheStart := time.Now()
-		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
-		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
-		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
-			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
-			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
-				logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
-			} else if cachedReader != nil {
-				// Buffer all responses before sending any. A concurrent goroutine write may have
-				// left a partial blob in storage; buffering lets us detect corruption and fall
-				// through to recompute before we've sent anything to the client.
-				var cached []*pb.GetChangedTargetsResponse
-				var readErr error
-				for {
-					var resp *pb.GetChangedTargetsResponse
-					resp, readErr = cachedReader.Read()
-					if readErr == io.EOF {
-						readErr = nil
-						break
-					}
-					if readErr != nil {
-						break
-					}
-					cached = append(cached, resp)
-				}
-				cachedReader.Close()
-
-				if readErr != nil {
-					// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
-					logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
-				} else {
-					cacheReadDuration := time.Since(cacheStart)
-					logger.Info("GetChangedTargets: Cache hit, streaming from storage",
-						zap.Duration("cache_read_duration", cacheReadDuration),
-					)
-					scope.Counter("cache_hit").Inc(1)
-					scope.Timer("cache_read_duration").Record(cacheReadDuration)
-					if sendErr := sendWithDistanceFilter(stream, cached, maxDist); sendErr != nil {
-						logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
-						return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send cached response: %w", sendErr))
-					}
-					totalDuration := time.Since(start)
-					logger.Info("GetChangedTargets: Successfully streamed from cache",
-						zap.Duration("total_duration", totalDuration),
-					)
-					scope.Timer("total_duration").Record(totalDuration)
-					return nil
-				}
-			}
+		if served, err := c.tryServeChangedTargetsFromCache(ctx, logger, scope, stream, request, maxDist); err != nil {
+			return err
+		} else if served {
+			scope.Timer("total_duration").Record(time.Since(start))
+			return nil
 		}
 	}
 
-	jobs := make([]*job, 2)
-
-	for i := 0; i < 2; i++ {
-		// create independent contexts for each job; if one of the jobs fails, the other one should be cancelled to save resources and improve latency
-		ctxNew, cancelNew := context.WithCancel(ctx)
-		defer cancelNew()
-		jobs[i] = &job{ctx: ctxNew, cancel: cancelNew}
-	}
-
-	// Start jobs for both revisions. Success or failure, the result will report to the results channel.
-	type graphResult struct {
-		// order is 0 or 1, 0 is the base (first) revision, 1 is the target (second) revision
-		order  int
-		chunks []*pb.GetTargetGraphResponse
-		err    error
-	}
-	results := make(chan graphResult, len(jobs))
-	graphFetchStart := time.Now()
-
-	for i := 0; i < len(jobs); i++ {
-		i := i
-		go func(idx int) {
-			defer func() {
-				if r := recover(); r != nil {
-					results <- graphResult{order: idx, err: fmt.Errorf("panic in graph fetch: %v", r)}
-				}
-			}()
-			var revision *pb.BuildDescription
-			if idx == 0 {
-				revision = request.GetFirstRevision()
-			} else {
-				revision = request.GetSecondRevision()
-			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
-			if err != nil || graphReader == nil {
-				results <- graphResult{order: idx, err: err}
-				return
-			}
-			defer graphReader.Close()
-
-			// Read all chunks from the stream
-			var chunks []*pb.GetTargetGraphResponse
-			for {
-				chunk, err := graphReader.Read()
-				if err == io.EOF {
-					results <- graphResult{order: idx, chunks: chunks}
-					return
-				}
-				if err != nil {
-					results <- graphResult{order: idx, err: err}
-					return
-				}
-				chunks = append(chunks, chunk)
-			}
-		}(i)
-	}
-
-	// Wait for both results to complete, either successfully or with an error.
-	for range jobs {
-		select {
-		case res := <-results:
-			jobs[res.order].graphStreamChunks = res.chunks
-			jobs[res.order].completed = true
-			jobs[res.order].err = res.err
-			if res.chunks == nil && res.err == nil {
-				jobs[res.order].err = errors.New("no chunks returned")
-			}
-
-			// one of the computations failed, if the other one has not
-			// completed yet, cancel it and wait for the result to come in,
-			// which would be a context cancelled result then
-			if jobs[res.order].err != nil {
-				other := (res.order + 1) % 2
-				if !jobs[other].completed {
-					jobs[other].cancel()
-					// explicitly mark that this job is cancelled, so we can
-					// ignore its error later
-					jobs[other].cancelled = true
-				}
-			}
+	graphs, err := c.fetchTwoGraphs(ctx, first, second, request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return common.WithReason(failureReasonCancelled, common.ErrorTypeUser, err)
 		}
+		return err
 	}
-
-	graphFetchDuration := time.Since(graphFetchStart)
+	graphFetchDuration := time.Since(start)
 	logger.Info("GetChangedTargets: Both graphs fetched",
 		zap.Duration("graph_fetch_duration", graphFetchDuration),
 	)
 	scope.Timer("graph_fetch_duration").Record(graphFetchDuration)
 
-	if ctx.Err() != nil {
-		// If the context was cancelled by the upstream, just return the original error without additional augmentation
-		return common.WithReason(failureReasonCancelled, common.ErrorTypeUser, ctx.Err())
-	}
-
-	// Process errors, only aggregating the ones that are original ones and not a result of the other job being cancelled
-	var err error
-	for i, job := range jobs {
-		if job.err != nil {
-			if job.cancelled {
-				// this only happens as a result of the other job failing, so we can ignore the error
-				continue
-			}
-			err = errors.Join(err, fmt.Errorf("failed to get target graph #%d: %w", i+1, job.err))
-		}
-	}
-
-	if err != nil {
-		return err
-	}
-	firstGraph := jobs[0].graphStreamChunks
-	secondGraph := jobs[1].graphStreamChunks
-	// Drop job references so the GC can reclaim them once the comparison is done.
-	jobs[0].graphStreamChunks = nil
-	jobs[1].graphStreamChunks = nil
-
 	compareStart := time.Now()
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, logger, firstGraph, secondGraph, maxDist, request.GetOutputConfig().GetComputeDistances())
-	// Allow GC of raw graph data while the caching goroutine runs.
-	firstGraph = nil
-	secondGraph = nil
+	responses, err := c.compareTargetGraphs(ctx, logger, graphs[0], graphs[1], maxDist, request.GetOutputConfig().GetComputeDistances())
+	// Drop graph references so the GC can reclaim them while the caching goroutine runs.
+	graphs[0] = nil
+	graphs[1] = nil
 	if err != nil {
 		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
 		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))
@@ -257,34 +93,83 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// Cache the computed result concurrently so it doesn't block the stream send.
 	// Re-read treehashes inside the goroutine — the orchestrator may have stored them
 	// during computation. Both the goroutine and the send loop below only read
-	// changedTargetsResponses, so concurrent access is safe.
-	go func() {
-		cacheCtx := context.Background()
-		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision())
-		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision())
-		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
-			if writeErr := storage.WriteChangedTargetsStream(cacheCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
-				logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
-			}
-		}
-	}()
+	// responses, so concurrent access is safe.
+	go c.cacheChangedTargetsAsync(logger, first, second, request.GetRequestOptions(), responses)
 
 	sendStart := time.Now()
-	if err := sendWithDistanceFilter(stream, changedTargetsResponses, maxDist); err != nil {
+	if err := sendWithDistanceFilter(stream, responses, maxDist); err != nil {
 		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
 		return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send response: %w", err))
 	}
 	sendDuration := time.Since(sendStart)
-	scope.Timer("send_duration").Record(sendDuration)
-
 	totalDuration := time.Since(start)
 	logger.Info("GetChangedTargets: Successfully processed request",
 		zap.Duration("send_duration", sendDuration),
 		zap.Duration("total_duration", totalDuration),
 	)
+	scope.Timer("send_duration").Record(sendDuration)
 	scope.Timer("total_duration").Record(totalDuration)
 	return nil
+}
+
+// tryServeChangedTargetsFromCache returns (true, nil) when a cache hit was
+// served end-to-end to the client. (false, nil) means cache miss/corrupt — the
+// caller should fall through and recompute. A non-nil error is returned only
+// when a downstream send fails after a hit.
+func (c *controller) tryServeChangedTargetsFromCache(
+	ctx context.Context,
+	logger *zap.Logger,
+	scope tally.Scope,
+	stream pb.TangoServiceGetChangedTargetsYARPCServer,
+	request *pb.GetChangedTargetsRequest,
+	maxDist int32,
+) (bool, error) {
+	first, second := request.GetFirstRevision(), request.GetSecondRevision()
+	treehash1, treehash2, ok := readTreehashPair(ctx, c.storage, first, second)
+	if !ok {
+		return false, nil
+	}
+	cacheStart := time.Now()
+	cacheKey := common.GetComparedTargetsCachePath(first.GetRemote(), treehash1, treehash2, request.GetRequestOptions())
+
+	cached, hit := loadCachedResponses(ctx, logger, "GetChangedTargets", func(ctx context.Context) (cacheReader[*pb.GetChangedTargetsResponse], error) {
+		return storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
+	})
+	if !hit {
+		return false, nil
+	}
+	cacheReadDuration := time.Since(cacheStart)
+	logger.Info("GetChangedTargets: Cache hit, streaming from storage",
+		zap.Duration("cache_read_duration", cacheReadDuration),
+	)
+	scope.Counter("cache_hit").Inc(1)
+	scope.Timer("cache_read_duration").Record(cacheReadDuration)
+	if err := sendWithDistanceFilter(stream, cached, maxDist); err != nil {
+		logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(err))
+		return false, common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send cached response: %w", err))
+	}
+	logger.Info("GetChangedTargets: Successfully streamed from cache")
+	return true, nil
+}
+
+// cacheChangedTargetsAsync writes the computed result back to storage. Runs
+// in its own goroutine so it cannot block the response stream. Failures are
+// logged and otherwise ignored.
+func (c *controller) cacheChangedTargetsAsync(
+	logger *zap.Logger,
+	first, second *pb.BuildDescription,
+	requestOptions *pb.RequestOptions,
+	responses []*pb.GetChangedTargetsResponse,
+) {
+	cacheCtx := context.Background()
+	treehash1, treehash2, ok := readTreehashPair(cacheCtx, c.storage, first, second)
+	if !ok {
+		return
+	}
+	cacheKey := common.GetComparedTargetsCachePath(first.GetRemote(), treehash1, treehash2, requestOptions)
+	if err := storage.WriteChangedTargetsStream(cacheCtx, c.storage, cacheKey, responses); err != nil {
+		logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(err))
+	}
 }
 
 // compareTargetGraphs diffs two target graph streams and produces a chunked
@@ -295,174 +180,78 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 // requested or when filtering by distance is active. Output IDs are
 // re-mapped into a canonical per-call namespace so the response metadata
 // only carries the names actually referenced.
-func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(
+	ctx context.Context,
+	logger *zap.Logger,
+	firstGraph, secondGraph []*pb.GetTargetGraphResponse,
+	maxDist int32,
+	outputDistances bool,
+) ([]*pb.GetChangedTargetsResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs")
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
 
-	// 1) Extract targets and metadata; index by canonical names
-	indexStart := time.Now()
-	firstTargetsByID, firstMetadata, err := getTargetsAndMetadata(ctx, firstGraph)
+	firstByName, firstMetadata, secondByName, secondMetadata, err := indexGraphsByName(ctx, scope, firstGraph, secondGraph)
 	if err != nil {
 		return nil, err
 	}
-	secondTargetsByID, secondMetadata, err := getTargetsAndMetadata(ctx, secondGraph)
-	if err != nil {
-		return nil, err
-	}
-	// Release raw chunk slices — individual target protos are now held by the ID maps.
+	// Raw chunk slices are no longer referenced once both graphs are indexed.
 	firstGraph = nil
 	secondGraph = nil
-	firstByName, err := buildNameIndex(ctx, firstTargetsByID, firstMetadata)
-	if err != nil {
-		return nil, err
-	}
-	firstTargetsByID = nil // all pointers are now in firstByName; drop the duplicate map
-	secondByName, err := buildNameIndex(ctx, secondTargetsByID, secondMetadata)
-	if err != nil {
-		return nil, err
-	}
-	secondTargetsByID = nil
-	indexDuration := time.Since(indexStart)
-	scope.Timer("index_duration").Record(indexDuration)
-
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
 
 	sourceFileRuleTypeID := detectSourceFileID(secondMetadata)
-
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
-	changedByName := make(map[string]*pb.ChangedTarget)
+	mappers := newIDMappers()
+	changedByName := make(map[string]*pb.ChangedTarget, len(secondByName))
 	changedSourceFileTargets := make(map[string]struct{})
 
-	// 3) Create canonical mappers for IDs (targets, rule types, tags, attributes)
-	targetMapper := common.NewNameIDMapper()
-	ruleTypeMapper := common.NewNameIDMapper()
-	tagMapper := common.NewNameIDMapper()
-	attrNameMapper := common.NewNameIDMapper()
-	attrValMapper := common.NewNameIDMapper()
-	// These functions are used to transpose the target into the canonical ID space.
-	// When called, we attempt to find the ID for the name in the metadata and return the ID.
-	getTargetId := func(name string) int32 { return targetMapper.ID(name) }
-	getRuleTypeId := func(name string) int32 { return ruleTypeMapper.ID(name) }
-	getTagId := func(name string) int32 { return tagMapper.ID(name) }
-	getAttrNameId := func(name string) int32 { return attrNameMapper.ID(name) }
-	getAttrValId := func(name string) int32 { return attrValMapper.ID(name) }
-
-	// Identify changed targets and collect changed source files
 	diffScanStart := time.Now()
 	for name, newT := range secondByName {
 		oldT, exists := firstByName[name]
 		if !exists {
-			// new target -> new
 			changedByName[name] = &pb.ChangedTarget{
 				ChangeType: pb.CHANGE_TYPE_NEW,
-				NewTarget: transposeOptimizedTarget(
-					newT,
-					secondMetadata.GetTargetIdMapping(),
-					secondMetadata.GetRuleTypeMapping(),
-					secondMetadata.GetTagMapping(),
-					secondMetadata.GetAttributeNameMapping(),
-					secondMetadata.GetAttributeStringValueMapping(),
-					getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
-				),
-				Distance: getDefaultDistance(maxDist, outputDistances, true),
+				NewTarget:  mappers.transpose(newT, secondMetadata),
+				Distance:   getDefaultDistance(maxDist, outputDistances, true),
 			}
 			continue
 		}
 		if oldT.GetHash() == newT.GetHash() {
-			// same hash -> unchanged
 			continue
 		}
 		initial := pb.CHANGE_TYPE_INDIRECT
-		// If we know the source file rule type, classify changes accordingly.
-		// Otherwise, leave as UNSPECIFIED.
-		// check if the target is a source file, if so, it is a direct change
-		isSource := newT.GetRuleType() == sourceFileRuleTypeID && sourceFileRuleTypeID != -1
-		if isSource {
+		// Source-file targets are leaf inputs and any hash change is a direct edit.
+		if sourceFileRuleTypeID != -1 && newT.GetRuleType() == sourceFileRuleTypeID {
 			initial = pb.CHANGE_TYPE_DIRECT
-			// Save the target name to the set of changed source file targets.
-			// This is used to check if the source file is a direct dependencies of other targets.
 			changedSourceFileTargets[name] = struct{}{}
 		}
-		// Transpose the target into ID, using the existing metadata mappings from the second revision.
-		newTarget := transposeOptimizedTarget(
-			newT,
-			secondMetadata.GetTargetIdMapping(),
-			secondMetadata.GetRuleTypeMapping(),
-			secondMetadata.GetTagMapping(),
-			secondMetadata.GetAttributeNameMapping(),
-			secondMetadata.GetAttributeStringValueMapping(),
-			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
-		)
-		// Transpose the target into ID. The target will be mapped to the IDs in the second revision,
-		//  so the resulting IDs will be consistent with the second revision.
-		oldTarget := transposeOptimizedTarget(
-			oldT,
-			firstMetadata.GetTargetIdMapping(),
-			firstMetadata.GetRuleTypeMapping(),
-			firstMetadata.GetTagMapping(),
-			firstMetadata.GetAttributeNameMapping(),
-			firstMetadata.GetAttributeStringValueMapping(),
-			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
-		)
 		changedByName[name] = &pb.ChangedTarget{
 			ChangeType: initial,
-			OldTarget:  oldTarget,
-			NewTarget:  newTarget,
+			OldTarget:  mappers.transpose(oldT, firstMetadata),
+			NewTarget:  mappers.transpose(newT, secondMetadata),
 			Distance:   getDefaultDistance(maxDist, outputDistances, false),
 		}
 	}
-	diffScanDuration := time.Since(diffScanStart)
-	scope.Timer("diff_scan_duration").Record(diffScanDuration)
+	scope.Timer("diff_scan_duration").Record(time.Since(diffScanStart))
 
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
-	// Iterate over the changed targets and check if any of them are DIRECT changes.
+	// Promote eligible INDIRECT changes to DIRECT.
 	classifyStart := time.Now()
 	for name, ct := range changedByName {
-		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
-			// Already marked as direct or new
-			continue
-		}
-		newT := secondByName[name]
-		oldT := firstByName[name]
-
-		// Check if any dependency is a changed source file
-		if hasDepInChangedSourceFileTargets(newT.GetDirectDependencies(), secondMetadata, changedSourceFileTargets) {
-			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
-			continue
-		}
-
-		// Check if direct dependencies changed
-		depsChanged, err := dependenciesChanged(oldT, firstMetadata, newT, secondMetadata)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check dependencies changed: %w", err)
-		}
-		if depsChanged {
-			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
-			continue
-		}
-		// Check if attributes changed
-		attrsChanged, err := attributesChanged(oldT, firstMetadata, newT, secondMetadata)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check attributes changed: %w", err)
-		}
-		if attrsChanged {
-			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
+		if err := promoteToDirectIfNeeded(ct, firstByName[name], secondByName[name], firstMetadata, secondMetadata, changedSourceFileTargets); err != nil {
+			return nil, err
 		}
 	}
-	classifyDuration := time.Since(classifyStart)
-	scope.Timer("classify_duration").Record(classifyDuration)
+	scope.Timer("classify_duration").Record(time.Since(classifyStart))
 
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// Compute BFS distances when filtering is active or the client requested distance output.
@@ -471,62 +260,86 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 		if err := computeDistances(ctx, c.logger, changedByName, secondByName, secondMetadata, maxDist); err != nil {
 			return nil, err
 		}
-		distancesDuration := time.Since(distancesStart)
-		scope.Timer("distances_duration").Record(distancesDuration)
+		scope.Timer("distances_duration").Record(time.Since(distancesStart))
 	}
 
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
-	// Collect changed targets.
+	responses := c.assembleChangedTargetsResponse(changedByName, mappers)
+
+	totalDuration := time.Since(start)
+	logger.Info("compareTargetGraphs: Done", zap.Duration("total_duration", totalDuration))
+	scope.Timer("total_duration").Record(totalDuration)
+	return responses, nil
+}
+
+// indexGraphsByName extracts targets+metadata from both graph streams and
+// builds per-revision name->target indexes. Records the index timer on scope.
+func indexGraphsByName(
+	ctx context.Context,
+	scope tally.Scope,
+	firstGraph, secondGraph []*pb.GetTargetGraphResponse,
+) (map[string]*pb.OptimizedTarget, *pb.Metadata, map[string]*pb.OptimizedTarget, *pb.Metadata, error) {
+	indexStart := time.Now()
+	firstTargetsByID, firstMetadata, err := getTargetsAndMetadata(ctx, firstGraph)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	secondTargetsByID, secondMetadata, err := getTargetsAndMetadata(ctx, secondGraph)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	firstByName, err := buildNameIndex(ctx, firstTargetsByID, firstMetadata)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	// firstTargetsByID's pointers are now held by firstByName; drop the duplicate map.
+	firstTargetsByID = nil
+	secondByName, err := buildNameIndex(ctx, secondTargetsByID, secondMetadata)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	secondTargetsByID = nil
+	scope.Timer("index_duration").Record(time.Since(indexStart))
+	return firstByName, firstMetadata, secondByName, secondMetadata, nil
+}
+
+// assembleChangedTargetsResponse turns the in-memory diff state into the
+// chunked response stream. Targets are emitted first (always at least one
+// envelope, even when there are no changes), followed by chunked metadata.
+func (c *controller) assembleChangedTargetsResponse(
+	changedByName map[string]*pb.ChangedTarget,
+	mappers *idMappers,
+) []*pb.GetChangedTargetsResponse {
 	changed := make([]*pb.ChangedTarget, 0, len(changedByName))
 	for _, ct := range changedByName {
 		changed = append(changed, ct)
 	}
 
-	// Emit changes in chunks to stay within gRPC per-message size limits, followed by chunked metadata.
-	var results []*pb.GetChangedTargetsResponse
+	var responses []*pb.GetChangedTargetsResponse
 	for i := 0; i < len(changed); i += c.changedTargetChunkSize {
-		end := i + c.changedTargetChunkSize
-		if end > len(changed) {
-			end = len(changed)
-		}
-		results = append(results, &pb.GetChangedTargetsResponse{
+		end := min(i+c.changedTargetChunkSize, len(changed))
+		responses = append(responses, &pb.GetChangedTargetsResponse{
 			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-				ChangedTargets: &pb.ChangedTargets{
-					ChangedTargets: changed[i:end],
-				},
+				ChangedTargets: &pb.ChangedTargets{ChangedTargets: changed[i:end]},
 			},
 		})
 	}
-	if len(results) == 0 {
-		results = append(results, &pb.GetChangedTargetsResponse{
+	if len(responses) == 0 {
+		responses = append(responses, &pb.GetChangedTargetsResponse{
 			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
 				ChangedTargets: &pb.ChangedTargets{},
 			},
 		})
 	}
-	for _, meta := range common.ChunkMetadata(
-		targetMapper.Invert(),
-		ruleTypeMapper.Invert(),
-		tagMapper.Invert(),
-		attrNameMapper.Invert(),
-		attrValMapper.Invert(),
-		c.metadataMapChunkSize,
-	) {
-		results = append(results, &pb.GetChangedTargetsResponse{
-			Item: &pb.GetChangedTargetsResponse_Metadata{
-				Metadata: meta,
-			},
+	for _, meta := range mappers.chunkMetadata(c.metadataMapChunkSize) {
+		responses = append(responses, &pb.GetChangedTargetsResponse{
+			Item: &pb.GetChangedTargetsResponse_Metadata{Metadata: meta},
 		})
 	}
-	totalDuration := time.Since(start)
-	logger.Info("compareTargetGraphs: Done",
-		zap.Duration("total_duration", totalDuration),
-	)
-	scope.Timer("total_duration").Record(totalDuration)
-	return results, nil
+	return responses
 }
 
 // cancelCheckInterval is how often long-running loops check ctx.Err().
@@ -554,25 +367,30 @@ func getTargetsAndMetadata(ctx context.Context, graph []*pb.GetTargetGraphRespon
 				targets[t.GetId()] = t
 			}
 		case *pb.GetTargetGraphResponse_Metadata:
-			m := item.Metadata
-			for k, v := range m.GetTargetIdMapping() {
-				merged.TargetIdMapping[k] = v
-			}
-			for k, v := range m.GetRuleTypeMapping() {
-				merged.RuleTypeMapping[k] = v
-			}
-			for k, v := range m.GetTagMapping() {
-				merged.TagMapping[k] = v
-			}
-			for k, v := range m.GetAttributeNameMapping() {
-				merged.AttributeNameMapping[k] = v
-			}
-			for k, v := range m.GetAttributeStringValueMapping() {
-				merged.AttributeStringValueMapping[k] = v
-			}
+			mergeMetadata(merged, item.Metadata)
 		}
 	}
 	return targets, merged, nil
+}
+
+// mergeMetadata copies all five name mappings from src into dst, overwriting
+// any duplicate keys.
+func mergeMetadata(dst, src *pb.Metadata) {
+	for k, v := range src.GetTargetIdMapping() {
+		dst.TargetIdMapping[k] = v
+	}
+	for k, v := range src.GetRuleTypeMapping() {
+		dst.RuleTypeMapping[k] = v
+	}
+	for k, v := range src.GetTagMapping() {
+		dst.TagMapping[k] = v
+	}
+	for k, v := range src.GetAttributeNameMapping() {
+		dst.AttributeNameMapping[k] = v
+	}
+	for k, v := range src.GetAttributeStringValueMapping() {
+		dst.AttributeStringValueMapping[k] = v
+	}
 }
 
 // buildNameIndex creates name->target maps using the provided metadata information.
@@ -586,7 +404,7 @@ func buildNameIndex(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarg
 		i++
 		name, err := canonicalTargetName(id, meta)
 		if err != nil {
-			// If a target ID is missing in metadata, skip it.
+			// Targets with no metadata entry are unreferenced; drop them silently.
 			continue
 		}
 		byName[name] = t
@@ -594,12 +412,12 @@ func buildNameIndex(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarg
 	return byName, nil
 }
 
-// detectSourceFileID returns the literal rule type name for source file if present.
+// detectSourceFileID returns the rule-type ID for "source file" when present;
+// -1 otherwise. Used to classify hash changes on source-file targets as DIRECT.
 func detectSourceFileID(meta *pb.Metadata) int32 {
-	if meta == nil || len(meta.GetRuleTypeMapping()) == 0 {
+	if meta == nil {
 		return -1
 	}
-	// check the id in the rule type mapping for "source file"
 	for id, name := range meta.GetRuleTypeMapping() {
 		if name == "source file" {
 			return id
@@ -623,8 +441,9 @@ func hasDepInChangedSourceFileTargets(depIds []int32, meta *pb.Metadata, changed
 	if meta == nil {
 		return false
 	}
+	idMapping := meta.GetTargetIdMapping()
 	for _, id := range depIds {
-		name := meta.GetTargetIdMapping()[id]
+		name := idMapping[id]
 		if name == "" {
 			continue
 		}
@@ -643,33 +462,24 @@ func dependenciesChanged(oldTarget *pb.OptimizedTarget, oldMeta *pb.Metadata, ne
 
 	oldDepIDs := oldTarget.GetDirectDependencies()
 	newDepIDs := newTarget.GetDirectDependencies()
-
-	// Early exit: if lengths differ, dependencies changed
 	if len(oldDepIDs) != len(newDepIDs) {
 		return true, nil
 	}
-	// Early exit: if both are empty, no change
 	if len(oldDepIDs) == 0 {
 		return false, nil
 	}
-
-	// validate target names are equivalent.
 	if err := validateTargetNames(oldTarget, newTarget, oldMeta, newMeta); err != nil {
 		return false, fmt.Errorf("target names are different")
 	}
 
-	// Cache metadata mappings to avoid repeated map lookups
 	oldTargetIDMapping := oldMeta.GetTargetIdMapping()
 	newTargetIDMapping := newMeta.GetTargetIdMapping()
-	// Build set of new dependency names (only one set needed)
 	newDepSet := make(map[string]struct{}, len(newDepIDs))
 	for _, depID := range newDepIDs {
 		if name := newTargetIDMapping[depID]; name != "" {
 			newDepSet[name] = struct{}{}
 		}
 	}
-
-	// Check if all old deps exist in new deps
 	for _, depID := range oldDepIDs {
 		if name := oldTargetIDMapping[depID]; name != "" {
 			if _, exists := newDepSet[name]; !exists {
@@ -677,7 +487,6 @@ func dependenciesChanged(oldTarget *pb.OptimizedTarget, oldMeta *pb.Metadata, ne
 			}
 		}
 	}
-
 	return false, nil
 }
 
@@ -686,46 +495,38 @@ func attributesChanged(oldTarget *pb.OptimizedTarget, oldMeta *pb.Metadata, newT
 	if oldMeta == nil || newMeta == nil {
 		return false, nil
 	}
-	// validate target names are equivalent.
 	if err := validateTargetNames(oldTarget, newTarget, oldMeta, newMeta); err != nil {
 		return false, err
 	}
 
 	oldAttrIDs := oldTarget.GetAttributes()
 	newAttrIDs := newTarget.GetAttributes()
-
-	// Early exit: if lengths differ, attributes changed
 	if len(oldAttrIDs) != len(newAttrIDs) {
 		return true, nil
 	}
-
-	// Early exit: if both are empty, no change
 	if len(oldAttrIDs) == 0 {
 		return false, nil
 	}
 
-	// Cache metadata mappings to avoid repeated map lookups
 	oldAttrNameMapping := oldMeta.GetAttributeNameMapping()
 	oldAttrValMapping := oldMeta.GetAttributeStringValueMapping()
 	newAttrNameMapping := newMeta.GetAttributeNameMapping()
 	newAttrValMapping := newMeta.GetAttributeStringValueMapping()
 
-	// Build map of new attributes (only one map needed)
 	newAttrMap := make(map[string]string, len(newAttrIDs))
-	for attrNameID, attrValID := range newAttrIDs {
-		if attrName := newAttrNameMapping[attrNameID]; attrName != "" {
-			newAttrMap[attrName] = newAttrValMapping[attrValID]
+	for nameID, valID := range newAttrIDs {
+		if attrName := newAttrNameMapping[nameID]; attrName != "" {
+			newAttrMap[attrName] = newAttrValMapping[valID]
 		}
 	}
-
-	// Check if all old attributes match
-	for attrNameID, attrValID := range oldAttrIDs {
-		if attrName := oldAttrNameMapping[attrNameID]; attrName != "" {
-			oldVal := oldAttrValMapping[attrValID]
-			newVal, exists := newAttrMap[attrName]
-			if !exists || newVal != oldVal {
-				return true, nil
-			}
+	for nameID, valID := range oldAttrIDs {
+		attrName := oldAttrNameMapping[nameID]
+		if attrName == "" {
+			continue
+		}
+		newVal, exists := newAttrMap[attrName]
+		if !exists || newVal != oldAttrValMapping[valID] {
+			return true, nil
 		}
 	}
 	return false, nil
@@ -733,16 +534,16 @@ func attributesChanged(oldTarget *pb.OptimizedTarget, oldMeta *pb.Metadata, newT
 
 // validateTargetNames checks if the target names are the same between old and new targets, and exists in both metadata maps.
 func validateTargetNames(oldTarget, newTarget *pb.OptimizedTarget, oldMeta, newMeta *pb.Metadata) error {
-	oldTargetName, ok := oldMeta.GetTargetIdMapping()[oldTarget.GetId()]
+	oldName, ok := oldMeta.GetTargetIdMapping()[oldTarget.GetId()]
 	if !ok {
 		return fmt.Errorf("old target id %d not found in metadata", oldTarget.GetId())
 	}
-	newTargetName, ok := newMeta.GetTargetIdMapping()[newTarget.GetId()]
+	newName, ok := newMeta.GetTargetIdMapping()[newTarget.GetId()]
 	if !ok {
 		return fmt.Errorf("new target id %d not found in metadata", newTarget.GetId())
 	}
-	if oldTargetName != newTargetName {
-		return fmt.Errorf("target names are different %s != %s", oldTargetName, newTargetName)
+	if oldName != newName {
+		return fmt.Errorf("target names are different %s != %s", oldName, newName)
 	}
 	return nil
 }
@@ -770,20 +571,16 @@ func transposeOptimizedTarget(
 		Root:     src.GetRoot(),
 		External: src.GetExternal(),
 	}
-	// Direct deps
-	deps := src.GetDirectDependencies()
-	if len(deps) > 0 {
+	if deps := src.GetDirectDependencies(); len(deps) > 0 {
 		out := make([]int32, 0, len(deps))
 		for _, d := range deps {
 			out = append(out, getTargetId(oldTargetIdMap[d]))
 		}
 		dst.DirectDependencies = out
 	}
-	// Rule type
 	if rtName := oldRuleTypeIdMap[src.GetRuleType()]; rtName != "" {
 		dst.RuleType = getRuleTypeId(rtName)
 	}
-	// Tags
 	if tags := src.GetTags(); len(tags) > 0 {
 		out := make([]int32, 0, len(tags))
 		for _, tg := range tags {
@@ -791,13 +588,10 @@ func transposeOptimizedTarget(
 		}
 		dst.Tags = out
 	}
-	// Attributes
 	if attrs := src.GetAttributes(); len(attrs) > 0 {
 		out := make(map[int32]int32, len(attrs))
 		for k, v := range attrs {
-			name := attrNameIdMap[k]
-			val := attrValIdMap[v]
-			out[getAttrNameId(name)] = getAttrValId(val)
+			out[getAttrNameId(attrNameIdMap[k])] = getAttrValId(attrValIdMap[v])
 		}
 		dst.Attributes = out
 	}
@@ -839,26 +633,73 @@ func computeDistances(ctx context.Context, logger *zap.Logger, changedByName map
 	if meta == nil {
 		return nil
 	}
+	reverseDeps, err := buildReverseDeps(ctx, targetsByName, meta)
+	if err != nil {
+		return err
+	}
 
-	targetIDMapping := meta.GetTargetIdMapping()
+	queue, visited := seedBFSFromDirectChanges(changedByName)
 
-	// Build reverse dependency graph: if B depends on A, then A -> B.
-	reverseDeps := make(map[string][]string, len(targetsByName))
-	revDepIter := 0
-	for name, t := range targetsByName {
-		if revDepIter%cancelCheckInterval == 0 && ctx.Err() != nil {
+	iter := 0
+	for len(queue) > 0 {
+		if iter%cancelCheckInterval == 0 && ctx.Err() != nil {
 			return ctx.Err()
 		}
-		revDepIter++
-		for _, depID := range t.GetDirectDependencies() {
-			depName := targetIDMapping[depID]
-			if depName != "" {
-				reverseDeps[depName] = append(reverseDeps[depName], name)
+		iter++
+		current := queue[0]
+		queue = queue[1:]
+		currentDist := changedByName[current].GetDistance()
+
+		for _, revDep := range reverseDeps[current] {
+			if _, seen := visited[revDep]; seen {
+				continue
+			}
+			nextDist := currentDist + 1
+			if maxDistance >= 0 && nextDist > maxDistance {
+				continue
+			}
+			visited[revDep] = struct{}{}
+			queue = append(queue, revDep)
+			if ct, ok := changedByName[revDep]; ok {
+				ct.Distance = nextDist
 			}
 		}
 	}
 
-	// initialize all distances to -1, means not set, DIRECT and NEW targets at 0.
+	// Warn about INDIRECT targets with no path to a DIRECT change — likely a hashing bug.
+	for name, ct := range changedByName {
+		if ct.GetChangeType() == pb.CHANGE_TYPE_INDIRECT && ct.GetDistance() == -1 {
+			logger.Warn("computeDistances: INDIRECT target has no path to a DIRECT change, possible hashing issue",
+				zap.String("target", name),
+			)
+		}
+	}
+	return nil
+}
+
+// buildReverseDeps inverts the target dependency graph: if B depends on A,
+// reverseDeps[A] contains B. Used as the adjacency list for distance BFS.
+func buildReverseDeps(ctx context.Context, targetsByName map[string]*pb.OptimizedTarget, meta *pb.Metadata) (map[string][]string, error) {
+	idMapping := meta.GetTargetIdMapping()
+	reverseDeps := make(map[string][]string, len(targetsByName))
+	iter := 0
+	for name, t := range targetsByName {
+		if iter%cancelCheckInterval == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		iter++
+		for _, depID := range t.GetDirectDependencies() {
+			if depName := idMapping[depID]; depName != "" {
+				reverseDeps[depName] = append(reverseDeps[depName], name)
+			}
+		}
+	}
+	return reverseDeps, nil
+}
+
+// seedBFSFromDirectChanges initializes the BFS queue with DIRECT/NEW changes
+// (distance 0) and resets every other distance to -1.
+func seedBFSFromDirectChanges(changedByName map[string]*pb.ChangedTarget) ([]string, map[string]struct{}) {
 	var queue []string
 	visited := make(map[string]struct{}, len(changedByName))
 	for name, ct := range changedByName {
@@ -870,81 +711,16 @@ func computeDistances(ctx context.Context, logger *zap.Logger, changedByName map
 			ct.Distance = -1
 		}
 	}
-
-	// BFS from DIRECT targets through reverseDeps. Shortest distance wins.
-	bfsIter := 0
-	for len(queue) > 0 {
-		if bfsIter%cancelCheckInterval == 0 && ctx.Err() != nil {
-			return ctx.Err()
-		}
-		bfsIter++
-		current := queue[0]
-		queue = queue[1:]
-		currentDist := changedByName[current].GetDistance()
-
-		for _, revDep := range reverseDeps[current] {
-			// BFS guarantees shortest distance, so skip if already visited.
-			if _, seen := visited[revDep]; seen {
-				continue
-			}
-			nextDist := currentDist + 1
-			// Prune: if a maxDistance is set and the next distance exceeds it, skip.
-			if maxDistance >= 0 && nextDist > maxDistance {
-				continue
-			}
-			visited[revDep] = struct{}{}
-			queue = append(queue, revDep)
-
-			if ct, ok := changedByName[revDep]; ok {
-				ct.Distance = nextDist
-			}
-		}
-	}
-
-	// Just in case a target is marked changed but has no distance to DIRECT change.
-	// Warn about such cases. Probably a hashing bug.
-	for name, ct := range changedByName {
-		if ct.GetChangeType() == pb.CHANGE_TYPE_INDIRECT && ct.GetDistance() == -1 {
-			logger.Warn("computeDistances: INDIRECT target has no path to a DIRECT change, possible hashing issue",
-				zap.String("target", name),
-			)
-		}
-	}
-	return nil
+	return queue, visited
 }
 
-// validateGetChangedTargetsRequest enforces the minimal invariants the
-// comparison pipeline relies on: both revisions present, both populated
-// with a remote and base SHA, and both pointing at the same remote.
+// validateGetChangedTargetsRequest validates the GetChangedTargetsRequest by
+// delegating revision invariants to validateRevisionPair.
 func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) error {
 	if request == nil {
 		return errors.New("request cannot be nil")
 	}
-	if request.GetFirstRevision() == nil {
-		return errors.New("first revision is required")
-	}
-	if request.GetSecondRevision() == nil {
-		return errors.New("second revision is required")
-	}
-	firstRevision := request.GetFirstRevision()
-	if firstRevision.GetRemote() == "" {
-		return errors.New("first revision remote is required")
-	}
-	if firstRevision.GetBaseSha() == "" {
-		return errors.New("first revision base_sha is required")
-	}
-	secondRevision := request.GetSecondRevision()
-	if secondRevision.GetRemote() == "" {
-		return errors.New("second revision remote is required")
-	}
-	if secondRevision.GetBaseSha() == "" {
-		return errors.New("second revision base_sha is required")
-	}
-	// Validate that both revisions have the same remote
-	if firstRevision.GetRemote() != secondRevision.GetRemote() {
-		return errors.New("first and second revision must have the same remote")
-	}
-	return nil
+	return validateRevisionPair(request.GetFirstRevision(), request.GetSecondRevision())
 }
 
 // getDefaultDistance picks the initial Distance value to store on a freshly
@@ -955,25 +731,8 @@ func getDefaultDistance(maxDist int32, outputDistances bool, forNewTarget bool) 
 	if maxDist < 0 && !outputDistances {
 		return -1
 	}
-	// New targets are always CHANGE_TYPE_NEW → distance 0.
-	// All others start at -1; computeDistances will fill them in.
 	if forNewTarget {
 		return 0
 	}
 	return -1
-}
-
-// readTreehash fetches the treehash stored at GetTreehashCachePath for the given build description.
-// Returns an empty string on any error or cache miss so callers can treat it as an optional optimistic lookup.
-func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) string {
-	resp, err := st.Get(ctx, storage.DownloadRequest{Key: common.GetTreehashCachePath(buildDescription)})
-	if err != nil || resp == nil || resp.ReadCloser == nil {
-		return ""
-	}
-	defer resp.ReadCloser.Close()
-	b, err := io.ReadAll(resp.ReadCloser)
-	if err != nil {
-		return ""
-	}
-	return string(b)
 }

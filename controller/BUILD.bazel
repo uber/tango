@@ -3,6 +3,8 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "controller",
     srcs = [
+        "cache.go",
+        "classify.go",
         "controller.go",
         "distance_filter.go",
         "errors.go",
@@ -10,6 +12,9 @@ go_library(
         "getchangedtargets.go",
         "getchangedtargetsandedges.go",
         "gettargetgraph.go",
+        "graphfetch.go",
+        "mappers.go",
+        "rpc_helpers.go",
     ],
     importpath = "github.com/uber/tango/controller",
     visibility = ["//visibility:public"],
