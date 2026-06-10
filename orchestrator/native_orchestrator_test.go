@@ -51,6 +51,8 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
 	}, nil)
+	// Backfill of the (base_sha, requests) -> treehash mapping on cache hit
+	st.EXPECT().Put(gomock.Any(), gomock.Any()).Return(nil)
 
 	// Inject git and workspace
 	g := gitmock.NewMockInterface(ctrl)
@@ -183,6 +185,8 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
 	}, nil)
+	// Backfill of the (base_sha, requests) -> treehash mapping on cache hit
+	st.EXPECT().Put(gomock.Any(), gomock.Any()).Return(nil)
 	ws := workspacemock.NewMockWorkspace(ctrl)
 	ws.EXPECT().Path().Return("/tmp/ws")
 	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)

@@ -162,6 +162,13 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 		if err == nil {
 			logger.Infow("GetTargetGraph: Cache hit on treehash", zap.String("treehash", treehash))
+			// Backfill the (base_sha, requests) -> treehash mapping so the controller's
+			// pre-orchestrator cache check serves identical future requests without
+			// re-leasing a workspace. Best-effort: the request already has the graph.
+			treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription)
+			if putErr := b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: bytes.NewReader([]byte(treehash))}); putErr != nil {
+				logger.Warnw("GetTargetGraph: Failed to backfill treehash mapping on cache hit", zap.Error(putErr))
+			}
 			return graphReader, nil
 		}
 		if !storage.IsNotFound(err) {
