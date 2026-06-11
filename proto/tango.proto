@@ -215,40 +215,6 @@ message GetChangedTargetGraphResponse {
     }
 }
 
-message GetChangedTargetsAndEdgesRequest {
-    // The base revision spec
-    BuildDescription first_revision = 1;
-    // The target revision spec
-    BuildDescription second_revision = 2;
-    // Controls what payload details are included in responses; used to reduce payload size when full attribute set is not needed
-    OutputConfig output_config = 3;
-    // Request-scoped inputs that affect computation (e.g. extra exclude regexes)
-    RequestOptions request_options = 4;
-    // When true, skip reading from cache and recompute, overwriting the existing cached result.
-    bool bypass_cache = 5;
-}
-
-message GetChangedTargetsAndEdgesResponse {
-    oneof item {
-        // A packet with optimized targets representing a portion of the target graph; all such packets represent the full target graph
-        ChangedTargetsAndEdges changed_targets_and_edges = 1;
-        Metadata metadata = 2;
-    }
-}
-
-message Edge {
-    int32 source_id = 1;
-    int32 target_id = 2;
-}
-
-message ChangedTargetsAndEdges {
-    repeated ChangedTarget changed_targets = 1;
-    repeated OptimizedTarget added_targets = 2;
-    repeated OptimizedTarget removed_targets = 3;
-    repeated Edge new_edges = 4;
-    repeated Edge removed_edges = 5;
-}
-
 // Tango is the service for analyzing build target graphs and services. It is an abstraction over the underlying build system like Bazel,
 // enabling quick understanding of the dependencies between software building blocks and changes across source code revisions.
 service Tango {
@@ -260,7 +226,4 @@ service Tango {
 
     // Return a full target graph across two revisions with change indicator for each target. It differs from GetChangedTargets in that a full target graph can be constructed for either base or target revision.
     rpc GetChangedTargetGraph(GetChangedTargetGraphRequest) returns (stream GetChangedTargetGraphResponse) {}
-
-    // Return a set of targets changed between two revisions and the new edges between them
-    rpc GetChangedTargetsAndEdges(GetChangedTargetsAndEdgesRequest) returns (stream GetChangedTargetsAndEdgesResponse) {}
 }

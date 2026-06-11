@@ -3,7 +3,6 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "storage",
     srcs = [
-        "changedtargetsandedgesreader.go",
         "changedtargetsreader.go",
         "graphreader.go",
         "graphwriter.go",
@@ -20,13 +19,9 @@ go_library(
 
 go_test(
     name = "storage_test",
-    srcs = [
-        "changedtargetsandedgesreader_test.go",
-        "storage_test.go",
-    ],
+    srcs = ["storage_test.go"],
     embed = [":storage"],
     deps = [
-        "//tangopb",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
     ],

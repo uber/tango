@@ -90,19 +90,6 @@ func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, requestOpt
 	return path
 }
 
-// GetChangedTargetsAndEdgesCachePath returns the cache path for a GetChangedTargetsAndEdges result.
-// treehash1 and treehash2 are the resolved treehashes of the first and second revisions.
-// remote is the shared git remote for both revisions.
-// requestOptions is folded into the key when any of its fields affect computation.
-// Empty/nil ⇒ legacy path unchanged.
-func GetChangedTargetsAndEdgesCachePath(remote, treehash1, treehash2 string, requestOptions *tangopb.RequestOptions) string {
-	path := filepath.Join(ToShortRemote(remote), "compared-targets-and-edges", treehash1+"_"+treehash2)
-	if hash := HashRequestOptions(requestOptions); hash != "" {
-		path += "_requests-options-" + hash
-	}
-	return path
-}
-
 // GetReqURLsHash returns a fixed-length MD5 hash of the sorted request URLs.
 // Each URL's bytes are fed into the digest individually (no separator), matching
 // the Java MessageDigest.update(str.getBytes()) per-string behavior.

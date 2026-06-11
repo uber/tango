@@ -157,19 +157,6 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}}))
 }
 
-func TestGetChangedTargetsAndEdgesCachePath(t *testing.T) {
-	t.Parallel()
-	got := GetChangedTargetsAndEdgesCachePath("git@github:uber/tango", "abc", "def", nil)
-	assert.Equal(t, filepath.Join("uber/tango", "compared-targets-and-edges", "abc_def"), got)
-
-	// Must be distinct from the GetChangedTargets cache path.
-	assert.NotEqual(t, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil), got)
-
-	// Nil/empty options ⇒ legacy path; non-empty ⇒ different key.
-	assert.Equal(t, got, GetChangedTargetsAndEdgesCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{}))
-	assert.NotEqual(t, got, GetChangedTargetsAndEdgesCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}}))
-}
-
 func TestChunkTargets(t *testing.T) {
 	t.Parallel()
 

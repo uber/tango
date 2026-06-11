@@ -8,7 +8,6 @@ go_library(
         "errors.go",
         "getchangedtargetgraph.go",
         "getchangedtargets.go",
-        "getchangedtargetsandedges.go",
         "gettargetgraph.go",
     ],
     importpath = "github.com/uber/tango/controller",
@@ -30,7 +29,6 @@ go_test(
     srcs = [
         "distance_filter_test.go",
         "getchangedtargets_test.go",
-        "getchangedtargetsandedges_test.go",
         "gettargetgraph_test.go",
         "testhelper_test.go",
     ],

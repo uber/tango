@@ -25,7 +25,6 @@ type TangoYARPCClient interface {
 	GetTargetGraph(context.Context, *GetTargetGraphRequest, ...yarpc.CallOption) (TangoServiceGetTargetGraphYARPCClient, error)
 	GetChangedTargets(context.Context, *GetChangedTargetsRequest, ...yarpc.CallOption) (TangoServiceGetChangedTargetsYARPCClient, error)
 	GetChangedTargetGraph(context.Context, *GetChangedTargetGraphRequest, ...yarpc.CallOption) (TangoServiceGetChangedTargetGraphYARPCClient, error)
-	GetChangedTargetsAndEdges(context.Context, *GetChangedTargetsAndEdgesRequest, ...yarpc.CallOption) (TangoServiceGetChangedTargetsAndEdgesYARPCClient, error)
 }
 
 // TangoServiceGetTargetGraphYARPCClient receives GetTargetGraphResponses, returning io.EOF when the stream is complete.
@@ -46,13 +45,6 @@ type TangoServiceGetChangedTargetsYARPCClient interface {
 type TangoServiceGetChangedTargetGraphYARPCClient interface {
 	Context() context.Context
 	Recv(...yarpc.StreamOption) (*GetChangedTargetGraphResponse, error)
-	CloseSend(...yarpc.StreamOption) error
-}
-
-// TangoServiceGetChangedTargetsAndEdgesYARPCClient receives GetChangedTargetsAndEdgesResponses, returning io.EOF when the stream is complete.
-type TangoServiceGetChangedTargetsAndEdgesYARPCClient interface {
-	Context() context.Context
-	Recv(...yarpc.StreamOption) (*GetChangedTargetsAndEdgesResponse, error)
 	CloseSend(...yarpc.StreamOption) error
 }
 
@@ -77,7 +69,6 @@ type TangoYARPCServer interface {
 	GetTargetGraph(*GetTargetGraphRequest, TangoServiceGetTargetGraphYARPCServer) error
 	GetChangedTargets(*GetChangedTargetsRequest, TangoServiceGetChangedTargetsYARPCServer) error
 	GetChangedTargetGraph(*GetChangedTargetGraphRequest, TangoServiceGetChangedTargetGraphYARPCServer) error
-	GetChangedTargetsAndEdges(*GetChangedTargetsAndEdgesRequest, TangoServiceGetChangedTargetsAndEdgesYARPCServer) error
 }
 
 // TangoServiceGetTargetGraphYARPCServer sends GetTargetGraphResponses.
@@ -96,12 +87,6 @@ type TangoServiceGetChangedTargetsYARPCServer interface {
 type TangoServiceGetChangedTargetGraphYARPCServer interface {
 	Context() context.Context
 	Send(*GetChangedTargetGraphResponse, ...yarpc.StreamOption) error
-}
-
-// TangoServiceGetChangedTargetsAndEdgesYARPCServer sends GetChangedTargetsAndEdgesResponses.
-type TangoServiceGetChangedTargetsAndEdgesYARPCServer interface {
-	Context() context.Context
-	Send(*GetChangedTargetsAndEdgesResponse, ...yarpc.StreamOption) error
 }
 
 type buildTangoYARPCProceduresParams struct {
@@ -139,14 +124,6 @@ func buildTangoYARPCProcedures(params buildTangoYARPCProceduresParams) []transpo
 					Handler: protobuf.NewStreamHandler(
 						protobuf.StreamHandlerParams{
 							Handle: handler.GetChangedTargetGraph,
-						},
-					),
-				},
-				{
-					MethodName: "GetChangedTargetsAndEdges",
-					Handler: protobuf.NewStreamHandler(
-						protobuf.StreamHandlerParams{
-							Handle: handler.GetChangedTargetsAndEdges,
 						},
 					),
 				},
@@ -299,17 +276,6 @@ func (c *_TangoYARPCCaller) GetChangedTargetGraph(ctx context.Context, request *
 	return &_TangoServiceGetChangedTargetGraphYARPCClient{stream: stream}, nil
 }
 
-func (c *_TangoYARPCCaller) GetChangedTargetsAndEdges(ctx context.Context, request *GetChangedTargetsAndEdgesRequest, options ...yarpc.CallOption) (TangoServiceGetChangedTargetsAndEdgesYARPCClient, error) {
-	stream, err := c.streamClient.CallStream(ctx, "GetChangedTargetsAndEdges", options...)
-	if err != nil {
-		return nil, err
-	}
-	if err := stream.Send(request); err != nil {
-		return nil, err
-	}
-	return &_TangoServiceGetChangedTargetsAndEdgesYARPCClient{stream: stream}, nil
-}
-
 type _TangoYARPCHandler struct {
 	server TangoYARPCServer
 }
@@ -351,19 +317,6 @@ func (h *_TangoYARPCHandler) GetChangedTargetGraph(serverStream *protobuf.Server
 		return protobuf.CastError(emptyTangoServiceGetChangedTargetGraphYARPCRequest, requestMessage)
 	}
 	return h.server.GetChangedTargetGraph(request, &_TangoServiceGetChangedTargetGraphYARPCServer{serverStream: serverStream})
-}
-
-func (h *_TangoYARPCHandler) GetChangedTargetsAndEdges(serverStream *protobuf.ServerStream) error {
-	requestMessage, err := serverStream.Receive(newTangoServiceGetChangedTargetsAndEdgesYARPCRequest)
-	if requestMessage == nil {
-		return err
-	}
-
-	request, ok := requestMessage.(*GetChangedTargetsAndEdgesRequest)
-	if !ok {
-		return protobuf.CastError(emptyTangoServiceGetChangedTargetsAndEdgesYARPCRequest, requestMessage)
-	}
-	return h.server.GetChangedTargetsAndEdges(request, &_TangoServiceGetChangedTargetsAndEdgesYARPCServer{serverStream: serverStream})
 }
 
 type _TangoServiceGetTargetGraphYARPCClient struct {
@@ -438,30 +391,6 @@ func (c *_TangoServiceGetChangedTargetGraphYARPCClient) CloseSend(options ...yar
 	return c.stream.Close(options...)
 }
 
-type _TangoServiceGetChangedTargetsAndEdgesYARPCClient struct {
-	stream *protobuf.ClientStream
-}
-
-func (c *_TangoServiceGetChangedTargetsAndEdgesYARPCClient) Context() context.Context {
-	return c.stream.Context()
-}
-
-func (c *_TangoServiceGetChangedTargetsAndEdgesYARPCClient) Recv(options ...yarpc.StreamOption) (*GetChangedTargetsAndEdgesResponse, error) {
-	responseMessage, err := c.stream.Receive(newTangoServiceGetChangedTargetsAndEdgesYARPCResponse, options...)
-	if responseMessage == nil {
-		return nil, err
-	}
-	response, ok := responseMessage.(*GetChangedTargetsAndEdgesResponse)
-	if !ok {
-		return nil, protobuf.CastError(emptyTangoServiceGetChangedTargetsAndEdgesYARPCResponse, responseMessage)
-	}
-	return response, err
-}
-
-func (c *_TangoServiceGetChangedTargetsAndEdgesYARPCClient) CloseSend(options ...yarpc.StreamOption) error {
-	return c.stream.Close(options...)
-}
-
 type _TangoServiceGetTargetGraphYARPCServer struct {
 	serverStream *protobuf.ServerStream
 }
@@ -498,18 +427,6 @@ func (s *_TangoServiceGetChangedTargetGraphYARPCServer) Send(response *GetChange
 	return s.serverStream.Send(response, options...)
 }
 
-type _TangoServiceGetChangedTargetsAndEdgesYARPCServer struct {
-	serverStream *protobuf.ServerStream
-}
-
-func (s *_TangoServiceGetChangedTargetsAndEdgesYARPCServer) Context() context.Context {
-	return s.serverStream.Context()
-}
-
-func (s *_TangoServiceGetChangedTargetsAndEdgesYARPCServer) Send(response *GetChangedTargetsAndEdgesResponse, options ...yarpc.StreamOption) error {
-	return s.serverStream.Send(response, options...)
-}
-
 func newTangoServiceGetTargetGraphYARPCRequest() proto.Message {
 	return &GetTargetGraphRequest{}
 }
@@ -534,23 +451,13 @@ func newTangoServiceGetChangedTargetGraphYARPCResponse() proto.Message {
 	return &GetChangedTargetGraphResponse{}
 }
 
-func newTangoServiceGetChangedTargetsAndEdgesYARPCRequest() proto.Message {
-	return &GetChangedTargetsAndEdgesRequest{}
-}
-
-func newTangoServiceGetChangedTargetsAndEdgesYARPCResponse() proto.Message {
-	return &GetChangedTargetsAndEdgesResponse{}
-}
-
 var (
-	emptyTangoServiceGetTargetGraphYARPCRequest             = &GetTargetGraphRequest{}
-	emptyTangoServiceGetTargetGraphYARPCResponse            = &GetTargetGraphResponse{}
-	emptyTangoServiceGetChangedTargetsYARPCRequest          = &GetChangedTargetsRequest{}
-	emptyTangoServiceGetChangedTargetsYARPCResponse         = &GetChangedTargetsResponse{}
-	emptyTangoServiceGetChangedTargetGraphYARPCRequest      = &GetChangedTargetGraphRequest{}
-	emptyTangoServiceGetChangedTargetGraphYARPCResponse     = &GetChangedTargetGraphResponse{}
-	emptyTangoServiceGetChangedTargetsAndEdgesYARPCRequest  = &GetChangedTargetsAndEdgesRequest{}
-	emptyTangoServiceGetChangedTargetsAndEdgesYARPCResponse = &GetChangedTargetsAndEdgesResponse{}
+	emptyTangoServiceGetTargetGraphYARPCRequest         = &GetTargetGraphRequest{}
+	emptyTangoServiceGetTargetGraphYARPCResponse        = &GetTargetGraphResponse{}
+	emptyTangoServiceGetChangedTargetsYARPCRequest      = &GetChangedTargetsRequest{}
+	emptyTangoServiceGetChangedTargetsYARPCResponse     = &GetChangedTargetsResponse{}
+	emptyTangoServiceGetChangedTargetGraphYARPCRequest  = &GetChangedTargetGraphRequest{}
+	emptyTangoServiceGetChangedTargetGraphYARPCResponse = &GetChangedTargetGraphResponse{}
 )
 
 var yarpcFileDescriptorClosurec4210c857dbeec96 = [][]byte{
