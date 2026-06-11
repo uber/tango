@@ -63,27 +63,24 @@ func (ComputationStrategy) EnumDescriptor() ([]byte, []int) {
 type ChangeType int32
 
 const (
-	CHANGE_TYPE_INVALID     ChangeType = 0
-	CHANGE_TYPE_NEW         ChangeType = 1
-	CHANGE_TYPE_DIRECT      ChangeType = 2
-	CHANGE_TYPE_INDIRECT    ChangeType = 3
-	CHANGE_TYPE_UNSPECIFIED ChangeType = 4
+	CHANGE_TYPE_INVALID ChangeType = 0
+	CHANGE_TYPE_NEW     ChangeType = 1
+	CHANGE_TYPE_DELETED ChangeType = 2
+	CHANGE_TYPE_CHANGED ChangeType = 3
 )
 
 var ChangeType_name = map[int32]string{
 	0: "CHANGE_TYPE_INVALID",
 	1: "CHANGE_TYPE_NEW",
-	2: "CHANGE_TYPE_DIRECT",
-	3: "CHANGE_TYPE_INDIRECT",
-	4: "CHANGE_TYPE_UNSPECIFIED",
+	2: "CHANGE_TYPE_DELETED",
+	3: "CHANGE_TYPE_CHANGED",
 }
 
 var ChangeType_value = map[string]int32{
-	"CHANGE_TYPE_INVALID":     0,
-	"CHANGE_TYPE_NEW":         1,
-	"CHANGE_TYPE_DIRECT":      2,
-	"CHANGE_TYPE_INDIRECT":    3,
-	"CHANGE_TYPE_UNSPECIFIED": 4,
+	"CHANGE_TYPE_INVALID": 0,
+	"CHANGE_TYPE_NEW":     1,
+	"CHANGE_TYPE_DELETED": 2,
+	"CHANGE_TYPE_CHANGED": 3,
 }
 
 func (ChangeType) EnumDescriptor() ([]byte, []int) {
@@ -230,11 +227,10 @@ type OutputConfig struct {
 	IncludeHashes bool `protobuf:"varint,3,opt,name=include_hashes,json=includeHashes,proto3" json:"include_hashes,omitempty"`
 	// Indicates if only root targets (i.e. targets that are not depended on by any other targets) should be included in the response
 	RootsOnly bool `protobuf:"varint,4,opt,name=roots_only,json=rootsOnly,proto3" json:"roots_only,omitempty"`
-	// Indicates if BFS distances from CHANGE_TYPE_DIRECT targets should be computed for each ChangedTarget
-	ComputeDistances bool `protobuf:"varint,5,opt,name=compute_distances,json=computeDistances,proto3" json:"compute_distances,omitempty"`
-	// Maximum BFS distance from a CHANGE_TYPE_DIRECT target to include. Only considered when compute_distances is true.
-	// 0 (default) means no limit. Positive values limit BFS: 1 = only DIRECT + immediate reverse deps, etc.
-	MaxDistance int32 `protobuf:"varint,6,opt,name=max_distance,json=maxDistance,proto3" json:"max_distance,omitempty"`
+	// Maximum BFS distance from a distance-0 seed to include in the response.
+	// 0 (default) means no distance filtering. Positive values limit results: 1 = only seeds,
+	// 2 = seeds + their immediate reverse deps, etc. See ChangedTarget.distance for what counts as a seed.
+	MaxDistance int32 `protobuf:"varint,5,opt,name=max_distance,json=maxDistance,proto3" json:"max_distance,omitempty"`
 }
 
 func (m *OutputConfig) Reset()      { *m = OutputConfig{} }
@@ -293,13 +289,6 @@ func (m *OutputConfig) GetIncludeHashes() bool {
 func (m *OutputConfig) GetRootsOnly() bool {
 	if m != nil {
 		return m.RootsOnly
-	}
-	return false
-}
-
-func (m *OutputConfig) GetComputeDistances() bool {
-	if m != nil {
-		return m.ComputeDistances
 	}
 	return false
 }
@@ -562,9 +551,11 @@ type ChangedTarget struct {
 	ChangeType ChangeType       `protobuf:"varint,1,opt,name=change_type,json=changeType,proto3,enum=uber.tango.ChangeType" json:"change_type,omitempty"`
 	OldTarget  *OptimizedTarget `protobuf:"bytes,2,opt,name=old_target,json=oldTarget,proto3" json:"old_target,omitempty"`
 	NewTarget  *OptimizedTarget `protobuf:"bytes,3,opt,name=new_target,json=newTarget,proto3" json:"new_target,omitempty"`
-	// Distance from the nearest CHANGE_TYPE_DIRECT target in the reverse dependency graph.
-	// 0 means the target itself is DIRECT, 1 means it directly depends on a DIRECT target, etc.
-	// -1 means the distance is not set (e.g., for NEW targets or targets unreachable from DIRECT targets).
+	// Distance from the nearest distance-0 seed in the reverse dependency graph.
+	// A seed is a directly changed source file, a rule whose own configuration (attributes or
+	// direct deps) changed, or a NEW/DELETED target. A rule whose only change is that it
+	// consumes a changed source file (own config unchanged) ends up at distance >= 1.
+	// -1 means the distance is not set (e.g., targets unreachable from any seed).
 	Distance int32 `protobuf:"varint,4,opt,name=distance,proto3" json:"distance,omitempty"`
 }
 
@@ -1452,9 +1443,6 @@ func (this *OutputConfig) Equal(that interface{}) bool {
 	if this.RootsOnly != that1.RootsOnly {
 		return false
 	}
-	if this.ComputeDistances != that1.ComputeDistances {
-		return false
-	}
 	if this.MaxDistance != that1.MaxDistance {
 		return false
 	}
@@ -2076,7 +2064,6 @@ func (this *OutputConfig) GoString() string {
 	s = append(s, "IncludeAttributes: "+fmt.Sprintf("%#v", this.IncludeAttributes)+",\n")
 	s = append(s, "IncludeHashes: "+fmt.Sprintf("%#v", this.IncludeHashes)+",\n")
 	s = append(s, "RootsOnly: "+fmt.Sprintf("%#v", this.RootsOnly)+",\n")
-	s = append(s, "ComputeDistances: "+fmt.Sprintf("%#v", this.ComputeDistances)+",\n")
 	s = append(s, "MaxDistance: "+fmt.Sprintf("%#v", this.MaxDistance)+",\n")
 	s = append(s, "}")
 	return strings.Join(s, "")
@@ -2505,16 +2492,6 @@ func (m *OutputConfig) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = l
 	if m.MaxDistance != 0 {
 		i = encodeVarintTango(dAtA, i, uint64(m.MaxDistance))
-		i--
-		dAtA[i] = 0x30
-	}
-	if m.ComputeDistances {
-		i--
-		if m.ComputeDistances {
-			dAtA[i] = 1
-		} else {
-			dAtA[i] = 0
-		}
 		i--
 		dAtA[i] = 0x28
 	}
@@ -3471,9 +3448,6 @@ func (m *OutputConfig) Size() (n int) {
 	if m.RootsOnly {
 		n += 2
 	}
-	if m.ComputeDistances {
-		n += 2
-	}
 	if m.MaxDistance != 0 {
 		n += 1 + sovTango(uint64(m.MaxDistance))
 	}
@@ -3876,7 +3850,6 @@ func (this *OutputConfig) String() string {
 		`IncludeAttributes:` + fmt.Sprintf("%v", this.IncludeAttributes) + `,`,
 		`IncludeHashes:` + fmt.Sprintf("%v", this.IncludeHashes) + `,`,
 		`RootsOnly:` + fmt.Sprintf("%v", this.RootsOnly) + `,`,
-		`ComputeDistances:` + fmt.Sprintf("%v", this.ComputeDistances) + `,`,
 		`MaxDistance:` + fmt.Sprintf("%v", this.MaxDistance) + `,`,
 		`}`,
 	}, "")
@@ -4556,26 +4529,6 @@ func (m *OutputConfig) Unmarshal(dAtA []byte) error {
 			}
 			m.RootsOnly = bool(v != 0)
 		case 5:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ComputeDistances", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowTango
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.ComputeDistances = bool(v != 0)
-		case 6:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field MaxDistance", wireType)
 			}

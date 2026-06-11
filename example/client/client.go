@@ -39,7 +39,6 @@ func main() {
 	reqURLs := flag.String("request-urls", "", "comma-separated change request URLs")
 	timeout := flag.Duration("timeout", 5*time.Minute, "request timeout")
 	maxDistance := flag.Int("max-distance", -1, "max distance for changed targets")
-	computeDistances := flag.Bool("compute-distances", false, "compute distances for changed targets")
 	bypassCache := flag.Bool("bypass-cache", false, "skip cache lookup and force recomputation, overwriting cached result")
 
 	newBaseSHA := flag.String("new-base-sha", "", "build description new base sha")
@@ -125,8 +124,7 @@ func main() {
 				Requests: newRequests,
 			},
 			OutputConfig: &pb.OutputConfig{
-				ComputeDistances: *computeDistances,
-				MaxDistance:      int32(*maxDistance),
+				MaxDistance: int32(*maxDistance),
 			},
 			BypassCache: *bypassCache,
 		}

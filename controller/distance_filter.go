@@ -15,34 +15,11 @@
 package controller
 
 import (
-	"github.com/uber/tango/config"
 	pb "github.com/uber/tango/tangopb"
 )
 
-// resolveMaxDistance returns the effective BFS distance cap for filtering, or
-// -1 when no filtering should be applied.
-//
-// Priority (highest first):
-//  1. outputConfig.max_distance > 0 → use the client's explicit limit.
-//  2. repoConfig.MaxDistance > 0 → server-side default.
-//  3. Neither set → -1 (no distance filtering).
-//
-// Note: outputConfig.compute_distances controls whether the distance field is
-// populated in the response and is independent of filtering.
-func resolveMaxDistance(repoConfig config.RepositoryConfig, outputConfig *pb.OutputConfig) int32 {
-	if outputConfig.GetMaxDistance() > 0 {
-		return outputConfig.GetMaxDistance()
-	}
-	if repoConfig.MaxDistance > 0 {
-		return repoConfig.MaxDistance
-	}
-	return -1
-}
-
 // filterChangedTargetsByDistance returns targets where 0 <= distance <= maxDist.
 // Returns the input slice unchanged when maxDist < 0 (filtering disabled).
-// Negative-distance targets (unreachable from a DIRECT/NEW seed) are always
-// dropped when the filter is active.
 func filterChangedTargetsByDistance(targets []*pb.ChangedTarget, maxDist int32) []*pb.ChangedTarget {
 	if maxDist < 0 {
 		return targets

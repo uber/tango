@@ -25,10 +25,6 @@ type RepositoryConfig struct {
 	BazelCommand           string   `yaml:"bazel_command"`
 	QueryTimeout           int64    `yaml:"query_timeout"` // in seconds
 	BazelExtraArgs         []string `yaml:"bazel_extra_args"`
-	// MaxDistance is the server-side default BFS distance cap applied when the
-	// client does not set output_config.compute_distances. 0 means unset (no cap).
-	// Positive values enable distance trimming with the given limit.
-	MaxDistance int32 `yaml:"max_distance"`
 }
 
 // RepositoryConfigProvider looks up per-repository configuration by remote.

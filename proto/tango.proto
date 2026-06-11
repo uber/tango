@@ -55,13 +55,18 @@ message OutputConfig {
     bool include_hashes = 3;
     // Indicates if only root targets (i.e. targets that are not depended on by any other targets) should be included in the response
     bool roots_only = 4;
-    // Indicates if BFS distances from CHANGE_TYPE_DIRECT targets should be computed and included
-    // in each ChangedTarget's distance field. Independent of max_distance filtering.
-    bool compute_distances = 5;
-    // Maximum BFS distance from a CHANGE_TYPE_DIRECT target to include in the response.
-    // 0 (default) means no distance filtering. Positive values limit results: 1 = only DIRECT
-    // targets, 2 = DIRECT + their immediate reverse deps, etc. Independent of compute_distances.
-    int32 max_distance = 6;
+    // Maximum BFS distance from a distance-0 seed to include in the response.
+    // Semantics match ChangedTarget.distance: -1 = no filtering (default behavior),
+    // 0 = only seeds, 1 = seeds and their immediate reverse deps, etc.
+    // See ChangedTarget.distance for what counts as a seed.
+    //
+    // Defaults: when the enclosing OutputConfig is omitted entirely, the server
+    // treats max_distance as -1 (no filtering). When OutputConfig is provided,
+    // max_distance is taken at face value — note that proto3's wire default for
+    // an unset scalar is 0, which under this contract means "filter to seeds
+    // only". Clients that want unfiltered results while supplying other
+    // OutputConfig fields must set max_distance to -1 explicitly.
+    int32 max_distance = 5;
 }
 
 // RequestOptions carries request-scoped inputs that affect computation.
@@ -99,13 +104,19 @@ message OptimizedTargets {
     repeated OptimizedTarget targets = 1;
 }
 
-// Enum for ChangeType
+// ChangeType classifies how a target changed between two revisions in a
+// GetChangedTargets response. Each ChangedTarget carries one value, set
+// from the second revision's perspective.
 enum ChangeType {
+    // Default-initialized sentinel; never explicitly set. Used as emptiness check only.
     CHANGE_TYPE_INVALID = 0;
+    // Target was added in the second revision.
     CHANGE_TYPE_NEW = 1;
-    CHANGE_TYPE_DIRECT = 2;
-    CHANGE_TYPE_INDIRECT = 3;
-    CHANGE_TYPE_UNSPECIFIED = 4;
+    // Target was removed in the second revision.
+    CHANGE_TYPE_DELETED = 2;
+    // Target is present in both revisions but differs (hash, attributes, or direct-deps changed,
+    // or it transitively consumes something that changed).
+    CHANGE_TYPE_CHANGED = 3;
 }
 
 // ChangedTargets represents a set of changed targets.
@@ -116,12 +127,20 @@ message ChangedTargets {
 
 // ChangedTarget represents a changed target and its associated optimized targets.
 message ChangedTarget {
-    ChangeType change_type = 1;      // Type of the change
-    OptimizedTarget old_target = 2; // The old target before the change (first revision)
-    OptimizedTarget new_target = 3; // The new target after the change (second revision)
-    // Distance from the nearest CHANGE_TYPE_DIRECT or CHANGE_TYPE_NEW target in the reverse dependency graph.
-    // 0 means the target itself is DIRECT or NEW, 1 means it directly depends on such a target, etc.
-    // -1 means the distance is not set (e.g., targets unreachable from DIRECT/NEW targets).
+    // Type of the change.
+    ChangeType change_type = 1;
+    // The old target before the change (first revision).
+    OptimizedTarget old_target = 2;
+    // The new target after the change (second revision).
+    OptimizedTarget new_target = 3;
+    // Distance from the nearest distance-0 seed in the reverse dependency graph.
+    // A seed is a directly changed source file, a NEW/DELETED target, or a
+    // CHANGED rule whose hash change is not fully explained by a direct dep
+    // having also changed — i.e. its own configuration (attributes or
+    // dep-name set) changed, or the hasher saw an input we don't track
+    // explicitly (tags, root/external, etc.). Only a CHANGED rule whose
+    // hash change is purely transitive (a direct dep changed and this rule's
+    // own config did not) ends up at distance >= 1.
     int32 distance = 4;
 }
 

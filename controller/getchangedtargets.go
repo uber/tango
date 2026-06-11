@@ -65,7 +65,13 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	logger.Info("GetChangedTargets: Processing request")
 
-	maxDist := resolveMaxDistance(c.getRepoConfig(request.GetFirstRevision().GetRemote()), request.GetOutputConfig())
+	// Default max_distance to -1 (no filtering) when the client omits OutputConfig
+	// entirely. When OutputConfig is supplied, take max_distance at face value —
+	// see proto/tango.proto OutputConfig.max_distance for the wire-default caveat.
+	maxDist := int32(-1)
+	if request.GetOutputConfig() != nil {
+		maxDist = request.GetOutputConfig().GetMaxDistance()
+	}
 
 	// Try to serve from cache first using the stored treehashes for both revisions.
 	// readTreehash returns "" on any miss/error so we silently skip the cache when
@@ -241,7 +247,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, logger, firstGraph, secondGraph, maxDist, request.GetOutputConfig().GetComputeDistances())
+	changedTargetsResponses, err := c.compareTargetGraphs(ctx, logger, firstGraph, secondGraph, maxDist)
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -290,14 +296,15 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 }
 
 // compareTargetGraphs diffs two target graph streams and produces a chunked
-// GetChangedTargetsResponse stream. Targets present only on one side are
-// classified as NEW or removed; targets present on both sides are classified
-// as DIRECT or INDIRECT based on hash, source-file dependencies, direct
-// dependency set, and attribute changes. Distances are computed when
-// requested or when filtering by distance is active. Output IDs are
-// re-mapped into a canonical per-call namespace so the response metadata
-// only carries the names actually referenced.
-func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32, outputDistances bool) ([]*pb.GetChangedTargetsResponse, error) {
+// GetChangedTargetsResponse stream. Targets are classified as NEW (only in
+// second), DELETED (only in first), or CHANGED (present in both, differs).
+// Distances are always computed: a target is a distance-0 seed when it is
+// NEW, DELETED, a source file with a changed hash, or a rule whose own
+// configuration (attributes or direct deps) changed. All other CHANGED
+// targets get their distance from BFS over the reverse-dep graph.
+// Output IDs are re-mapped into a canonical per-call namespace so the
+// response metadata only carries the names actually referenced.
+func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs")
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
@@ -339,7 +346,11 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 	}
 
 	changedByName := make(map[string]*pb.ChangedTarget)
-	changedSourceFileTargets := make(map[string]struct{})
+	// seeds are targets whose own state changed: NEW, DELETED, a source file
+	// whose hash changed, or a rule whose attributes or direct-deps changed.
+	// BFS over reverse-deps assigns distance 0 to seeds and distance >=1 to
+	// downstream consumers.
+	seeds := make(map[string]struct{})
 
 	// 3) Create canonical mappers for IDs (targets, rule types, tags, attributes)
 	targetMapper := common.NewNameIDMapper()
@@ -355,12 +366,13 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 	getAttrNameId := func(name string) int32 { return attrNameMapper.ID(name) }
 	getAttrValId := func(name string) int32 { return attrValMapper.ID(name) }
 
-	// Identify changed targets and collect changed source files
+	// Pass 1: walk second revision. Targets not in first revision are NEW (seeds).
+	// Targets in both with differing hashes are CHANGED; source-file CHANGED
+	// targets are also seeds (rule consumers will pick up distance >= 1 via BFS).
 	diffScanStart := time.Now()
 	for name, newT := range secondByName {
 		oldT, exists := firstByName[name]
 		if !exists {
-			// new target -> new
 			changedByName[name] = &pb.ChangedTarget{
 				ChangeType: pb.CHANGE_TYPE_NEW,
 				NewTarget: transposeOptimizedTarget(
@@ -372,26 +384,19 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 					secondMetadata.GetAttributeStringValueMapping(),
 					getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
 				),
-				Distance: getDefaultDistance(maxDist, outputDistances, true),
 			}
+			seeds[name] = struct{}{}
 			continue
 		}
 		if oldT.GetHash() == newT.GetHash() {
 			// same hash -> unchanged
 			continue
 		}
-		initial := pb.CHANGE_TYPE_INDIRECT
-		// If we know the source file rule type, classify changes accordingly.
-		// Otherwise, leave as UNSPECIFIED.
-		// check if the target is a source file, if so, it is a direct change
-		isSource := newT.GetRuleType() == sourceFileRuleTypeID && sourceFileRuleTypeID != -1
-		if isSource {
-			initial = pb.CHANGE_TYPE_DIRECT
-			// Save the target name to the set of changed source file targets.
-			// This is used to check if the source file is a direct dependencies of other targets.
-			changedSourceFileTargets[name] = struct{}{}
+		// Source files with a hash change are seeds; rules will be evaluated
+		// for own-config changes in pass 2 below.
+		if sourceFileRuleTypeID != -1 && newT.GetRuleType() == sourceFileRuleTypeID {
+			seeds[name] = struct{}{}
 		}
-		// Transpose the target into ID, using the existing metadata mappings from the second revision.
 		newTarget := transposeOptimizedTarget(
 			newT,
 			secondMetadata.GetTargetIdMapping(),
@@ -401,8 +406,6 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 			secondMetadata.GetAttributeStringValueMapping(),
 			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
 		)
-		// Transpose the target into ID. The target will be mapped to the IDs in the second revision,
-		//  so the resulting IDs will be consistent with the second revision.
 		oldTarget := transposeOptimizedTarget(
 			oldT,
 			firstMetadata.GetTargetIdMapping(),
@@ -413,10 +416,9 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
 		)
 		changedByName[name] = &pb.ChangedTarget{
-			ChangeType: initial,
+			ChangeType: pb.CHANGE_TYPE_CHANGED,
 			OldTarget:  oldTarget,
 			NewTarget:  newTarget,
-			Distance:   getDefaultDistance(maxDist, outputDistances, false),
 		}
 	}
 	diffScanDuration := time.Since(diffScanStart)
@@ -426,38 +428,52 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 		return nil, ctx.Err()
 	}
 
-	// Iterate over the changed targets and check if any of them are DIRECT changes.
+	// Pass 2: decide which CHANGED rule targets are seeds (distance 0).
+	//
+	// We trust the hasher: a CHANGED entry means the rule's hash differs.
+	// The only reason a hash change should land at distance >= 1 (rather than
+	// 0) is when it is fully explained by a *direct dep* having changed —
+	// i.e. the change is purely transitive. In every other case the rule is
+	// a seed.
+	//
+	// Concretely, attribute / dep-list inspection is only needed to promote
+	// a rule that BFS would otherwise put at distance 1 (because a dep
+	// changed) down to distance 0 (because the rule's own configuration
+	// changed too). If no dep changed, the hash change has no upstream
+	// explanation and the rule is a seed regardless of what inspection says.
 	classifyStart := time.Now()
 	for name, ct := range changedByName {
-		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
-			// Already marked as direct or new
+		if _, isSeed := seeds[name]; isSeed {
+			// Already a seed (NEW or changed source file).
+			continue
+		}
+		if ct.GetChangeType() != pb.CHANGE_TYPE_CHANGED {
 			continue
 		}
 		newT := secondByName[name]
 		oldT := firstByName[name]
 
-		// Check if any dependency is a changed source file
-		if hasDepInChangedSourceFileTargets(newT.GetDirectDependencies(), secondMetadata, changedSourceFileTargets) {
-			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
+		// Single pass over newT.deps decides two things at once: whether any
+		// direct dep itself changed (would otherwise transitively explain the
+		// hash diff at distance >= 1), and whether the rule's own dep-name set
+		// changed (its own configuration changed → seed).
+		anyChanged, depsChanged := changedDepStatus(oldT, firstMetadata, newT, secondMetadata, changedByName)
+		if !anyChanged {
+			// No direct dep changed: the hash diff has no upstream explanation,
+			// trust the hasher and seed.
+			seeds[name] = struct{}{}
 			continue
-		}
-
-		// Check if direct dependencies changed
-		depsChanged, err := dependenciesChanged(oldT, firstMetadata, newT, secondMetadata)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check dependencies changed: %w", err)
 		}
 		if depsChanged {
-			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
+			seeds[name] = struct{}{}
 			continue
 		}
-		// Check if attributes changed
 		attrsChanged, err := attributesChanged(oldT, firstMetadata, newT, secondMetadata)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check attributes changed: %w", err)
 		}
 		if attrsChanged {
-			ct.ChangeType = pb.CHANGE_TYPE_DIRECT
+			seeds[name] = struct{}{}
 		}
 	}
 	classifyDuration := time.Since(classifyStart)
@@ -467,15 +483,39 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 		return nil, ctx.Err()
 	}
 
-	// Compute BFS distances when filtering is active or the client requested distance output.
-	if maxDist >= 0 || outputDistances {
-		distancesStart := time.Now()
-		if err := computeDistances(ctx, c.logger, changedByName, secondByName, secondMetadata, maxDist); err != nil {
-			return nil, err
+	// Pass 3: emit DELETED entries for targets present only in the first revision.
+	// Deletions are seeds (distance 0) but have no entries in secondByName /
+	// reverseDeps, so BFS naturally propagates nothing from them.
+	for name, oldT := range firstByName {
+		if _, exists := secondByName[name]; exists {
+			continue
 		}
-		distancesDuration := time.Since(distancesStart)
-		scope.Timer("distances_duration").Record(distancesDuration)
+		changedByName[name] = &pb.ChangedTarget{
+			ChangeType: pb.CHANGE_TYPE_DELETED,
+			OldTarget: transposeOptimizedTarget(
+				oldT,
+				firstMetadata.GetTargetIdMapping(),
+				firstMetadata.GetRuleTypeMapping(),
+				firstMetadata.GetTagMapping(),
+				firstMetadata.GetAttributeNameMapping(),
+				firstMetadata.GetAttributeStringValueMapping(),
+				getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+			),
+		}
+		seeds[name] = struct{}{}
 	}
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// Distances are always computed; seeds get 0, BFS assigns 1+ to consumers.
+	distancesStart := time.Now()
+	if err := computeDistances(ctx, changedByName, secondByName, secondMetadata, seeds, maxDist); err != nil {
+		return nil, err
+	}
+	distancesDuration := time.Since(distancesStart)
+	scope.Timer("distances_duration").Record(distancesDuration)
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -620,67 +660,75 @@ func canonicalTargetName(id int32, meta *pb.Metadata) (string, error) {
 	return "", fmt.Errorf("target id %d not found in metadata", id)
 }
 
-// hasDepInChangedSourceFileTargets returns true if any dependency (resolved via metadata) is a changed source file target.
-func hasDepInChangedSourceFileTargets(depIds []int32, meta *pb.Metadata, changedSourceFileTargets map[string]struct{}) bool {
-	if meta == nil {
-		return false
+// changedDepStatus reports two facts about a CHANGED rule's direct deps in a
+// single pass over newTarget.GetDirectDependencies():
+//   - anyChanged: at least one current direct dep is itself CHANGED between
+//     the two revisions (i.e. appears as CHANGE_TYPE_CHANGED in changedByName).
+//   - setDiffered: the *set of dep names* — not their hashes — differs between
+//     old and new. A dep changing its hash while keeping the same name leaves
+//     setDiffered false; that case is handled by BFS reaching the consumer at
+//     distance >= 1.
+//
+// The name-set walk over oldTarget is skipped entirely when lengths already
+// disagree (setDiffered is trivially true) or when anyChanged is false and
+// the caller will seed the rule regardless of setDiffered.
+func changedDepStatus(
+	oldTarget *pb.OptimizedTarget,
+	oldMeta *pb.Metadata,
+	newTarget *pb.OptimizedTarget,
+	newMeta *pb.Metadata,
+	changedByName map[string]*pb.ChangedTarget,
+) (anyChanged, setDiffered bool) {
+	if newTarget == nil || newMeta == nil {
+		return false, false
 	}
-	for _, id := range depIds {
-		name := meta.GetTargetIdMapping()[id]
+
+	newDepIDs := newTarget.GetDirectDependencies()
+	newIDMap := newMeta.GetTargetIdMapping()
+
+	var oldDepIDs []int32
+	var oldIDMap map[int32]string
+	if oldTarget != nil && oldMeta != nil {
+		oldDepIDs = oldTarget.GetDirectDependencies()
+		oldIDMap = oldMeta.GetTargetIdMapping()
+	}
+
+	// If lengths differ, setDiffered is trivially true — no need to allocate
+	// a name set for membership checks.
+	lengthsMatch := len(oldDepIDs) == len(newDepIDs)
+	var newDepSet map[string]struct{}
+	if lengthsMatch && len(newDepIDs) > 0 {
+		newDepSet = make(map[string]struct{}, len(newDepIDs))
+	}
+
+	for _, depID := range newDepIDs {
+		name := newIDMap[depID]
 		if name == "" {
 			continue
 		}
-		if _, ok := changedSourceFileTargets[name]; ok {
-			return true
+		if !anyChanged {
+			if ct, ok := changedByName[name]; ok && ct.GetChangeType() == pb.CHANGE_TYPE_CHANGED {
+				anyChanged = true
+			}
 		}
-	}
-	return false
-}
-
-// dependenciesChanged checks if the set of direct dependencies changed between old and new targets.
-func dependenciesChanged(oldTarget *pb.OptimizedTarget, oldMeta *pb.Metadata, newTarget *pb.OptimizedTarget, newMeta *pb.Metadata) (bool, error) {
-	if oldMeta == nil || newMeta == nil {
-		return false, nil
-	}
-
-	oldDepIDs := oldTarget.GetDirectDependencies()
-	newDepIDs := newTarget.GetDirectDependencies()
-
-	// Early exit: if lengths differ, dependencies changed
-	if len(oldDepIDs) != len(newDepIDs) {
-		return true, nil
-	}
-	// Early exit: if both are empty, no change
-	if len(oldDepIDs) == 0 {
-		return false, nil
-	}
-
-	// validate target names are equivalent.
-	if err := validateTargetNames(oldTarget, newTarget, oldMeta, newMeta); err != nil {
-		return false, fmt.Errorf("target names are different")
-	}
-
-	// Cache metadata mappings to avoid repeated map lookups
-	oldTargetIDMapping := oldMeta.GetTargetIdMapping()
-	newTargetIDMapping := newMeta.GetTargetIdMapping()
-	// Build set of new dependency names (only one set needed)
-	newDepSet := make(map[string]struct{}, len(newDepIDs))
-	for _, depID := range newDepIDs {
-		if name := newTargetIDMapping[depID]; name != "" {
+		if newDepSet != nil {
 			newDepSet[name] = struct{}{}
 		}
 	}
 
-	// Check if all old deps exist in new deps
+	if !lengthsMatch {
+		return anyChanged, true
+	}
 	for _, depID := range oldDepIDs {
-		if name := oldTargetIDMapping[depID]; name != "" {
-			if _, exists := newDepSet[name]; !exists {
-				return true, nil
-			}
+		name := oldIDMap[depID]
+		if name == "" {
+			continue
+		}
+		if _, exists := newDepSet[name]; !exists {
+			return anyChanged, true
 		}
 	}
-
-	return false, nil
+	return anyChanged, false
 }
 
 // attributesChanged checks if the attributes changed between old and new targets.
@@ -807,7 +855,7 @@ func transposeOptimizedTarget(
 }
 
 // sendWithDistanceFilter streams responses to the client, filtering changed targets to those
-// within maxDist from any CHANGE_TYPE_DIRECT target when maxDist >= 0.
+// within maxDist from any distance-0 seed when maxDist >= 0.
 // Metadata and other non-target responses are always forwarded.
 // Filtering and sending are combined into a single pass to avoid an intermediate allocation.
 func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, maxDist int32) error {
@@ -830,14 +878,12 @@ func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, 
 	return nil
 }
 
-// computeDistances computes the shortest distance from any CHANGE_TYPE_DIRECT
-// target to each changed target via the reverse dependency graph using BFS.
-// DIRECT targets get distance 0, their reverse dependants get 1, and so on.
-// When maxDistance >= 0, the BFS is pruned: targets at distance > maxDistance are never
-// enqueued, so they keep their initial distance of -1 (out-of-range).
-//
-// Targets unreachable from any DIRECT target keep the initial distance of -1.
-func computeDistances(ctx context.Context, logger *zap.Logger, changedByName map[string]*pb.ChangedTarget, targetsByName map[string]*pb.OptimizedTarget, meta *pb.Metadata, maxDistance int32) error {
+// computeDistances assigns each CHANGED target its BFS distance from the
+// nearest distance-0 seed in the reverse-dependency graph. Seeds are passed in
+// pre-classified and start at distance 0; everything else starts at -1 and
+// gets overwritten if reachable. Targets beyond `maxDistance` (when >= 0) are
+// never enqueued, so they keep their initial distance of -1 (out-of-range).
+func computeDistances(ctx context.Context, changedByName map[string]*pb.ChangedTarget, targetsByName map[string]*pb.OptimizedTarget, meta *pb.Metadata, seeds map[string]struct{}, maxDistance int32) error {
 	if meta == nil {
 		return nil
 	}
@@ -860,11 +906,11 @@ func computeDistances(ctx context.Context, logger *zap.Logger, changedByName map
 		}
 	}
 
-	// initialize all distances to -1, means not set, DIRECT and NEW targets at 0.
+	// Initialize all distances. Seeds at 0 and enqueued; everything else at -1.
 	var queue []string
 	visited := make(map[string]struct{}, len(changedByName))
 	for name, ct := range changedByName {
-		if ct.GetChangeType() == pb.CHANGE_TYPE_DIRECT || ct.GetChangeType() == pb.CHANGE_TYPE_NEW {
+		if _, isSeed := seeds[name]; isSeed {
 			ct.Distance = 0
 			queue = append(queue, name)
 			visited[name] = struct{}{}
@@ -873,7 +919,7 @@ func computeDistances(ctx context.Context, logger *zap.Logger, changedByName map
 		}
 	}
 
-	// BFS from DIRECT targets through reverseDeps. Shortest distance wins.
+	// BFS from seeds through reverseDeps. Shortest distance wins.
 	bfsIter := 0
 	for len(queue) > 0 {
 		if bfsIter%cancelCheckInterval == 0 && ctx.Err() != nil {
@@ -902,22 +948,16 @@ func computeDistances(ctx context.Context, logger *zap.Logger, changedByName map
 			}
 		}
 	}
-
-	// Just in case a target is marked changed but has no distance to DIRECT change.
-	// Warn about such cases. Probably a hashing bug.
-	for name, ct := range changedByName {
-		if ct.GetChangeType() == pb.CHANGE_TYPE_INDIRECT && ct.GetDistance() == -1 {
-			logger.Warn("computeDistances: INDIRECT target has no path to a DIRECT change, possible hashing issue",
-				zap.String("target", name),
-			)
-		}
-	}
 	return nil
 }
 
 // validateGetChangedTargetsRequest enforces the minimal invariants the
 // comparison pipeline relies on: both revisions present, both populated
 // with a remote and base SHA, and both pointing at the same remote.
+// OutputConfig is optional; when omitted, max_distance defaults to -1
+// (no filtering). See proto/tango.proto OutputConfig.max_distance for
+// the wire-default caveat when OutputConfig is supplied without
+// max_distance set.
 func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) error {
 	if request == nil {
 		return errors.New("request cannot be nil")
@@ -947,22 +987,6 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 		return errors.New("first and second revision must have the same remote")
 	}
 	return nil
-}
-
-// getDefaultDistance picks the initial Distance value to store on a freshly
-// classified ChangedTarget. -1 is used when distances are neither requested
-// nor needed for filtering, so callers can cheaply skip BFS entirely. NEW
-// targets always start at 0 because they are their own seeds.
-func getDefaultDistance(maxDist int32, outputDistances bool, forNewTarget bool) int32 {
-	if maxDist < 0 && !outputDistances {
-		return -1
-	}
-	// New targets are always CHANGE_TYPE_NEW → distance 0.
-	// All others start at -1; computeDistances will fill them in.
-	if forNewTarget {
-		return 0
-	}
-	return -1
 }
 
 // readTreehash fetches the treehash stored at GetTreehashCachePath for the given build description.
