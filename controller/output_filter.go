@@ -92,17 +92,57 @@ func applyChangedTargetsOutputConfig(src []*pb.ChangedTarget, cfg *pb.OutputConf
 // OptimizedTargets payload filtered per cfg. Non-targets chunks (Metadata)
 // and chunks that need no stripping are returned unchanged.
 func applyOptimizedTargetsOutputConfigToChunk(chunk *pb.GetTargetGraphResponse, cfg *pb.OutputConfig) *pb.GetTargetGraphResponse {
-	if chunk == nil || !optimizedTargetNeedsStripping(cfg) {
+	if chunk == nil {
 		return chunk
 	}
-	t, ok := chunk.GetItem().(*pb.GetTargetGraphResponse_Targets)
-	if !ok || t.Targets == nil {
-		return chunk
+	switch item := chunk.GetItem().(type) {
+	case *pb.GetTargetGraphResponse_Targets:
+		if !optimizedTargetNeedsStripping(cfg) || item.Targets == nil {
+			return chunk
+		}
+		filtered := applyOptimizedTargetsOutputConfig(item.Targets.GetTargets(), cfg)
+		return &pb.GetTargetGraphResponse{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{Targets: filtered},
+			},
+		}
+	case *pb.GetTargetGraphResponse_Metadata:
+		pruned := applyMetadataOutputConfig(item.Metadata, cfg)
+		if pruned == item.Metadata {
+			return chunk
+		}
+		return &pb.GetTargetGraphResponse{
+			Item: &pb.GetTargetGraphResponse_Metadata{Metadata: pruned},
+		}
 	}
-	filtered := applyOptimizedTargetsOutputConfig(t.Targets.GetTargets(), cfg)
-	return &pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{
-			Targets: &pb.OptimizedTargets{Targets: filtered},
-		},
+	return chunk
+}
+
+// metadataNeedsPruning reports whether applyMetadataOutputConfig would drop
+// any mapping under cfg. Tag mapping is dropped when include_tags is off;
+// attribute name + string value mappings are dropped when include_attributes
+// is off. include_hashes has no metadata impact since hashes are inline.
+func metadataNeedsPruning(cfg *pb.OutputConfig) bool {
+	if cfg == nil {
+		return true
 	}
+	return !cfg.GetIncludeTags() || !cfg.GetIncludeAttributes()
+}
+
+// applyMetadataOutputConfig returns a copy of meta with mappings cleared for
+// fields stripped from per-target output, so the response doesn't ship dead
+// ID->name tables. Returns meta unchanged when nothing needs pruning.
+func applyMetadataOutputConfig(meta *pb.Metadata, cfg *pb.OutputConfig) *pb.Metadata {
+	if meta == nil || !metadataNeedsPruning(cfg) {
+		return meta
+	}
+	dst := *meta
+	if cfg == nil || !cfg.GetIncludeTags() {
+		dst.TagMapping = nil
+	}
+	if cfg == nil || !cfg.GetIncludeAttributes() {
+		dst.AttributeNameMapping = nil
+		dst.AttributeStringValueMapping = nil
+	}
+	return &dst
 }

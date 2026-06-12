@@ -855,17 +855,19 @@ func transposeOptimizedTarget(
 }
 
 // sendWithDistanceFilter streams responses to the client, filtering changed targets to those
-// within maxDist from any distance-0 seed when maxDist >= 0, and stripping per-target
-// hash/tags/attributes per outputConfig's include_* flags. Metadata and other non-target
-// responses are always forwarded. Filtering and sending are combined into a single pass
+// within maxDist from any distance-0 seed when maxDist >= 0, stripping per-target
+// hash/tags/attributes per outputConfig's include_* flags, and pruning metadata mappings
+// whose IDs are no longer referenced. Filtering and sending are combined into a single pass
 // to avoid an intermediate allocation.
 func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) error {
 	stripFields := optimizedTargetNeedsStripping(outputConfig)
+	pruneMeta := metadataNeedsPruning(outputConfig)
 	for _, resp := range responses {
 		toSend := resp
-		if maxDist >= 0 || stripFields {
-			if ct, ok := resp.GetItem().(*pb.GetChangedTargetsResponse_ChangedTargets); ok {
-				kept := ct.ChangedTargets.GetChangedTargets()
+		switch item := resp.GetItem().(type) {
+		case *pb.GetChangedTargetsResponse_ChangedTargets:
+			if maxDist >= 0 || stripFields {
+				kept := item.ChangedTargets.GetChangedTargets()
 				if maxDist >= 0 {
 					kept = filterChangedTargetsByDistance(kept, maxDist)
 				}
@@ -873,6 +875,14 @@ func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, 
 				toSend = &pb.GetChangedTargetsResponse{
 					Item: &pb.GetChangedTargetsResponse_ChangedTargets{
 						ChangedTargets: &pb.ChangedTargets{ChangedTargets: kept},
+					},
+				}
+			}
+		case *pb.GetChangedTargetsResponse_Metadata:
+			if pruneMeta {
+				toSend = &pb.GetChangedTargetsResponse{
+					Item: &pb.GetChangedTargetsResponse_Metadata{
+						Metadata: applyMetadataOutputConfig(item.Metadata, outputConfig),
 					},
 				}
 			}

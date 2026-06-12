@@ -142,14 +142,80 @@ func TestApplyOptimizedTargetsOutputConfigToChunk_StripsTargets(t *testing.T) {
 	}
 }
 
-func TestApplyOptimizedTargetsOutputConfigToChunk_MetadataPassesThrough(t *testing.T) {
+func TestApplyMetadataOutputConfig_NilConfigDropsTagAndAttrMappings(t *testing.T) {
+	src := &pb.Metadata{
+		TargetIdMapping:             map[int32]string{1: "//foo"},
+		RuleTypeMapping:             map[int32]string{1: "go_library"},
+		TagMapping:                  map[int32]string{1: "manual"},
+		AttributeNameMapping:        map[int32]string{1: "visibility"},
+		AttributeStringValueMapping: map[int32]string{1: "//visibility:public"},
+	}
+	got := applyMetadataOutputConfig(src, nil)
+	require.NotNil(t, got)
+	assert.Equal(t, map[int32]string{1: "//foo"}, got.GetTargetIdMapping())
+	assert.Equal(t, map[int32]string{1: "go_library"}, got.GetRuleTypeMapping())
+	assert.Nil(t, got.GetTagMapping())
+	assert.Nil(t, got.GetAttributeNameMapping())
+	assert.Nil(t, got.GetAttributeStringValueMapping())
+	// Source unchanged.
+	assert.NotNil(t, src.GetTagMapping())
+}
+
+func TestApplyMetadataOutputConfig_TagsOnlyKeepsTags(t *testing.T) {
+	src := &pb.Metadata{
+		TagMapping:                  map[int32]string{1: "manual"},
+		AttributeNameMapping:        map[int32]string{1: "visibility"},
+		AttributeStringValueMapping: map[int32]string{1: "//visibility:public"},
+	}
+	got := applyMetadataOutputConfig(src, &pb.OutputConfig{IncludeTags: true})
+	require.NotNil(t, got)
+	assert.Equal(t, map[int32]string{1: "manual"}, got.GetTagMapping())
+	assert.Nil(t, got.GetAttributeNameMapping())
+	assert.Nil(t, got.GetAttributeStringValueMapping())
+}
+
+func TestApplyMetadataOutputConfig_AttrsOnlyKeepsAttrs(t *testing.T) {
+	src := &pb.Metadata{
+		TagMapping:                  map[int32]string{1: "manual"},
+		AttributeNameMapping:        map[int32]string{1: "visibility"},
+		AttributeStringValueMapping: map[int32]string{1: "//visibility:public"},
+	}
+	got := applyMetadataOutputConfig(src, &pb.OutputConfig{IncludeAttributes: true})
+	require.NotNil(t, got)
+	assert.Nil(t, got.GetTagMapping())
+	assert.Equal(t, map[int32]string{1: "visibility"}, got.GetAttributeNameMapping())
+	assert.Equal(t, map[int32]string{1: "//visibility:public"}, got.GetAttributeStringValueMapping())
+}
+
+func TestApplyMetadataOutputConfig_AllIncludesPassesThrough(t *testing.T) {
+	src := &pb.Metadata{TagMapping: map[int32]string{1: "manual"}}
+	cfg := &pb.OutputConfig{IncludeTags: true, IncludeAttributes: true}
+	got := applyMetadataOutputConfig(src, cfg)
+	assert.Same(t, src, got, "no copy when nothing needs pruning (include_hashes irrelevant for metadata)")
+}
+
+func TestApplyOptimizedTargetsOutputConfigToChunk_MetadataTagAndAttrMappingsCleared(t *testing.T) {
 	chunk := &pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Metadata{
-			Metadata: &pb.Metadata{TargetIdMapping: map[int32]string{1: "//foo"}},
+			Metadata: &pb.Metadata{
+				TargetIdMapping:             map[int32]string{1: "//foo"},
+				RuleTypeMapping:             map[int32]string{1: "go_library"},
+				TagMapping:                  map[int32]string{1: "manual"},
+				AttributeNameMapping:        map[int32]string{1: "visibility"},
+				AttributeStringValueMapping: map[int32]string{1: "//visibility:public"},
+			},
 		},
 	}
 	got := applyOptimizedTargetsOutputConfigToChunk(chunk, nil)
-	assert.Same(t, chunk, got, "metadata chunks should pass through unchanged")
+	require.NotNil(t, got)
+	m := got.GetMetadata()
+	// target_id and rule_type mappings preserved — still referenced by surviving fields.
+	assert.Equal(t, map[int32]string{1: "//foo"}, m.GetTargetIdMapping())
+	assert.Equal(t, map[int32]string{1: "go_library"}, m.GetRuleTypeMapping())
+	// Tag and attribute mappings dropped — nothing references them after per-target stripping.
+	assert.Nil(t, m.GetTagMapping())
+	assert.Nil(t, m.GetAttributeNameMapping())
+	assert.Nil(t, m.GetAttributeStringValueMapping())
 }
 
 func TestApplyOptimizedTargetsOutputConfigToChunk_FullIncludePassesThrough(t *testing.T) {
