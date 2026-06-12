@@ -57,6 +57,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	}
 	defer graphReader.Close()
 	sendStart := time.Now()
+	outputConfig := request.GetOutputConfig()
 	for {
 		graphStreamChunk, err := graphReader.Read()
 		if err == io.EOF {
@@ -73,7 +74,8 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 		if err != nil {
 			return common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
 		}
-		err = stream.Send(graphStreamChunk)
+		toSend := applyOptimizedTargetsOutputConfigToChunk(graphStreamChunk, outputConfig)
+		err = stream.Send(toSend)
 		if err != nil {
 			return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("send graph: %w", err))
 		}

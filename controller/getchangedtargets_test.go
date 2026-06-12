@@ -384,7 +384,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	request := &pb.GetChangedTargetsRequest{
 		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
 		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
-		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
+		OutputConfig:   &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true},
 	}
 
 	err := c.GetChangedTargets(request, stream)
@@ -927,7 +927,7 @@ func TestSendWithDistanceFilter_MetadataAlwaysForwarded(t *testing.T) {
 	}).Times(2)
 
 	// max_distance=1 filters out the distance-5 target, metadata always forwarded
-	require.NoError(t, sendWithDistanceFilter(stream, responses, 1))
+	require.NoError(t, sendWithDistanceFilter(stream, responses, 1, nil))
 
 	// First response: target filtered out (distance 5 > maxDist 1)
 	assert.Empty(t, sent[0].GetChangedTargets().GetChangedTargets())
@@ -949,7 +949,7 @@ func TestSendWithDistanceFilter_SendError(t *testing.T) {
 
 	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send error"))
 
-	err := sendWithDistanceFilter(stream, responses, -1)
+	err := sendWithDistanceFilter(stream, responses, -1, nil)
 	assert.EqualError(t, err, "send error")
 }
 
@@ -1260,7 +1260,7 @@ func TestSendWithDistanceFilter_RetainsDeletedAtMaxDistanceOne(t *testing.T) {
 		return nil
 	}).Times(1)
 
-	require.NoError(t, sendWithDistanceFilter(stream, responses, 1))
+	require.NoError(t, sendWithDistanceFilter(stream, responses, 1, nil))
 
 	kept := sent[0].GetChangedTargets().GetChangedTargets()
 	require.Len(t, kept, 2, "distance-0 DELETED and distance-1 CHANGED both kept; distance-5 dropped")

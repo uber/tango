@@ -115,7 +115,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 					)
 					scope.Counter("cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
-					if sendErr := sendWithDistanceFilter(stream, cached, maxDist); sendErr != nil {
+					if sendErr := sendWithDistanceFilter(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
 						logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
 						return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send cached response: %w", sendErr))
 					}
@@ -278,7 +278,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}()
 
 	sendStart := time.Now()
-	if err := sendWithDistanceFilter(stream, changedTargetsResponses, maxDist); err != nil {
+	if err := sendWithDistanceFilter(stream, changedTargetsResponses, maxDist, request.GetOutputConfig()); err != nil {
 		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
 		return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send response: %w", err))
 	}
@@ -855,15 +855,21 @@ func transposeOptimizedTarget(
 }
 
 // sendWithDistanceFilter streams responses to the client, filtering changed targets to those
-// within maxDist from any distance-0 seed when maxDist >= 0.
-// Metadata and other non-target responses are always forwarded.
-// Filtering and sending are combined into a single pass to avoid an intermediate allocation.
-func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, maxDist int32) error {
+// within maxDist from any distance-0 seed when maxDist >= 0, and stripping per-target
+// hash/tags/attributes per outputConfig's include_* flags. Metadata and other non-target
+// responses are always forwarded. Filtering and sending are combined into a single pass
+// to avoid an intermediate allocation.
+func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) error {
+	stripFields := optimizedTargetNeedsStripping(outputConfig)
 	for _, resp := range responses {
 		toSend := resp
-		if maxDist >= 0 {
+		if maxDist >= 0 || stripFields {
 			if ct, ok := resp.GetItem().(*pb.GetChangedTargetsResponse_ChangedTargets); ok {
-				kept := filterChangedTargetsByDistance(ct.ChangedTargets.GetChangedTargets(), maxDist)
+				kept := ct.ChangedTargets.GetChangedTargets()
+				if maxDist >= 0 {
+					kept = filterChangedTargetsByDistance(kept, maxDist)
+				}
+				kept = applyChangedTargetsOutputConfig(kept, outputConfig)
 				toSend = &pb.GetChangedTargetsResponse{
 					Item: &pb.GetChangedTargetsResponse_ChangedTargets{
 						ChangedTargets: &pb.ChangedTargets{ChangedTargets: kept},
