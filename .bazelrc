@@ -1,1 +1,9 @@
 common --disk_cache=~/.cache/bazel-disk-cache
+
+# Xcode 26 / Clang 21 enforces strict Clang-modules header layering on
+# C++ sources. abseil-cpp does not satisfy those checks, so transitive
+# protobuf/grpc compiles fail with "module X does not depend on a module
+# exporting 'array'" etc. Disable the layering enforcement on every build.
+build --features=-layering_check
+build --features=-parse_headers
+build --features=-use_header_modules
