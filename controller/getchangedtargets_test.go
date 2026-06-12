@@ -900,7 +900,7 @@ func TestComputeDistances_OrphanCHANGEDStaysAtMinusOne(t *testing.T) {
 	assert.Equal(t, int32(-1), changedByName["E"].GetDistance(), "orphan E stays at -1 in pure BFS")
 }
 
-func TestSendWithDistanceFilter_MetadataAlwaysForwarded(t *testing.T) {
+func TestSendTrimmedChangedTargets_MetadataAlwaysForwarded(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
@@ -927,7 +927,7 @@ func TestSendWithDistanceFilter_MetadataAlwaysForwarded(t *testing.T) {
 	}).Times(2)
 
 	// max_distance=1 filters out the distance-5 target, metadata always forwarded
-	require.NoError(t, sendWithDistanceFilter(stream, responses, 1, nil))
+	require.NoError(t, sendTrimmedChangedTargets(stream, responses, 1, nil))
 
 	// First response: target filtered out (distance 5 > maxDist 1)
 	assert.Empty(t, sent[0].GetChangedTargets().GetChangedTargets())
@@ -935,7 +935,7 @@ func TestSendWithDistanceFilter_MetadataAlwaysForwarded(t *testing.T) {
 	assert.Equal(t, meta, sent[1].GetMetadata())
 }
 
-func TestSendWithDistanceFilter_SendError(t *testing.T) {
+func TestSendTrimmedChangedTargets_SendError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
@@ -949,7 +949,7 @@ func TestSendWithDistanceFilter_SendError(t *testing.T) {
 
 	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send error"))
 
-	err := sendWithDistanceFilter(stream, responses, -1, nil)
+	err := sendTrimmedChangedTargets(stream, responses, -1, nil)
 	assert.EqualError(t, err, "send error")
 }
 
@@ -1235,7 +1235,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 	assert.Equal(t, "//app:T", res[1].GetMetadata().GetTargetIdMapping()[got.GetOldTarget().GetId()])
 }
 
-func TestSendWithDistanceFilter_RetainsDeletedAtMaxDistanceOne(t *testing.T) {
+func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
@@ -1260,7 +1260,7 @@ func TestSendWithDistanceFilter_RetainsDeletedAtMaxDistanceOne(t *testing.T) {
 		return nil
 	}).Times(1)
 
-	require.NoError(t, sendWithDistanceFilter(stream, responses, 1, nil))
+	require.NoError(t, sendTrimmedChangedTargets(stream, responses, 1, nil))
 
 	kept := sent[0].GetChangedTargets().GetChangedTargets()
 	require.Len(t, kept, 2, "distance-0 DELETED and distance-1 CHANGED both kept; distance-5 dropped")

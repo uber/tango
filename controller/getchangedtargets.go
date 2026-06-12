@@ -115,7 +115,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 					)
 					scope.Counter("cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
-					if sendErr := sendWithDistanceFilter(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
+					if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
 						logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
 						return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send cached response: %w", sendErr))
 					}
@@ -278,7 +278,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}()
 
 	sendStart := time.Now()
-	if err := sendWithDistanceFilter(stream, changedTargetsResponses, maxDist, request.GetOutputConfig()); err != nil {
+	if err := sendTrimmedChangedTargets(stream, changedTargetsResponses, maxDist, request.GetOutputConfig()); err != nil {
 		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
 		return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send response: %w", err))
 	}
@@ -854,12 +854,12 @@ func transposeOptimizedTarget(
 	return dst
 }
 
-// sendWithDistanceFilter streams responses to the client, filtering changed targets to those
+// sendTrimmedChangedTargets streams responses to the client, filtering changed targets to those
 // within maxDist from any distance-0 seed when maxDist >= 0, stripping per-target
 // hash/tags/attributes per outputConfig's include_* flags, and pruning metadata mappings
 // whose IDs are no longer referenced. Filtering and sending are combined into a single pass
 // to avoid an intermediate allocation.
-func sendWithDistanceFilter(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) error {
+func sendTrimmedChangedTargets(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) error {
 	stripFields := optimizedTargetNeedsStripping(outputConfig)
 	pruneMeta := metadataNeedsPruning(outputConfig)
 	for _, resp := range responses {
