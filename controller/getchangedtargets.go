@@ -190,26 +190,24 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	// Wait for both results to complete, either successfully or with an error.
 	for range jobs {
-		select {
-		case res := <-results:
-			jobs[res.order].graphStreamChunks = res.chunks
-			jobs[res.order].completed = true
-			jobs[res.order].err = res.err
-			if res.chunks == nil && res.err == nil {
-				jobs[res.order].err = errors.New("no chunks returned")
-			}
+		res := <-results
+		jobs[res.order].graphStreamChunks = res.chunks
+		jobs[res.order].completed = true
+		jobs[res.order].err = res.err
+		if res.chunks == nil && res.err == nil {
+			jobs[res.order].err = errors.New("no chunks returned")
+		}
 
-			// one of the computations failed, if the other one has not
-			// completed yet, cancel it and wait for the result to come in,
-			// which would be a context cancelled result then
-			if jobs[res.order].err != nil {
-				other := (res.order + 1) % 2
-				if !jobs[other].completed {
-					jobs[other].cancel()
-					// explicitly mark that this job is cancelled, so we can
-					// ignore its error later
-					jobs[other].cancelled = true
-				}
+		// one of the computations failed, if the other one has not
+		// completed yet, cancel it and wait for the result to come in,
+		// which would be a context cancelled result then
+		if jobs[res.order].err != nil {
+			other := (res.order + 1) % 2
+			if !jobs[other].completed {
+				jobs[other].cancel()
+				// explicitly mark that this job is cancelled, so we can
+				// ignore its error later
+				jobs[other].cancelled = true
 			}
 		}
 	}
@@ -340,10 +338,6 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 	}
 
 	sourceFileRuleTypeID := detectSourceFileID(secondMetadata)
-
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
 
 	changedByName := make(map[string]*pb.ChangedTarget)
 	// seeds are targets whose own state changed: NEW, DELETED, a source file
