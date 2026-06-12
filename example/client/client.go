@@ -40,6 +40,9 @@ func main() {
 	timeout := flag.Duration("timeout", 5*time.Minute, "request timeout")
 	maxDistance := flag.Int("max-distance", -1, "max distance for changed targets")
 	bypassCache := flag.Bool("bypass-cache", false, "skip cache lookup and force recomputation, overwriting cached result")
+	includeHashes := flag.Bool("include-hashes", false, "include per-target hash in responses (proto3 default: false)")
+	includeTags := flag.Bool("include-tags", false, "include per-target tags + tag_mapping in responses (proto3 default: false)")
+	includeAttributes := flag.Bool("include-attributes", false, "include per-target attributes + attribute mappings in responses (proto3 default: false)")
 
 	newBaseSHA := flag.String("new-base-sha", "", "build description new base sha")
 	newRequestURLs := flag.String("new-request-urls", "", "comma-separated change request URLs for new state")
@@ -83,6 +86,11 @@ func main() {
 				BaseSha:  *baseSHA,
 				Requests: requests,
 			},
+			OutputConfig: &pb.OutputConfig{
+				IncludeHashes:     *includeHashes,
+				IncludeTags:       *includeTags,
+				IncludeAttributes: *includeAttributes,
+			},
 			BypassCache: *bypassCache,
 		}
 		if err := callGetTargetGraph(ctx, client, logger, req); err != nil {
@@ -124,7 +132,10 @@ func main() {
 				Requests: newRequests,
 			},
 			OutputConfig: &pb.OutputConfig{
-				MaxDistance: int32(*maxDistance),
+				MaxDistance:       int32(*maxDistance),
+				IncludeHashes:     *includeHashes,
+				IncludeTags:       *includeTags,
+				IncludeAttributes: *includeAttributes,
 			},
 			BypassCache: *bypassCache,
 		}

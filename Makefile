@@ -53,7 +53,10 @@ run-client-get-graph:
 		-method $(or $(METHOD),get-target-graph) \
 		-remote "$(or $(REMOTE),)" \
 		-base-sha "$(or $(BASE_SHA),)" \
-		-request-urls "$(or $(REQUEST_URLS),)"
+		-request-urls "$(or $(REQUEST_URLS),)" \
+		-include-hashes=$(or $(INCLUDE_HASHES),false) \
+		-include-tags=$(or $(INCLUDE_TAGS),false) \
+		-include-attributes=$(or $(INCLUDE_ATTRIBUTES),false)
 
 # Run get-changed-targets via the Tango client
 run-client-changed-targets:
@@ -64,7 +67,10 @@ run-client-changed-targets:
 		-base-sha "$(or $(BASE_SHA),)" \
 		-request-urls "$(or $(REQUEST_URLS),)" \
 		-new-base-sha "$(or $(NEW_BASE_SHA),)" \
-		-new-request-urls "$(or $(NEW_REQUEST_URLS),)"
+		-new-request-urls "$(or $(NEW_REQUEST_URLS),)" \
+		-include-hashes=$(or $(INCLUDE_HASHES),false) \
+		-include-tags=$(or $(INCLUDE_TAGS),false) \
+		-include-attributes=$(or $(INCLUDE_ATTRIBUTES),false)
 
 # Show Bazel version
 version:
@@ -110,3 +116,5 @@ help:
 	@echo "  make run-client-get-graph REMOTE=org/repo BASE_SHA=abc123"
 	@echo "  # Run get-changed-targets via the Tango client"
 	@echo "  make run-client-changed-targets REMOTE=org/repo BASE_SHA=abc123 NEW_BASE_SHA=abc123~"
+	@echo "  # Opt into per-target fields (default false per proto3)"
+	@echo "  make run-client-changed-targets REMOTE=org/repo BASE_SHA=abc123 NEW_BASE_SHA=abc123~ INCLUDE_TAGS=true INCLUDE_HASHES=true INCLUDE_ATTRIBUTES=true"
