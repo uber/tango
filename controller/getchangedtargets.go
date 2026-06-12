@@ -56,7 +56,8 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		return common.WithReason(failureReasonValidation, common.ErrorTypeUser, err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
-	ctx := stream.Context()
+	ctx, cancelLink := c.linkRequestCtx(stream.Context())
+	defer cancelLink()
 	start := time.Now()
 	logger := c.logger.With(
 		zap.Any("first_revision", request.GetFirstRevision()),
@@ -272,17 +273,18 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// during computation. Both the goroutine and the send loop below only read
 	// changedTargetsResponses, so concurrent access is safe.
 	go func() {
-		// Detach cancellation so the cache write survives client disconnect,
-		// but preserve request values (tracing/identity) by deriving from ctx.
-		// Per-operation deadlines are the storage backend's responsibility —
-		// the controller is backend-agnostic and must not encode any one
-		// implementation's I/O budget.
-		cacheCtx := context.WithoutCancel(ctx)
-		treehash1 := readTreehash(cacheCtx, c.storage, logger, request.GetFirstRevision())
-		treehash2 := readTreehash(cacheCtx, c.storage, logger, request.GetSecondRevision())
+		// Use c.appCtx directly: the cache write is fire-and-forget and must
+		// outlive the request (so a client disconnect doesn't abort it) but
+		// must NOT outlive the server (so it doesn't leak past shutdown).
+		// c.appCtx fits both: it's never cancelled by client disconnect and
+		// is cancelled on shutdown. Per-operation deadlines are the storage
+		// backend's responsibility — the controller is backend-agnostic and
+		// must not encode any one implementation's I/O budget.
+		treehash1 := readTreehash(c.appCtx, c.storage, logger, request.GetFirstRevision())
+		treehash2 := readTreehash(c.appCtx, c.storage, logger, request.GetSecondRevision())
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
-			if writeErr := storage.WriteChangedTargetsStream(cacheCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
+			if writeErr := storage.WriteChangedTargetsStream(c.appCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
 				logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
 			}
 		} else {

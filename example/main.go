@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -48,6 +49,12 @@ func run() error {
 	defer zl.Sync()
 	logger := zl.Sugar()
 
+	// appCtx is the application-lifetime context. It is cancelled on
+	// SIGINT/SIGTERM so background work (e.g. the controller's async
+	// cache write) is aborted instead of leaking past process exit.
+	appCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+
 	configFilePath := filepath.Join("example", "tango-config.yaml")
 	cfg, err := config.Parse(configFilePath)
 	if err != nil {
@@ -72,14 +79,14 @@ func run() error {
 	}
 	defer os.RemoveAll(workerRootPath)
 
-	rm := repomanager.NewRepoManager(repomanager.Params{
+	rm := repomanager.NewRepoManager(appCtx, repomanager.Params{
 		Git:                  git.New(repoManagerClonePath),
 		Logger:               logger,
 		RepoManagerClonePath: repoManagerClonePath,
 		WorkerRootPath:       workerRootPath,
 		PoolSize:             cfg.Service.WorkerPoolSize,
 	})
-	orch := orchestrator.NewNativeOrchestrator(orchestrator.Params{
+	orch := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
 		Storage:        store,
 		RepoManager:    rm,
 		Logger:         logger,
@@ -87,8 +94,9 @@ func run() error {
 		ConfigFilePath: configFilePath,
 	})
 
-	// Controller (YARPC server implementation)
-	ctrl := controller.NewController(controller.Params{
+	// Controller (YARPC server implementation). appCtx is forwarded so the
+	// controller's background goroutines are tied to process lifetime.
+	ctrl := controller.NewController(appCtx, controller.Params{
 		Logger:       zl,
 		Storage:      store,
 		Orchestrator: orch,
@@ -119,10 +127,8 @@ func run() error {
 	logger.Infof("Tango server is running:")
 	logger.Infof("- gRPC inbound:  %s", port)
 	logger.Infof("Press Ctrl+C to stop.")
-	// Wait for interrupt
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
+	// Block until SIGINT/SIGTERM cancels appCtx.
+	<-appCtx.Done()
 	return nil
 }
 

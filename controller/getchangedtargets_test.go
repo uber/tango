@@ -154,7 +154,7 @@ func TestGetChangedTargets_ValidationError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-	c := NewController(Params{Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
+	c := NewController(context.Background(), Params{Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
 
 	err := c.GetChangedTargets(nil, stream)
 	assert.EqualError(t, err, "request cannot be nil")
@@ -195,7 +195,7 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 
 	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
-	c := NewController(Params{
+	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -223,7 +223,7 @@ func TestGetChangedTargets_GetGraphError(t *testing.T) {
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("graph error")).Times(4)
 
-	c := NewController(Params{
+	c := NewController(context.Background(), Params{
 		Logger:       zap.NewNop(),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -268,7 +268,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 		return nil
 	})
 
-	c := NewController(Params{
+	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -375,7 +375,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 		return nil
 	})
 
-	c := NewController(Params{
+	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -408,6 +408,123 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 
 	targetID := changed.GetNewTarget().GetId()
 	assert.Equal(t, "//app:target2", metadata.GetTargetIdMapping()[targetID])
+}
+
+// TestGetChangedTargets_CacheWriteUsesAppCtx verifies the cache-write
+// goroutine passes c.appCtx to storage (so a client disconnect does not abort
+// the write, but server shutdown does). Drives a successful GetChangedTargets
+// pipeline so the goroutine runs, captures the context the storage backend
+// sees inside Put, and asserts each cancellation source independently.
+func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	reqCtx, cancelReq := context.WithCancel(context.Background())
+	defer cancelReq()
+	stream.EXPECT().Context().Return(reqCtx)
+	stream.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
+
+	storagemock := storagemock.NewMockStorage(ctrl)
+
+	// Minimal single-chunk graph so the comparison succeeds and the cache
+	// goroutine runs. Both revisions share the same target so there are no
+	// diffs to send beyond the metadata chunk.
+	var graphBuf bytes.Buffer
+	w := gogio.NewDelimitedWriter(&graphBuf)
+	w.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{
+			Targets: &pb.OptimizedTargets{
+				Targets: []*pb.OptimizedTarget{{Id: 1, Hash: "h1", RuleType: 100}},
+			},
+		},
+	})
+	w.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{
+			Metadata: &pb.Metadata{
+				TargetIdMapping: map[int32]string{1: "//app:t1"},
+				RuleTypeMapping: map[int32]string{100: "go_library"},
+			},
+		},
+	})
+	graphBytes := graphBuf.Bytes()
+
+	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
+			switch {
+			case strings.Contains(req.Key, "compared-targets"):
+				return nil, &storage.NotFoundError{Path: req.Key}
+			case strings.Contains(req.Key, "sha1"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
+			case strings.Contains(req.Key, "sha2"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
+			case strings.Contains(req.Key, "treehash"):
+				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graphBytes))}, nil
+			default:
+				return nil, fmt.Errorf("unexpected key: %s", req.Key)
+			}
+		}).AnyTimes()
+
+	// Put captures the context the cache-write goroutine passes to storage
+	// and blocks until that context is cancelled, mimicking a slow backend.
+	cacheCtxCh := make(chan context.Context, 1)
+	storagemock.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, _ storage.UploadRequest) error {
+			cacheCtxCh <- ctx
+			<-ctx.Done()
+			return ctx.Err()
+		})
+
+	appCtx, cancelApp := context.WithCancel(context.Background())
+	defer cancelApp()
+	c := NewController(appCtx, Params{
+		Logger:       zaptest.NewLogger(t),
+		Storage:      storagemock,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+	})
+
+	request := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
+	}
+
+	handlerDone := make(chan error, 1)
+	go func() { handlerDone <- c.GetChangedTargets(request, stream) }()
+
+	var cacheCtx context.Context
+	select {
+	case cacheCtx = <-cacheCtxCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cache-write goroutine never reached storage.Put")
+	}
+
+	// Handler should be free to return regardless of the still-running
+	// goroutine — that is the whole point of the detached cache write.
+	select {
+	case err := <-handlerDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("GetChangedTargets did not return while cache write was in flight")
+	}
+
+	// Cancelling the request ctx (client disconnect) must NOT cancel the
+	// cache write. Give the cancellation a beat to propagate if it were
+	// going to.
+	cancelReq()
+	select {
+	case <-cacheCtx.Done():
+		t.Fatal("cache-write ctx was cancelled by request ctx; should only follow appCtx")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Cancelling appCtx (server shutdown) MUST cancel the cache write so
+	// the goroutine doesn't outlive the process.
+	cancelApp()
+	select {
+	case <-cacheCtx.Done():
+		assert.ErrorIs(t, cacheCtx.Err(), context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("cache-write ctx was not cancelled by appCtx")
+	}
 }
 
 func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
@@ -994,7 +1111,7 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 		return nil
 	}).Times(2)
 
-	c := NewController(Params{
+	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),

@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"context"
 	"time"
 
 	"github.com/uber-go/tally"
@@ -49,10 +50,16 @@ type controller struct {
 	changedTargetChunkSize int
 	metadataMapChunkSize   int
 	totalDurationBuckets   tally.Buckets
+
+	// appCtx is the application lifetime; cancel it on process shutdown.
+	// Used by linkRequestCtx and any fire-and-forget goroutines so they
+	// abort instead of leaking past server teardown.
+	appCtx context.Context
 }
 
-// NewController creates a new controller.
-func NewController(p Params) pb.TangoYARPCServer {
+// NewController creates a new controller. appCtx is cancelled on process
+// shutdown to abort background work.
+func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	scope := p.Scope
 	if scope == nil {
 		scope = tally.NoopScope
@@ -78,5 +85,28 @@ func NewController(p Params) pb.TangoYARPCServer {
 		changedTargetChunkSize: changedTargetChunkSize,
 		metadataMapChunkSize:   metadataMapChunkSize,
 		totalDurationBuckets:   _totalDurationBuckets,
+		appCtx:                 appCtx,
+	}
+}
+
+// linkRequestCtx returns a context derived from reqCtx that is also cancelled
+// when c.appCtx is cancelled. Use it at the top of every streaming handler
+// (and pass the returned context to all downstream calls) so a request is
+// aborted both by the client disconnecting (reqCtx) and by the server
+// beginning to shut down (appCtx).
+//
+// The returned cancel function MUST be deferred; it releases the
+// context.AfterFunc handle so we do not leak a watcher past the request.
+func (c *controller) linkRequestCtx(reqCtx context.Context) (context.Context, context.CancelFunc) {
+	// Derive a per-request ctx whose cancel only affects this ctx and its
+	// children — it never propagates up to reqCtx.
+	ctx, cancel := context.WithCancel(reqCtx)
+	// Register a one-shot watcher that cancels the derived ctx if appCtx fires.
+	// AfterFunc only observes appCtx; it never cancels it. stop() deregisters
+	// the watcher so the closure is not retained past the request.
+	stop := context.AfterFunc(c.appCtx, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
 	}
 }

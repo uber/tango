@@ -28,6 +28,7 @@ go_library(
 go_test(
     name = "controller_test",
     srcs = [
+        "controller_test.go",
         "distance_filter_test.go",
         "getchangedtargets_test.go",
         "gettargetgraph_test.go",

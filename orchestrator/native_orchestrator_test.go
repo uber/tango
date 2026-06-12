@@ -63,7 +63,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 
-	o := NewNativeOrchestrator(Params{
+	o := NewNativeOrchestrator(context.Background(), Params{
 		Storage:        st,
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),
@@ -119,7 +119,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 			RuleType: "go_library",
 		},
 	}}, nil)
-	o := NewNativeOrchestrator(Params{
+	o := NewNativeOrchestrator(context.Background(), Params{
 		Storage:        st,
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),
@@ -151,7 +151,7 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 	ws.EXPECT().Release().Return(nil)
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
-	o := NewNativeOrchestrator(Params{
+	o := NewNativeOrchestrator(context.Background(), Params{
 		Storage:        st,
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),
@@ -190,7 +190,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	ws.EXPECT().Release().Return(nil)
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
-	o := NewNativeOrchestrator(Params{
+	o := NewNativeOrchestrator(context.Background(), Params{
 		Storage:        st,
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),

@@ -45,6 +45,17 @@ type nativeOrchestrator struct {
 	gitFactory     func(directory string) git.Interface
 	graphRunner    graphrunner.GraphRunner
 	configFilePath string
+
+	// appCtx represents the app's overall lifetime. It is passed in by the
+	// caller at construction and is expected to be cancelled when the whole
+	// application is shutting down (e.g. on SIGTERM/SIGINT). Any future
+	// fire-and-forget goroutines this orchestrator starts should use this
+	// context instead of context.Background() so they abort promptly on
+	// shutdown rather than running unbounded past server teardown.
+	//
+	// Per-request cancellation should still use the request's own context;
+	// appCtx is only for work that intentionally outlives the request.
+	appCtx context.Context
 }
 
 type Params struct {
@@ -58,7 +69,11 @@ type Params struct {
 }
 
 // NewNativeOrchestrator creates a new native orchestrator with the given parameters.
-func NewNativeOrchestrator(p Params) Orchestrator {
+//
+// appCtx is the application-lifetime context. Cancel it when the process is
+// shutting down (e.g. wire it to SIGTERM/SIGINT in main) to abort any
+// background goroutines the orchestrator spawns.
+func NewNativeOrchestrator(appCtx context.Context, p Params) Orchestrator {
 	scope := p.Scope
 	if scope == nil {
 		scope = tally.NoopScope
@@ -71,6 +86,7 @@ func NewNativeOrchestrator(p Params) Orchestrator {
 		gitFactory:     p.GitFactory,
 		graphRunner:    p.GraphRunner,
 		configFilePath: p.ConfigFilePath,
+		appCtx:         appCtx,
 	}
 }
 

@@ -42,7 +42,8 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 		}
 	}()
 	start := time.Now()
-	ctx := stream.Context()
+	ctx, cancelLink := c.linkRequestCtx(stream.Context())
+	defer cancelLink()
 	logger := c.logger.With(
 		zap.Any("build_description", request.GetBuildDescription()),
 	)

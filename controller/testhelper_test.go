@@ -15,6 +15,8 @@
 package controller
 
 import (
+	"context"
+
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/common"
 	"go.uber.org/zap"
@@ -28,5 +30,6 @@ func newTestController(logger *zap.Logger) *controller {
 		changedTargetChunkSize: common.DefaultChangedTargetChunkSize,
 		metadataMapChunkSize:   common.DefaultMetadataMapChunkSize,
 		totalDurationBuckets:   _totalDurationBuckets,
+		appCtx:                 context.Background(),
 	}
 }
