@@ -74,12 +74,12 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}
 
 	// Try to serve from cache first using the stored treehashes for both revisions.
-	// readTreehash returns "" on any miss/error so we silently skip the cache when
-	// either treehash is not yet available.
+	// readTreehash returns "" on a cache miss (and logs any real storage error) so
+	// we skip the cache when either treehash is not yet available.
 	if !request.GetBypassCache() {
 		cacheStart := time.Now()
-		treehash1 := readTreehash(ctx, c.storage, request.GetFirstRevision())
-		treehash2 := readTreehash(ctx, c.storage, request.GetSecondRevision())
+		treehash1 := readTreehash(ctx, c.storage, logger, request.GetFirstRevision())
+		treehash2 := readTreehash(ctx, c.storage, logger, request.GetSecondRevision())
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
@@ -266,14 +266,23 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// during computation. Both the goroutine and the send loop below only read
 	// changedTargetsResponses, so concurrent access is safe.
 	go func() {
-		cacheCtx := context.Background()
-		treehash1 := readTreehash(cacheCtx, c.storage, request.GetFirstRevision())
-		treehash2 := readTreehash(cacheCtx, c.storage, request.GetSecondRevision())
+		// Detach cancellation so the cache write survives client disconnect,
+		// but preserve request values (tracing/identity) by deriving from ctx.
+		// Per-operation deadlines are the storage backend's responsibility —
+		// the controller is backend-agnostic and must not encode any one
+		// implementation's I/O budget.
+		cacheCtx := context.WithoutCancel(ctx)
+		treehash1 := readTreehash(cacheCtx, c.storage, logger, request.GetFirstRevision())
+		treehash2 := readTreehash(cacheCtx, c.storage, logger, request.GetSecondRevision())
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			if writeErr := storage.WriteChangedTargetsStream(cacheCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
 				logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
 			}
+		} else {
+			logger.Warn("GetChangedTargets: skipping compared-targets cache write, missing treehash",
+				zap.Bool("treehash1_empty", treehash1 == ""),
+				zap.Bool("treehash2_empty", treehash2 == ""))
 		}
 	}()
 
@@ -1007,14 +1016,21 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 
 // readTreehash fetches the treehash stored at GetTreehashCachePath for the given build description.
 // Returns an empty string on any error or cache miss so callers can treat it as an optional optimistic lookup.
-func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) string {
-	resp, err := st.Get(ctx, storage.DownloadRequest{Key: common.GetTreehashCachePath(buildDescription)})
+// A genuine cache miss (not-found) is silent; any other storage error is logged so an
+// infra failure that disables the cache (e.g. a missing-deadline "missing TTL" reject) is visible.
+func readTreehash(ctx context.Context, st storage.Storage, logger *zap.Logger, buildDescription *pb.BuildDescription) string {
+	key := common.GetTreehashCachePath(buildDescription)
+	resp, err := st.Get(ctx, storage.DownloadRequest{Key: key})
 	if err != nil || resp == nil || resp.ReadCloser == nil {
+		if err != nil && !storage.IsNotFound(err) {
+			logger.Warn("readTreehash: treehash read failed", zap.String("key", key), zap.Error(err))
+		}
 		return ""
 	}
 	defer resp.ReadCloser.Close()
 	b, err := io.ReadAll(resp.ReadCloser)
 	if err != nil {
+		logger.Warn("readTreehash: treehash read body failed", zap.String("key", key), zap.Error(err))
 		return ""
 	}
 	return string(b)
