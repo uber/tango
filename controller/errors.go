@@ -33,6 +33,8 @@ const (
 	failureReasonSend = "send"
 	// Diffing two target graphs failed.
 	failureReasonCompare = "compare"
+	// Reading a stored treehash from storage failed (not a cache miss).
+	failureReasonTreehashRead = "treehash_read"
 	// The caller's context was cancelled before the RPC completed.
 	failureReasonCancelled = "cancelled"
 	// The caller's context deadline elapsed before the RPC completed.

@@ -75,12 +75,22 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}
 
 	// Try to serve from cache first using the stored treehashes for both revisions.
-	// readTreehash returns "" on a cache miss (and logs any real storage error) so
-	// we skip the cache when either treehash is not yet available.
+	// readTreehash returns ("", nil) on a cache miss (skip cache, recompute) but any
+	// real storage error surfaces here so an infra failure that disables the cache
+	// (e.g. a missing-deadline "missing TTL" reject) becomes a visible request failure
+	// rather than silent degradation.
 	if !request.GetBypassCache() {
 		cacheStart := time.Now()
-		treehash1 := readTreehash(ctx, c.storage, logger, request.GetFirstRevision())
-		treehash2 := readTreehash(ctx, c.storage, logger, request.GetSecondRevision())
+		treehash1, err := readTreehash(ctx, c.storage, request.GetFirstRevision())
+		if err != nil {
+			logger.Error("GetChangedTargets: Failed to read first revision treehash", zap.Error(err))
+			return common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
+		}
+		treehash2, err := readTreehash(ctx, c.storage, request.GetSecondRevision())
+		if err != nil {
+			logger.Error("GetChangedTargets: Failed to read second revision treehash", zap.Error(err))
+			return common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
+		}
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
@@ -280,8 +290,19 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		// is cancelled on shutdown. Per-operation deadlines are the storage
 		// backend's responsibility — the controller is backend-agnostic and
 		// must not encode any one implementation's I/O budget.
-		treehash1 := readTreehash(c.appCtx, c.storage, logger, request.GetFirstRevision())
-		treehash2 := readTreehash(c.appCtx, c.storage, logger, request.GetSecondRevision())
+		treehash1, err := readTreehash(c.appCtx, c.storage, request.GetFirstRevision())
+		if err != nil {
+			// Goroutine outlives the handler so we can't return; log loudly and
+			// abandon the cache write. Surfacing infra failures matters more than
+			// a missed cache opportunity.
+			logger.Error("GetChangedTargets: skipping cache write, failed to read first revision treehash", zap.Error(err))
+			return
+		}
+		treehash2, err := readTreehash(c.appCtx, c.storage, request.GetSecondRevision())
+		if err != nil {
+			logger.Error("GetChangedTargets: skipping cache write, failed to read second revision treehash", zap.Error(err))
+			return
+		}
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			if writeErr := storage.WriteChangedTargetsStream(c.appCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
@@ -1053,23 +1074,25 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 }
 
 // readTreehash fetches the treehash stored at GetTreehashCachePath for the given build description.
-// Returns an empty string on any error or cache miss so callers can treat it as an optional optimistic lookup.
-// A genuine cache miss (not-found) is silent; any other storage error is logged so an
-// infra failure that disables the cache (e.g. a missing-deadline "missing TTL" reject) is visible.
-func readTreehash(ctx context.Context, st storage.Storage, logger *zap.Logger, buildDescription *pb.BuildDescription) string {
+// Returns ("", nil) on a cache miss (not-found is the normal "not yet computed" state).
+// Returns ("", err) on any other storage or read failure so callers can decide whether to
+// surface the error or fall back. Returns (treehash, nil) on a successful read.
+func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) (string, error) {
 	key := common.GetTreehashCachePath(buildDescription)
 	resp, err := st.Get(ctx, storage.DownloadRequest{Key: key})
-	if err != nil || resp == nil || resp.ReadCloser == nil {
-		if err != nil && !storage.IsNotFound(err) {
-			logger.Warn("readTreehash: treehash read failed", zap.String("key", key), zap.Error(err))
+	if err != nil {
+		if storage.IsNotFound(err) {
+			return "", nil
 		}
-		return ""
+		return "", fmt.Errorf("treehash read failed for key %q: %w", key, err)
+	}
+	if resp == nil || resp.ReadCloser == nil {
+		return "", fmt.Errorf("treehash read returned nil body for key %q", key)
 	}
 	defer resp.ReadCloser.Close()
 	b, err := io.ReadAll(resp.ReadCloser)
 	if err != nil {
-		logger.Warn("readTreehash: treehash read body failed", zap.String("key", key), zap.Error(err))
-		return ""
+		return "", fmt.Errorf("treehash body read failed for key %q: %w", key, err)
 	}
-	return string(b)
+	return string(b), nil
 }

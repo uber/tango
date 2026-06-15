@@ -27,6 +27,7 @@ import (
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
@@ -211,17 +212,19 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestGetChangedTargets_GetGraphError(t *testing.T) {
+func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background())
 
 	storagemock := storagemock.NewMockStorage(ctrl)
-	// First two Gets are treehash pre-reads (both return error -> treated as cache miss, skip
-	// comparison cache check). The next two are the goroutine treehash lookups, which also fail
-	// with a non-NotFound error so getGraph propagates the error for both revisions.
+	// A non-NotFound storage error on the first treehash read must surface as
+	// a failed request (with failureReasonTreehashRead) rather than be silently
+	// treated as a cache miss. The handler returns before any second treehash
+	// read or graph fetch happens, so this is the only Get expected.
+	injected := errors.New("storage exploded")
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-		Return(nil, errors.New("graph error")).Times(4)
+		Return(nil, injected).Times(1)
 
 	c := NewController(context.Background(), Params{
 		Logger:       zap.NewNop(),
@@ -236,7 +239,62 @@ func TestGetChangedTargets_GetGraphError(t *testing.T) {
 	}
 
 	err := c.GetChangedTargets(request, stream)
-	assert.Error(t, err)
+	require.Error(t, err)
+	require.ErrorIs(t, err, injected)
+	var ce common.ClassifiedError
+	require.True(t, errors.As(err, &ce), "expected ClassifiedError, got %T", err)
+	assert.Equal(t, failureReasonTreehashRead, ce.Reason())
+	assert.Equal(t, common.ErrorTypeInfra, ce.Type())
+}
+
+func TestReadTreehash(t *testing.T) {
+	bd := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"}
+
+	t.Run("cache miss returns empty and no error", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		st := storagemock.NewMockStorage(ctrl)
+		st.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(nil, &storage.NotFoundError{Path: "missing"})
+
+		val, err := readTreehash(context.Background(), st, bd)
+		require.NoError(t, err)
+		assert.Empty(t, val)
+	})
+
+	t.Run("storage error surfaces", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		st := storagemock.NewMockStorage(ctrl)
+		injected := errors.New("infra down")
+		st.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(nil, injected)
+
+		val, err := readTreehash(context.Background(), st, bd)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, injected)
+		assert.Empty(t, val)
+	})
+
+	t.Run("nil response surfaces as error", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		st := storagemock.NewMockStorage(ctrl)
+		st.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(nil, nil)
+
+		val, err := readTreehash(context.Background(), st, bd)
+		require.Error(t, err)
+		assert.Empty(t, val)
+	})
+
+	t.Run("success returns treehash", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		st := storagemock.NewMockStorage(ctrl)
+		st.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("deadbeef"))}, nil)
+
+		val, err := readTreehash(context.Background(), st, bd)
+		require.NoError(t, err)
+		assert.Equal(t, "deadbeef", val)
+	})
 }
 
 func TestGetChangedTargets_StreamSendError(t *testing.T) {
