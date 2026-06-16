@@ -6,7 +6,6 @@ MODULE.bazel.lock
 .idea/
 .claude/
 .ijwb/
-CLAUDE.md
 .mcp.*
 tools/gopackagesdriver.sh
 
