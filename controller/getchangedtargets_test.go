@@ -524,7 +524,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
-	// Expect 2 changed: A (source-file seed, distance 0) and L (rule consuming A, distance 1 via BFS)
+	// Expect 2 changed: A (source-file seed, distance 0) and L (rule whose own src changed, distance 0)
 	require.Len(t, cs.GetChangedTargets(), 2)
 	var aCT, lCT *pb.ChangedTarget
 	for _, ct := range cs.GetChangedTargets() {
@@ -541,7 +541,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 	require.Equal(t, pb.CHANGE_TYPE_CHANGED, aCT.GetChangeType())
 	require.Equal(t, pb.CHANGE_TYPE_CHANGED, lCT.GetChangeType())
 	assert.Equal(t, int32(0), aCT.GetDistance(), "source-file A with hash change is a seed (distance 0)")
-	assert.Equal(t, int32(1), lCT.GetDistance(), "rule L consuming A gets distance 1 via BFS")
+	assert.Equal(t, int32(0), lCT.GetDistance(), "rule L whose own source A changed is a seed (distance 0)")
 	// Old and new IDs must match for each changed target under canonical metadata
 	require.Equal(t, aCT.GetOldTarget().GetId(), aCT.GetNewTarget().GetId())
 	require.Equal(t, lCT.GetOldTarget().GetId(), lCT.GetNewTarget().GetId())
@@ -1180,7 +1180,86 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 	}
 	require.NotNil(t, targetT)
 	require.Equal(t, pb.CHANGE_TYPE_CHANGED, targetT.GetChangeType(), "Target with only hash change (not deps/attrs) is CHANGED")
-	assert.Equal(t, int32(1), targetT.GetDistance(), "T is not a seed itself but consumes a changed source file at distance 1")
+	assert.Equal(t, int32(0), targetT.GetDistance(), "T owns changed source file A so is a seed (distance 0)")
+}
+
+func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
+	c := newTestController(zaptest.NewLogger(t))
+
+	// Source file A (id 1) owned by rule L (id 2).
+	// Rule T (id 3) depends on L (sibling rule), NOT directly on A.
+	// When A changes, L should be distance 0 (owns its changed src),
+	// but T should be distance 1 (depends on changed rule, not its own src).
+	first := []*pb.GetTargetGraphResponse{
+		{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{
+					Targets: []*pb.OptimizedTarget{
+						{Id: 1, Hash: "h1", RuleType: 100},                                 // source file A
+						{Id: 2, Hash: "h1", RuleType: 200, DirectDependencies: []int32{1}}, // rule L -> A
+						{Id: 3, Hash: "h1", RuleType: 200, DirectDependencies: []int32{2}}, // rule T -> L
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetTargetGraphResponse_Metadata{
+				Metadata: &pb.Metadata{
+					TargetIdMapping: map[int32]string{
+						1: "//pkg:A",
+						2: "//pkg:L",
+						3: "//pkg:T",
+					},
+					RuleTypeMapping: map[int32]string{
+						100: "source file",
+						200: "rule",
+					},
+				},
+			},
+		},
+	}
+	second := []*pb.GetTargetGraphResponse{
+		{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{
+					Targets: []*pb.OptimizedTarget{
+						{Id: 11, Hash: "h2", RuleType: 101},                                   // source file A changed
+						{Id: 22, Hash: "h2", RuleType: 201, DirectDependencies: []int32{11}},  // rule L -> A
+						{Id: 33, Hash: "h2", RuleType: 201, DirectDependencies: []int32{22}},  // rule T -> L
+					},
+				},
+			},
+		},
+		{
+			Item: &pb.GetTargetGraphResponse_Metadata{
+				Metadata: &pb.Metadata{
+					TargetIdMapping: map[int32]string{
+						11: "//pkg:A",
+						22: "//pkg:L",
+						33: "//pkg:T",
+					},
+					RuleTypeMapping: map[int32]string{
+						101: "source file",
+						201: "rule",
+					},
+				},
+			},
+		},
+	}
+	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	require.NoError(t, err)
+	cs := res[0].GetChangedTargets()
+	require.NotNil(t, cs)
+	require.Len(t, cs.GetChangedTargets(), 3)
+
+	byName := make(map[string]*pb.ChangedTarget)
+	for _, ct := range cs.GetChangedTargets() {
+		name := res[1].GetMetadata().GetTargetIdMapping()[ct.GetNewTarget().GetId()]
+		byName[name] = ct
+	}
+	assert.Equal(t, int32(0), byName["//pkg:A"].GetDistance(), "source file A is a seed")
+	assert.Equal(t, int32(0), byName["//pkg:L"].GetDistance(), "rule L owns changed source A → seed")
+	assert.Equal(t, int32(1), byName["//pkg:T"].GetDistance(), "rule T depends on sibling rule L, not its own src → distance 1")
 }
 
 func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {

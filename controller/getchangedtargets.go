@@ -376,7 +376,8 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 
 	// Pass 1: walk second revision. Targets not in first revision are NEW (seeds).
 	// Targets in both with differing hashes are CHANGED; source-file CHANGED
-	// targets are also seeds (rule consumers will pick up distance >= 1 via BFS).
+	// targets are also seeds. Rules that own a changed source file are promoted
+	// to seeds in pass 2 via hasChangedSourceFileDep.
 	diffScanStart := time.Now()
 	for name, newT := range secondByName {
 		oldT, exists := firstByName[name]
@@ -473,6 +474,10 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 			continue
 		}
 		if depsChanged {
+			seeds[name] = struct{}{}
+			continue
+		}
+		if hasChangedSourceFileDep(newT, secondMetadata, changedByName, secondByName, sourceFileRuleTypeID) {
 			seeds[name] = struct{}{}
 			continue
 		}
@@ -737,6 +742,35 @@ func changedDepStatus(
 		}
 	}
 	return anyChanged, false
+}
+
+// hasChangedSourceFileDep reports whether any direct dependency of the given
+// target is a changed source file. When true the rule's own inputs changed and
+// it should be treated as a seed (distance 0) rather than a transitive consumer.
+func hasChangedSourceFileDep(
+	target *pb.OptimizedTarget,
+	meta *pb.Metadata,
+	changedByName map[string]*pb.ChangedTarget,
+	targetsByName map[string]*pb.OptimizedTarget,
+	sourceFileRuleTypeID int32,
+) bool {
+	if target == nil || meta == nil || sourceFileRuleTypeID == -1 {
+		return false
+	}
+	idMapping := meta.GetTargetIdMapping()
+	for _, depID := range target.GetDirectDependencies() {
+		depName := idMapping[depID]
+		if depName == "" {
+			continue
+		}
+		if _, changed := changedByName[depName]; !changed {
+			continue
+		}
+		if depTarget, ok := targetsByName[depName]; ok && depTarget.GetRuleType() == sourceFileRuleTypeID {
+			return true
+		}
+	}
+	return false
 }
 
 // attributesChanged checks if the attributes changed between old and new targets.
