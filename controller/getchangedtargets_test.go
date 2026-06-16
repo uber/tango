@@ -1223,9 +1223,9 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 			Item: &pb.GetTargetGraphResponse_Targets{
 				Targets: &pb.OptimizedTargets{
 					Targets: []*pb.OptimizedTarget{
-						{Id: 11, Hash: "h2", RuleType: 101},                                   // source file A changed
-						{Id: 22, Hash: "h2", RuleType: 201, DirectDependencies: []int32{11}},  // rule L -> A
-						{Id: 33, Hash: "h2", RuleType: 201, DirectDependencies: []int32{22}},  // rule T -> L
+						{Id: 11, Hash: "h2", RuleType: 101},                                  // source file A changed
+						{Id: 22, Hash: "h2", RuleType: 201, DirectDependencies: []int32{11}}, // rule L -> A
+						{Id: 33, Hash: "h2", RuleType: 201, DirectDependencies: []int32{22}}, // rule T -> L
 					},
 				},
 			},
