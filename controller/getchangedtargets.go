@@ -255,6 +255,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	firstGraph = nil
 	secondGraph = nil
 	if err != nil {
+		if ctx.Err() != nil {
+			return common.WithReason(failureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+		}
 		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
 		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))
 	}
