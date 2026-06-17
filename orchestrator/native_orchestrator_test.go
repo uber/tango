@@ -48,7 +48,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// Single fetch by remote/treehash for the graph
-	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
 	}, nil)
 
@@ -92,7 +92,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	defer ctrl.Finish()
 	st := storagemock.NewMockStorage(ctrl)
 	// First attempt returns NotFound to trigger compute path.
-	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(nil, &storage.NotFoundError{Path: "missing"})
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "missing"})
 	// Expect writes (graph list and treehash cache mapping)
 	st.EXPECT().Put(gomock.Any(), gomock.Any()).Return(nil).MinTimes(2)
 	// After compute, second read returns a valid delimited stream with one message
@@ -100,7 +100,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	_ = gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
 	})
-	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
 	}, nil)
 	g := gitmock.NewMockInterface(ctrl)
@@ -180,7 +180,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	// Compute treehash
 	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("treehash", nil)
 	// Single storage fetch for graph by remote/treehash
-	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
 	}, nil)
 	ws := workspacemock.NewMockWorkspace(ctrl)

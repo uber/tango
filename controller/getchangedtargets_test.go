@@ -187,11 +187,11 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 	// First two Gets resolve the treehashes, third gets the cached comparison result.
 	gomock.InOrder(
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil),
+			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil),
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil),
+			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil),
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cachedBytes))}, nil),
+			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cachedBytes))}, nil),
 	)
 
 	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
@@ -224,7 +224,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 	// read or graph fetch happens, so this is the only Get expected.
 	injected := errors.New("storage exploded")
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-		Return(nil, injected).Times(1)
+		Return(storage.DownloadResponse{}, injected).Times(1)
 
 	c := NewController(context.Background(), Params{
 		Logger:       zap.NewNop(),
@@ -254,7 +254,7 @@ func TestReadTreehash(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		st := storagemock.NewMockStorage(ctrl)
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(nil, &storage.NotFoundError{Path: "missing"})
+			Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "missing"})
 
 		val, err := readTreehash(context.Background(), st, bd)
 		require.NoError(t, err)
@@ -266,7 +266,7 @@ func TestReadTreehash(t *testing.T) {
 		st := storagemock.NewMockStorage(ctrl)
 		injected := errors.New("infra down")
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(nil, injected)
+			Return(storage.DownloadResponse{}, injected)
 
 		val, err := readTreehash(context.Background(), st, bd)
 		require.Error(t, err)
@@ -274,22 +274,11 @@ func TestReadTreehash(t *testing.T) {
 		assert.Empty(t, val)
 	})
 
-	t.Run("nil response surfaces as error", func(t *testing.T) {
-		ctrl := gomock.NewController(t)
-		st := storagemock.NewMockStorage(ctrl)
-		st.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(nil, nil)
-
-		val, err := readTreehash(context.Background(), st, bd)
-		require.Error(t, err)
-		assert.Empty(t, val)
-	})
-
 	t.Run("success returns treehash", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		st := storagemock.NewMockStorage(ctrl)
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("deadbeef"))}, nil)
+			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("deadbeef"))}, nil)
 
 		val, err := readTreehash(context.Background(), st, bd)
 		require.NoError(t, err)
@@ -309,14 +298,14 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
 	})
-	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
+	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 		if strings.Contains(req.Key, "compared-targets") {
-			return nil, &storage.NotFoundError{Path: req.Key}
+			return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
 		}
 		if strings.Contains(req.Key, "th") {
-			return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil
+			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil
 		}
-		return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("th")))}, nil
+		return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("th")))}, nil
 	}).AnyTimes()
 
 	// Put is launched in a goroutine — use a channel to wait for it before the test ends.
@@ -409,20 +398,20 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 
 	// Each revision needs: treehash lookup + graph lookup. Plus one initial cache miss.
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
+		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 			switch {
 			case strings.Contains(req.Key, "compared-targets"):
-				return nil, &storage.NotFoundError{Path: req.Key}
+				return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
 			case strings.Contains(req.Key, "sha1"):
-				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
 			case strings.Contains(req.Key, "sha2"):
-				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
 			case strings.Contains(req.Key, "treehash1"):
-				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph1Bytes))}, nil
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph1Bytes))}, nil
 			case strings.Contains(req.Key, "treehash2"):
-				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph2Bytes))}, nil
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph2Bytes))}, nil
 			default:
-				return nil, fmt.Errorf("unexpected key: %s", req.Key)
+				return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
 			}
 			// readTreehash (×2 pre) + comparison cache miss (×1) + graph computation (×4) + readTreehash (×2 post) = 9
 		}).Times(9)
@@ -506,18 +495,18 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	graphBytes := graphBuf.Bytes()
 
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
+		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 			switch {
 			case strings.Contains(req.Key, "compared-targets"):
-				return nil, &storage.NotFoundError{Path: req.Key}
+				return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
 			case strings.Contains(req.Key, "sha1"):
-				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
 			case strings.Contains(req.Key, "sha2"):
-				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
 			case strings.Contains(req.Key, "treehash"):
-				return &storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graphBytes))}, nil
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graphBytes))}, nil
 			default:
-				return nil, fmt.Errorf("unexpected key: %s", req.Key)
+				return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
 			}
 		}).AnyTimes()
 
@@ -1156,11 +1145,11 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	storagemock := storagemock.NewMockStorage(ctrl)
 	gomock.InOrder(
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil),
+			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil),
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil),
+			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil),
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(&storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cachedBytes))}, nil),
+			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cachedBytes))}, nil),
 	)
 
 	var sent []*pb.GetChangedTargetsResponse

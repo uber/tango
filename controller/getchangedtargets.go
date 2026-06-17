@@ -1086,9 +1086,6 @@ func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.
 		}
 		return "", fmt.Errorf("treehash read failed for key %q: %w", key, err)
 	}
-	if resp == nil || resp.ReadCloser == nil {
-		return "", fmt.Errorf("treehash read returned nil body for key %q", key)
-	}
 	defer resp.ReadCloser.Close()
 	b, err := io.ReadAll(resp.ReadCloser)
 	if err != nil {

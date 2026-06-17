@@ -110,10 +110,6 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 				logger.Error("getGraph: Storage error", zap.Error(err))
 				return nil, err
 			}
-		} else if treehashResponse == nil || treehashResponse.ReadCloser == nil {
-			// This shouldn't happen with valid Storage implementation, but handle gracefully
-			logger.Info("getGraph: Empty response from Storage")
-			return nil, nil // Return nil to indicate no send should happen
 		} else {
 			defer treehashResponse.ReadCloser.Close()
 			treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)

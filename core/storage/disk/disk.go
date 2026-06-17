@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/uber/tango/core/storage"
 )
@@ -42,19 +43,19 @@ func New(rootDir string) (*diskStorage, error) {
 }
 
 // Get retrieves a blob by key. Returns storage.NotFoundError if not found.
-func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (*storage.DownloadResponse, error) {
+func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return storage.DownloadResponse{}, ctx.Err()
 	}
 	path := filepath.Join(d.rootDir, req.Key)
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, &storage.NotFoundError{Path: req.Key}
+			return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
 		}
-		return nil, err
+		return storage.DownloadResponse{}, err
 	}
-	return &storage.DownloadResponse{ReadCloser: file}, nil
+	return storage.DownloadResponse{ReadCloser: file}, nil
 }
 
 // Put stores a blob with the given key.
@@ -104,14 +105,22 @@ func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
 	return false, err
 }
 
-// List returns the relative paths of all regular files under the given directory prefix.
-func (d *diskStorage) List(ctx context.Context, dir string) ([]string, error) {
+// List returns all keys whose name starts with the given prefix.
+//
+// To honor the literal-prefix contract without walking the entire rootDir, this
+// walks the longest path-prefix of `prefix` ending in "/" (or rootDir if none)
+// and filters entries by strings.HasPrefix on the full key.
+func (d *diskStorage) List(ctx context.Context, prefix string) ([]string, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	root := filepath.Join(d.rootDir, dir)
+	walkSubdir := ""
+	if idx := strings.LastIndex(prefix, "/"); idx >= 0 {
+		walkSubdir = prefix[:idx+1]
+	}
+	walkRoot := filepath.Join(d.rootDir, walkSubdir)
 	var keys []string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil
@@ -124,6 +133,9 @@ func (d *diskStorage) List(ctx context.Context, dir string) ([]string, error) {
 		rel, err := filepath.Rel(d.rootDir, path)
 		if err != nil {
 			return err
+		}
+		if !strings.HasPrefix(rel, prefix) {
+			return nil
 		}
 		keys = append(keys, rel)
 		return nil

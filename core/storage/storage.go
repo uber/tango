@@ -51,13 +51,27 @@ type UploadRequest struct {
 }
 
 // Storage is an abstract interface for remote data storage.
+//
+// Keys are opaque strings; the interface has no concept of paths, directories,
+// or segments. Any structure (e.g. "/"-delimited paths) is a convention of the
+// caller, and implementations MUST NOT impose path semantics of their own.
 type Storage interface {
-	// Get downloads a blob from the storage. Return NotFoundError when the blob is not found.
-	Get(ctx context.Context, req DownloadRequest) (*DownloadResponse, error)
+	// Get downloads a blob from the storage. On success the returned DownloadResponse.ReadCloser
+	// is non-nil and the caller owns closing it. Returns NotFoundError when the blob is not found.
+	Get(ctx context.Context, req DownloadRequest) (DownloadResponse, error)
 	// Put uploads a blob to the storage
 	Put(ctx context.Context, req UploadRequest) error
 	// Exists checks whether a blob exists in the storage.
 	Exists(ctx context.Context, key string) (bool, error)
-	// List returns the keys of all blobs under the given directory prefix.
-	List(ctx context.Context, dir string) ([]string, error)
+	// List returns all keys whose name starts with the given prefix, semantically
+	// equivalent to filtering the full key namespace by strings.HasPrefix(key, prefix).
+	//
+	// Implementations MUST treat prefix as a literal string prefix and MUST NOT
+	// interpret it as a directory path. Callers control segment boundaries by
+	// including a trailing "/" in their prefix: List(ctx, "foo") matches both
+	// "foo/bar" and "foo-bar", while List(ctx, "foo/") matches only the former.
+	//
+	// An empty prefix lists every key. The returned slice is unordered and may be
+	// nil when no key matches.
+	List(ctx context.Context, prefix string) ([]string, error)
 }

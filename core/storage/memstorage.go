@@ -36,14 +36,14 @@ func NewMemoryStorage() Storage {
 }
 
 // Get downloads a blob from the storage. Return NotFoundError when the blob is not found.
-func (m *memoryStorage) Get(ctx context.Context, req DownloadRequest) (*DownloadResponse, error) {
+func (m *memoryStorage) Get(ctx context.Context, req DownloadRequest) (DownloadResponse, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	b, ok := m.data[req.Key]
 	if !ok {
-		return nil, &NotFoundError{Path: req.Key}
+		return DownloadResponse{}, &NotFoundError{Path: req.Key}
 	}
-	return &DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(b))}, nil
+	return DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(b))}, nil
 }
 
 func (m *memoryStorage) Put(ctx context.Context, req UploadRequest) error {
@@ -67,12 +67,12 @@ func (m *memoryStorage) Exists(ctx context.Context, key string) (bool, error) {
 	return ok, nil
 }
 
-func (m *memoryStorage) List(ctx context.Context, dir string) ([]string, error) {
+func (m *memoryStorage) List(ctx context.Context, prefix string) ([]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var keys []string
 	for k := range m.data {
-		if strings.HasPrefix(k, dir) {
+		if strings.HasPrefix(k, prefix) {
 			keys = append(keys, k)
 		}
 	}

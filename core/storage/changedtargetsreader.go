@@ -58,9 +58,6 @@ func NewChangedTargetsReader(ctx context.Context, st Storage, key string) (Chang
 	if err != nil {
 		return nil, err
 	}
-	if resp == nil || resp.ReadCloser == nil {
-		return nil, nil
-	}
 	return &changedTargetsReaderCloser{
 		reader: gogio.NewDelimitedReader(resp.ReadCloser, 32<<20),
 	}, nil

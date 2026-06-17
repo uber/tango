@@ -41,9 +41,9 @@ func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
 	// Return a valid treehash, then an empty graph blob (no messages).
 	gomock.InOrder(
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(&storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-empty"))}, nil),
+			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-empty"))}, nil),
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(&storage.DownloadResponse{ReadCloser: newMockReadCloser(nil)}, nil),
+			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte{})}, nil),
 	)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
@@ -69,7 +69,7 @@ func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background())
 	storagemock := storagemock.NewMockStorage(ctrl)
-	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(nil, expected)
+	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, expected)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
 		Storage: storagemock,
@@ -93,8 +93,8 @@ func TestGetTargetGraph_DecodeError_ReturnsError(t *testing.T) {
 	stream.EXPECT().Context().Return(context.Background())
 	storagemock := storagemock.NewMockStorage(ctrl)
 	gomock.InOrder(
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("bad-bytes"))}, nil),
+		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
+		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("bad-bytes"))}, nil),
 	)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
@@ -126,8 +126,8 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 	require.NoError(t, err)
 
 	gomock.InOrder(
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-xyz"))}, nil),
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: newMockReadCloser(buf.Bytes())}, nil),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-xyz"))}, nil),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(buf.Bytes())}, nil),
 	)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
@@ -188,7 +188,7 @@ func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).Return(nil)
 
 	store := storagemock.NewMockStorage(ctrl)
-	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(nil, &storage.NotFoundError{Path: "x"})
+	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "x"})
 	orchestrator := orchestratormock.NewMockOrchestrator(ctrl)
 	// Provide a fake GraphReader that yields one message then EOF
 	graphReader := storagemock.NewMockGraphReader(ctrl)
@@ -218,7 +218,7 @@ func TestGetTargetGraph_TreehashReadError(t *testing.T) {
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background())
 	store := storagemock.NewMockStorage(ctrl)
-	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: &errReadCloser{err: errors.New("readfail")}}, nil)
+	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: &errReadCloser{err: errors.New("readfail")}}, nil)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
 		Storage: store,
@@ -236,8 +236,8 @@ func TestGetTargetGraph_GraphFetchError(t *testing.T) {
 	stream.EXPECT().Context().Return(context.Background())
 	store := storagemock.NewMockStorage(ctrl)
 	gomock.InOrder(
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(nil, errors.New("graph error")),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, errors.New("graph error")),
 	)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
@@ -256,8 +256,8 @@ func TestGetTargetGraph_GraphReadError(t *testing.T) {
 	stream.EXPECT().Context().Return(context.Background())
 	store := storagemock.NewMockStorage(ctrl)
 	gomock.InOrder(
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: &errReadCloser{err: errors.New("readfail")}}, nil),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: &errReadCloser{err: errors.New("readfail")}}, nil),
 	)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
@@ -284,8 +284,8 @@ func TestGetTargetGraph_StreamSendError(t *testing.T) {
 
 	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send fail"))
 	gomock.InOrder(
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(&storage.DownloadResponse{ReadCloser: newMockReadCloser(buf.Bytes())}, nil),
+		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
+		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(buf.Bytes())}, nil),
 	)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),

@@ -169,6 +169,38 @@ func TestStorage_List(t *testing.T) {
 		_, err := s.List(cancelledCtx, "itg")
 		assert.Error(t, err)
 	})
+
+	t.Run("partial-segment prefix matches sibling keys (literal prefix)", func(t *testing.T) {
+		// Both "itg/repoA..." and "itg/repoB..." start with "itg/repo" — the
+		// literal-prefix contract returns both, even though they are different
+		// "directories" in a filesystem sense.
+		keys, err := s.List(ctx, "itg/repo")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{
+			"itg/repoA/2024-01-01/100_abc",
+			"itg/repoA/2024-01-02/200_def",
+			"itg/repoB/2024-01-01/300_ghi",
+		}, keys)
+	})
+
+	t.Run("trailing slash delimits segment", func(t *testing.T) {
+		// Same data, but the trailing "/" enforces a segment boundary so only
+		// repoA's keys match.
+		keys, err := s.List(ctx, "itg/repoA/")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{
+			"itg/repoA/2024-01-01/100_abc",
+			"itg/repoA/2024-01-02/200_def",
+		}, keys)
+	})
+
+	t.Run("top-level partial prefix without slash", func(t *testing.T) {
+		// "g" matches "graph/treehash123" only — proves the walk doesn't require
+		// the prefix to name a real directory.
+		keys, err := s.List(ctx, "g")
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"graph/treehash123"}, keys)
+	})
 }
 
 func TestStorage_Get_NotFound(t *testing.T) {
@@ -178,7 +210,7 @@ func TestStorage_Get_NotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	resp, err := s.Get(ctx, storage.DownloadRequest{Key: "nonexistent.txt"})
-	assert.Nil(t, resp)
+	assert.Nil(t, resp.ReadCloser)
 	assert.Error(t, err)
 	assert.True(t, storage.IsNotFound(err))
 }
