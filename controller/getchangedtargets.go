@@ -129,7 +129,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 					logger.Info("GetChangedTargets: Cache hit, streaming from storage",
 						zap.Duration("cache_read_duration", cacheReadDuration),
 					)
-					scope.Counter("cache_hit").Inc(1)
+					scope.Counter("changed_targets_cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
 					if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
 						logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
