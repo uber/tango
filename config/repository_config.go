@@ -25,12 +25,6 @@ type RepositoryConfig struct {
 	BazelCommand           string   `yaml:"bazel_command"`
 	QueryTimeout           int64    `yaml:"query_timeout"` // in seconds
 	BazelExtraArgs []string `yaml:"bazel_extra_args"`
-	// StreamBazelLogs forwards Bazel's stderr to the Tango process's stderr
-	// in real time instead of buffering it. When true, operators see query
-	// progress live as Bazel runs; the trade-off is that stderr is no longer
-	// captured, so query-failure errors will not include it. When false
-	// (default) stderr is buffered and folded into the returned error if
-	// the query fails.
 	StreamBazelLogs bool `yaml:"stream_bazel_logs"`
 }
 
