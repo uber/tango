@@ -196,6 +196,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			Logger:        b.logger,
 			BazelCommand:  repoCfg.BazelCommand,
 			QueryTimeout:  time.Duration(repoCfg.QueryTimeout) * time.Second,
+			StreamLogs:    repoCfg.StreamBazelLogs,
 		})
 		if err != nil {
 			logger.Errorw("GetTargetGraph: Error creating bazel client", zap.Error(err))

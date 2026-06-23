@@ -56,6 +56,7 @@ type BazelClient struct {
 	logger             *zap.SugaredLogger
 	execCommandContext func(ctx context.Context, name string, arg ...string) commander
 	queryTimeout       time.Duration
+	streamLogs         bool
 }
 
 type Params struct {
@@ -65,6 +66,7 @@ type Params struct {
 	Logger             *zap.SugaredLogger
 	ExecCommandContext func(ctx context.Context, name string, arg ...string) commander
 	QueryTimeout       time.Duration
+	StreamLogs         bool
 }
 
 func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
@@ -97,6 +99,7 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 		logger:             p.Logger,
 		execCommandContext: execCmd,
 		queryTimeout:       timeout,
+		streamLogs:         p.StreamLogs,
 	}, nil
 }
 
