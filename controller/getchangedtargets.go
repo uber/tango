@@ -81,14 +81,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// rather than silent degradation.
 	if !request.GetBypassCache() {
 		cacheStart := time.Now()
-		treehash1, err := readTreehash(ctx, c.storage, request.GetFirstRevision())
+		treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
 		if err != nil {
-			logger.Error("GetChangedTargets: Failed to read first revision treehash", zap.Error(err))
-			return common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
-		}
-		treehash2, err := readTreehash(ctx, c.storage, request.GetSecondRevision())
-		if err != nil {
-			logger.Error("GetChangedTargets: Failed to read second revision treehash", zap.Error(err))
+			logger.Error("GetChangedTargets: Failed to read revision treehash", zap.Error(err))
 			return common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
 		}
 		if treehash1 != "" && treehash2 != "" {
@@ -290,17 +285,12 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		// is cancelled on shutdown. Per-operation deadlines are the storage
 		// backend's responsibility — the controller is backend-agnostic and
 		// must not encode any one implementation's I/O budget.
-		treehash1, err := readTreehash(c.appCtx, c.storage, request.GetFirstRevision())
+		treehash1, treehash2, err := readTreehashParallel(c.appCtx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
 		if err != nil {
 			// Goroutine outlives the handler so we can't return; log loudly and
 			// abandon the cache write. Surfacing infra failures matters more than
 			// a missed cache opportunity.
-			logger.Error("GetChangedTargets: skipping cache write, failed to read first revision treehash", zap.Error(err))
-			return
-		}
-		treehash2, err := readTreehash(c.appCtx, c.storage, request.GetSecondRevision())
-		if err != nil {
-			logger.Error("GetChangedTargets: skipping cache write, failed to read second revision treehash", zap.Error(err))
+			logger.Error("GetChangedTargets: skipping cache write, failed to read revision treehash", zap.Error(err))
 			return
 		}
 		if treehash1 != "" && treehash2 != "" {
@@ -1071,6 +1061,49 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 		return errors.New("first and second revision must have the same remote")
 	}
 	return nil
+}
+
+// readTreehashParallel fetches the treehashes for two build descriptions concurrently.
+// Each treehash is read via readTreehash, so a cache miss yields "" (with a nil error)
+// while any real storage/read failure is returned. The two reads run under a shared
+// cancellable context: as soon as one read fails, the sibling is cancelled so it stops
+// wasting work on a result that will be discarded anyway. The cancelled sibling's error
+// is dropped — only the original failure is returned, so a self-inflicted
+// context.Canceled never masks the real reason the lookup failed.
+func readTreehashParallel(ctx context.Context, st storage.Storage, first, second *pb.BuildDescription) (string, string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		idx  int
+		hash string
+		err  error
+	}
+	descs := [2]*pb.BuildDescription{first, second}
+	results := make(chan result, len(descs))
+	for i, desc := range descs {
+		go func(idx int, d *pb.BuildDescription) {
+			hash, err := readTreehash(ctx, st, d)
+			results <- result{idx: idx, hash: hash, err: err}
+		}(i, desc)
+	}
+
+	var hashes [2]string
+	var firstErr error
+	for range descs {
+		res := <-results
+		hashes[res.idx] = res.hash
+		// Keep only the first failure. Once it is recorded we cancel the sibling
+		// read, so any later error is the cancellation we induced — discard it.
+		if res.err != nil && firstErr == nil {
+			firstErr = res.err
+			cancel()
+		}
+	}
+	if firstErr != nil {
+		return "", "", firstErr
+	}
+	return hashes[0], hashes[1], nil
 }
 
 // readTreehash fetches the treehash stored at GetTreehashCachePath for the given build description.

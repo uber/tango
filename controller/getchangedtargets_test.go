@@ -218,13 +218,14 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 	stream.EXPECT().Context().Return(context.Background())
 
 	storagemock := storagemock.NewMockStorage(ctrl)
-	// A non-NotFound storage error on the first treehash read must surface as
-	// a failed request (with failureReasonTreehashRead) rather than be silently
-	// treated as a cache miss. The handler returns before any second treehash
-	// read or graph fetch happens, so this is the only Get expected.
+	// A non-NotFound storage error on a treehash read must surface as a failed
+	// request (with failureReasonTreehashRead) rather than be silently treated
+	// as a cache miss. Both revision treehashes are read in parallel, so two Get
+	// calls happen; the handler returns the first failure (and drops the
+	// cancelled sibling's error) before any graph fetch happens.
 	injected := errors.New("storage exploded")
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-		Return(storage.DownloadResponse{}, injected).Times(1)
+		Return(storage.DownloadResponse{}, injected).Times(2)
 
 	c := NewController(context.Background(), Params{
 		Logger:       zap.NewNop(),
