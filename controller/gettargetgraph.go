@@ -123,18 +123,25 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 			storageStart := time.Now()
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
 			if err != nil {
-				logger.Error("getGraph: Error reading graph from Storage", zap.Error(err))
-				return nil, err
+				if ctx.Err() != nil {
+					return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+				}
+				if !storage.IsNotFound(err) {
+					logger.Error("getGraph: Error reading graph from Storage", zap.Error(err))
+					return nil, common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
+				}
+				logger.Warn("getGraph: graph not found at treehash path", zap.Error(err))
+			} else {
+				logger.Info("getGraph: loaded graph from storage",
+					zap.Duration("storage_duration", time.Since(storageStart)),
+					zap.Duration("total_duration", time.Since(start)),
+				)
+				scope := c.scope.SubScope("get_graph")
+				scope.Counter("graph_cache_hit").Inc(1)
+				scope.Timer("storage_duration").Record(time.Since(storageStart))
+				scope.Timer("total_duration").Record(time.Since(start))
+				return graphReader, nil
 			}
-			logger.Info("getGraph: loaded graph from storage",
-				zap.Duration("storage_duration", time.Since(storageStart)),
-				zap.Duration("total_duration", time.Since(start)),
-			)
-			scope := c.scope.SubScope("get_graph")
-			scope.Counter("graph_cache_hit").Inc(1)
-			scope.Timer("storage_duration").Record(time.Since(storageStart))
-			scope.Timer("total_duration").Record(time.Since(start))
-			return graphReader, nil
 		}
 	} else {
 		logger.Info("getGraph: bypass_cache=true, skipping cache lookup")
@@ -142,7 +149,14 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 	computeStart := time.Now()
 	graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: &pb.GetTargetGraphRequest{BuildDescription: buildDescription, OutputConfig: outputConfig, RequestOptions: requestOptions}, BypassCache: bypassCache})
 	if err != nil {
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+		}
+		var ce common.ClassifiedError
+		if errors.As(err, &ce) {
+			return nil, err
+		}
+		return nil, common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
 	}
 	logger.Info("getGraph: computed target graph",
 		zap.Duration("compute_duration", time.Since(computeStart)),

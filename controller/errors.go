@@ -24,9 +24,8 @@ import (
 
 // failure_reason tag values for errors that originate in the controller itself.
 // Errors from the orchestrator carry their own reason via common.ClassifiedError.
+// Shared reasons live in core/common as common.FailureReason*.
 const (
-	// Request failed input validation before any work was attempted.
-	failureReasonValidation = "validation"
 	// Reading a cached target graph from storage failed.
 	failureReasonGraphFetch = "graph_fetch"
 	// Streaming a response message back to the client failed.
@@ -35,12 +34,6 @@ const (
 	failureReasonCompare = "compare"
 	// Reading a stored treehash from storage failed (not a cache miss).
 	failureReasonTreehashRead = "treehash_read"
-	// The caller's context was cancelled before the RPC completed.
-	failureReasonCancelled = "cancelled"
-	// The caller's context deadline elapsed before the RPC completed.
-	failureReasonDeadlineExceeded = "deadline_exceeded"
-	// Catch-all for errors that did not classify themselves.
-	failureReasonUnknown = "unknown"
 )
 
 // emitFailureMetric tags the failure counter with the reason and type from the
@@ -52,11 +45,11 @@ func emitFailureMetric(scope tally.Scope, err error) {
 	case errors.As(err, &ce):
 		// already classified — use the error's own reason and type
 	case errors.Is(err, context.Canceled):
-		ce = common.WithReason(failureReasonCancelled, common.ErrorTypeUser, err)
+		ce = common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)
 	case errors.Is(err, context.DeadlineExceeded):
-		ce = common.WithReason(failureReasonDeadlineExceeded, common.ErrorTypeUser, err)
+		ce = common.WithReason(common.FailureReasonDeadlineExceeded, common.ErrorTypeUser, err)
 	default:
-		ce = common.WithReason(failureReasonUnknown, common.ErrorTypeInfra, err)
+		ce = common.WithReason(common.FailureReasonUnknown, common.ErrorTypeInfra, err)
 	}
 	scope.Tagged(map[string]string{
 		"failure_type":   ce.Type(),

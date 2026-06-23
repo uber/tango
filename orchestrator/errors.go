@@ -15,6 +15,7 @@
 package orchestrator
 
 // failure_reason tag values emitted by the orchestrator.
+// Shared reasons live in core/common as common.FailureReason*.
 const (
 	failureReasonConfigParse       = "config_parse"
 	failureReasonNoRepoConfig      = "no_repo_config"
@@ -26,6 +27,4 @@ const (
 	failureReasonBazelClient       = "bazel_client"
 	failureReasonGraphCompute      = "graph_compute"
 	failureReasonGraphConvert      = "graph_convert"
-	failureReasonStorage           = "storage"
-	failureReasonUnknown           = "unknown"
 )

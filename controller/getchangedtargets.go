@@ -53,7 +53,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
 		c.logger.Error("GetChangedTargets: Invalid request", zap.Error(err))
-		return common.WithReason(failureReasonValidation, common.ErrorTypeUser, err)
+		return common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
@@ -106,7 +106,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 					if err := ctx.Err(); err != nil {
 						cachedReader.Close()
 						// Client gave up while we were draining the cache. Surface as a user-cancelled error.
-						return common.WithReason(failureReasonCancelled, common.ErrorTypeUser, err)
+						return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)
 					}
 					var resp *pb.GetChangedTargetsResponse
 					resp, readErr = cachedReader.Read()
@@ -236,7 +236,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	if ctx.Err() != nil {
 		// If the context was cancelled by the upstream, just return the original error without additional augmentation
-		return common.WithReason(failureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+		return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
 	}
 
 	// Process errors, only aggregating the ones that are original ones and not a result of the other job being cancelled
@@ -267,7 +267,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	secondGraph = nil
 	if err != nil {
 		if ctx.Err() != nil {
-			return common.WithReason(failureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+			return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
 		}
 		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
 		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))

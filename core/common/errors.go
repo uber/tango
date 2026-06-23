@@ -20,6 +20,15 @@ const (
 	ErrorTypeInfra = "infra"
 )
 
+// Common failure_reason tag values shared across packages.
+const (
+	FailureReasonCancelled        = "cancelled"
+	FailureReasonDeadlineExceeded = "deadline_exceeded"
+	FailureReasonUnknown          = "unknown"
+	FailureReasonStorage          = "storage"
+	FailureReasonValidation       = "validation"
+)
+
 // ClassifiedError is an error that carries an explicit failure reason and type
 // for metrics classification. External clients can implement this interface so
 // that classifyError in the controller picks it up automatically via errors.As,

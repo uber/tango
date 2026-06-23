@@ -100,7 +100,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			scope.Counter("failure").Inc(1)
 			var ce common.ClassifiedError
 			if !errors.As(retErr, &ce) {
-				ce = common.WithReason(failureReasonUnknown, common.ErrorTypeInfra, retErr)
+				ce = common.WithReason(common.FailureReasonUnknown, common.ErrorTypeInfra, retErr)
 			}
 			scope.Tagged(map[string]string{
 				"failure_type":   ce.Type(),
@@ -182,7 +182,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		}
 		if !storage.IsNotFound(err) {
 			logger.Errorw("GetTargetGraph: Storage error", zap.Error(err))
-			return nil, common.WithReason(failureReasonStorage, common.ErrorTypeInfra, err)
+			return nil, common.WithReason(common.FailureReasonStorage, common.ErrorTypeInfra, err)
 		}
 		logger.Infow("GetTargetGraph: Treehash not found, computing target graph", zap.String("treehash", treehash))
 	} else {
@@ -223,19 +223,19 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, responses)
 	if err != nil {
 		logger.Errorw("GetTargetGraph: Error writing target graph to storage", zap.Error(err))
-		return nil, common.WithReason(failureReasonStorage, common.ErrorTypeInfra, err)
+		return nil, common.WithReason(common.FailureReasonStorage, common.ErrorTypeInfra, err)
 	}
 	treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription)
 	treehashReader := bytes.NewReader([]byte(treehash))
 	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
 	if err != nil {
 		logger.Errorw("GetTargetGraph: Error storing treehash mapping", zap.Error(err))
-		return nil, common.WithReason(failureReasonStorage, common.ErrorTypeInfra, err)
+		return nil, common.WithReason(common.FailureReasonStorage, common.ErrorTypeInfra, err)
 	}
 	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 	if err != nil {
 		logger.Errorw("GetTargetGraph: Error creating graph reader", zap.Error(err))
-		return nil, common.WithReason(failureReasonStorage, common.ErrorTypeInfra, err)
+		return nil, common.WithReason(common.FailureReasonStorage, common.ErrorTypeInfra, err)
 	}
 	logger.Infow("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
 	return graphReader, nil
