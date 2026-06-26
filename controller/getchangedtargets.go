@@ -100,7 +100,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 				for {
 					if err := ctx.Err(); err != nil {
 						cachedReader.Close()
-						// Client gave up while we were draining the cache. Surface as a user-cancelled error.
+						if isClientDisconnect(ctx) {
+							return common.WithReason(failureReasonClientDisconnect, common.ErrorTypeUser, err)
+						}
 						return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)
 					}
 					var resp *pb.GetChangedTargetsResponse
@@ -230,7 +232,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	scope.Timer("graph_fetch_duration").Record(graphFetchDuration)
 
 	if ctx.Err() != nil {
-		// If the context was cancelled by the upstream, just return the original error without additional augmentation
+		if isClientDisconnect(ctx) {
+			return common.WithReason(failureReasonClientDisconnect, common.ErrorTypeUser, ctx.Err())
+		}
 		return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
 	}
 
@@ -262,6 +266,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	secondGraph = nil
 	if err != nil {
 		if ctx.Err() != nil {
+			if isClientDisconnect(ctx) {
+				return common.WithReason(failureReasonClientDisconnect, common.ErrorTypeUser, ctx.Err())
+			}
 			return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
 		}
 		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))

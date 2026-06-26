@@ -124,6 +124,9 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
 			if err != nil {
 				if ctx.Err() != nil {
+					if isClientDisconnect(ctx) {
+						return nil, common.WithReason(failureReasonClientDisconnect, common.ErrorTypeUser, ctx.Err())
+					}
 					return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
 				}
 				if !storage.IsNotFound(err) {
@@ -150,6 +153,9 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 	graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: &pb.GetTargetGraphRequest{BuildDescription: buildDescription, OutputConfig: outputConfig, RequestOptions: requestOptions}, BypassCache: bypassCache})
 	if err != nil {
 		if ctx.Err() != nil {
+			if isClientDisconnect(ctx) {
+				return nil, common.WithReason(failureReasonClientDisconnect, common.ErrorTypeUser, ctx.Err())
+			}
 			return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
 		}
 		var ce common.ClassifiedError

@@ -14,6 +14,8 @@
 
 package common
 
+import "errors"
+
 // Error type values for the failure_type metrics tag.
 const (
 	ErrorTypeUser  = "user"
@@ -28,6 +30,13 @@ const (
 	FailureReasonStorage          = "storage"
 	FailureReasonValidation       = "validation"
 )
+
+// ErrClientCancelled is a sentinel error that clients pass to
+// context.WithCancelCause when cancelling a request due to a client-side
+// disconnect or voluntary abort. The service checks context.Cause(ctx) for
+// this error to distinguish client-initiated cancellations from
+// infrastructure failures and suppresses logging for them.
+var ErrClientCancelled = errors.New("client cancelled")
 
 // ClassifiedError is an error that carries an explicit failure reason and type
 // for metrics classification. External clients can implement this interface so

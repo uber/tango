@@ -34,7 +34,16 @@ const (
 	failureReasonCompare = "compare"
 	// Reading a stored treehash from storage failed (not a cache miss).
 	failureReasonTreehashRead = "treehash_read"
+	// The client disconnected before the request completed.
+	failureReasonClientDisconnect = "client_disconnect"
 )
+
+// isClientDisconnect reports whether ctx was cancelled because the client
+// disconnected. The client signals this by passing common.ErrClientCancelled
+// to context.WithCancelCause; the service checks context.Cause(ctx) here.
+func isClientDisconnect(ctx context.Context) bool {
+	return errors.Is(context.Cause(ctx), common.ErrClientCancelled)
+}
 
 // emitFailureMetric tags the failure counter with the reason and type from the
 // error's ClassifiedError. Context errors are recognised explicitly; everything
@@ -44,8 +53,6 @@ func emitFailureMetric(scope tally.Scope, err error) {
 	switch {
 	case errors.As(err, &ce):
 		// already classified — use the error's own reason and type
-	case errors.Is(err, context.Canceled):
-		ce = common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)
 	case errors.Is(err, context.DeadlineExceeded):
 		ce = common.WithReason(common.FailureReasonDeadlineExceeded, common.ErrorTypeUser, err)
 	default:
