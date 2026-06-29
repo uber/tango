@@ -52,7 +52,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		}
 	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
-		c.logger.Error("GetChangedTargets: Invalid request", zap.Error(err))
+		c.logger.Warn("GetChangedTargets: Invalid request", zap.Error(err))
 		return common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
@@ -290,7 +290,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			// Goroutine outlives the handler so we can't return; log loudly and
 			// abandon the cache write. Surfacing infra failures matters more than
 			// a missed cache opportunity.
-			logger.Error("GetChangedTargets: skipping cache write, failed to read revision treehash", zap.Error(err))
+			logger.Warn("GetChangedTargets: skipping cache write, failed to read revision treehash", zap.Error(err))
 			return
 		}
 		if treehash1 != "" && treehash2 != "" {

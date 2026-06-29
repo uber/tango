@@ -104,7 +104,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 		if err != nil {
 			if storage.IsNotFound(err) {
 				// Cache miss - blob doesn't exist, need to compute and store target graph
-				logger.Info("getGraph: treehash not found", zap.Error(err))
+				logger.Debug("getGraph: treehash not found", zap.Error(err))
 			} else {
 				// Other errors (network, infra issues) should be retried
 				logger.Error("getGraph: Storage error", zap.Error(err))

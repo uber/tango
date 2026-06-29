@@ -37,7 +37,7 @@ func (b *BazelClient) setupCommand(ctx context.Context, query string, startupOpt
 	args = append(args, additionalArgs...)
 	args = append(args, "--output=streamed_proto")
 	args = append(args, query)
-	b.logger.Infow("Querying Bazel", zap.String("workspacePath", b.workspacePath), zap.String("query", query))
+	b.logger.Debugw("Querying Bazel", zap.String("workspacePath", b.workspacePath), zap.String("query", query))
 	return b.execCommandContext(ctx, b.bazelCommand, args...)
 }
 
@@ -100,7 +100,7 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	if streamErr != nil {
 		return nil, b.wrapQueryFailure("stream processing failed", streamErr, &stderrBuf)
 	}
-	b.logger.Debugf("Parsed %d targets from bazel query", len(queryResults.Target))
+	b.logger.Debugw("Parsed targets from bazel query", zap.Int("target_count", len(queryResults.Target)))
 	return queryResults, nil
 }
 
@@ -113,7 +113,6 @@ func (b *BazelClient) wrapQueryFailure(msg string, cause error, stderrBuf *bytes
 	if !b.streamLogs {
 		tail = "\nstderr:\n" + stderrBuf.String()
 	}
-	b.logger.Errorf("%s: %v%s", msg, cause, tail)
 	return fmt.Errorf("%s: %w%s", msg, cause, tail)
 }
 
