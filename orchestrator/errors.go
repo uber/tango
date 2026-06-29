@@ -13,18 +13,3 @@
 // limitations under the License.
 
 package orchestrator
-
-// failure_reason tag values emitted by the orchestrator.
-// Shared reasons live in core/common as common.FailureReason*.
-const (
-	failureReasonConfigParse       = "config_parse"
-	failureReasonNoRepoConfig      = "no_repo_config"
-	failureReasonWorkspaceLease    = "workspace_lease"
-	failureReasonWorkspaceCheckout = "workspace_checkout"
-	failureReasonRequestCreate     = "request_create"
-	failureReasonRequestApply      = "request_apply"
-	failureReasonTreehashCompute   = "treehash_compute"
-	failureReasonBazelClient       = "bazel_client"
-	failureReasonGraphCompute      = "graph_compute"
-	failureReasonGraphConvert      = "graph_convert"
-)

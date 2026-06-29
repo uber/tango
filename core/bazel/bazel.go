@@ -88,7 +88,7 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 	}
 	bazelCommand, err := detectBazelExecutable(ctx, p.BazelCommand)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("detect bazel executable: %w", err)
 	}
 	p.Logger.Debugw("NewBazelClient", zap.String("bazelCommand", bazelCommand), zap.String("workspacePath", p.WorkspacePath))
 	return &BazelClient{
