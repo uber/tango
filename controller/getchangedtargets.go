@@ -52,7 +52,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		}
 	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
-		c.logger.Warn("GetChangedTargets: Invalid request", zap.Error(err))
 		return common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
