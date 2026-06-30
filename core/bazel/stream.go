@@ -32,6 +32,7 @@ func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
 
 	select {
 	case <-ctx.Done():
+		<-done
 		return ctx.Err()
 	case err := <-done:
 		return err
@@ -52,6 +53,7 @@ func streamAndParseTargets(ctx context.Context, src io.Reader, dst io.Writer) (*
 
 	select {
 	case <-ctx.Done():
+		<-done
 		return nil, ctx.Err()
 	case res := <-done:
 		return res.queryResult, res.err
