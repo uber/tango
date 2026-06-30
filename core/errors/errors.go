@@ -47,7 +47,7 @@ func New(errorType, reason string, err error) *ClassifiedError {
 	return &ClassifiedError{ErrorType: errorType, Reason: reason, Err: err}
 }
 
-// User Sentinel vars
+// User Sentinel errors
 
 var (
 	ErrRootDirEmpty                  = New(ErrorTypeUser, FailureReasonValidation, stderrors.New("root directory cannot be empty"))
@@ -62,7 +62,7 @@ var (
 	ErrRevisionRemoteMismatch        = New(ErrorTypeUser, FailureReasonValidation, stderrors.New("first and second revision must have the same remote"))
 )
 
-// Infra Sentinel vars
+// Infra Sentinel errors
 
 var (
 	ErrParentPackageNotExist        = New(ErrorTypeInfra, FailureReasonUnknown, stderrors.New("parent package does not exist"))
@@ -71,7 +71,7 @@ var (
 	ErrNoChunksReturned             = New(ErrorTypeInfra, FailureReasonUnknown, stderrors.New("no chunks returned"))
 )
 
-// User Structured types
+// User Structured errors
 // Wrap at call site: New(ErrorTypeUser, FailureReasonValidation, &ErrFoo{...})
 
 // ErrRegexPatternInvalid is returned when a regex pattern fails to compile.
@@ -95,7 +95,7 @@ func (e *ErrBuildDescriptionMissingFields) Error() string {
 	return fmt.Sprintf("build description is missing required fields: base_sha: %s, remote: %s", e.BaseSha, e.Remote)
 }
 
-// Infra Structured types
+// Infra Structured errors
 // Wrap at call site: New(ErrorTypeInfra, FailureReasonUnknown, &ErrFoo{...})
 
 // ErrTargetTypeNotHandled is returned when a buildpb.Target proto has an unexpected type.
