@@ -43,6 +43,7 @@ var Module = fx.Module("tango",
 		),
 		fx.Annotate(
 			controller.NewController,
+			fx.ParamTags(`name:"appCtx"`, ``),
 			fx.As(new(pb.TangoYARPCServer)),
 		),
 	),

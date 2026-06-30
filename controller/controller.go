@@ -31,15 +31,11 @@ import (
 // Params are the parameters for the controller.
 type Params struct {
 	fx.In
-
-	// AppCtx is the application-lifetime context. Cancel it on process
-	// shutdown to abort background work.
-	AppCtx       context.Context            `name:"appCtx"`
 	Logger       *zap.Logger
 	Storage      storage.Storage
 	Orchestrator orchestrator.Orchestrator
-	Scope        tally.Scope                `optional:"true"`
-	ChunkConfig  config.ChunkConfig         `optional:"true"`
+	Scope        tally.Scope        `optional:"true"`
+	ChunkConfig  config.ChunkConfig `optional:"true"`
 }
 
 // _totalDurationBuckets covers 0–15 minutes in 10-second linear intervals.
@@ -61,8 +57,9 @@ type controller struct {
 	appCtx context.Context
 }
 
-// NewController creates a new controller.
-func NewController(p Params) pb.TangoYARPCServer {
+// NewController creates a new controller. appCtx is cancelled on process
+// shutdown to abort background work.
+func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	scope := p.Scope
 	if scope == nil {
 		scope = tally.NoopScope
@@ -88,7 +85,7 @@ func NewController(p Params) pb.TangoYARPCServer {
 		changedTargetChunkSize: changedTargetChunkSize,
 		metadataMapChunkSize:   metadataMapChunkSize,
 		totalDurationBuckets:   _totalDurationBuckets,
-		appCtx:                 p.AppCtx,
+		appCtx:                 appCtx,
 	}
 }
 
