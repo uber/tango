@@ -19,9 +19,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/controller"
@@ -31,6 +29,7 @@ import (
 	"github.com/uber/tango/core/storage/disk"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
+	"go.uber.org/fx"
 	"go.uber.org/yarpc"
 	"go.uber.org/yarpc/api/transport"
 	yarpcgrpc "go.uber.org/yarpc/transport/grpc"
@@ -38,78 +37,118 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to start: %v\n", err)
-		os.Exit(1)
+	fx.New(
+		fx.Provide(
+			newLogger,
+			newConfig,
+			newStorage,
+			newAppContext,
+			newRepoManager,
+			newOrchestrator,
+			newController,
+			newDispatcher,
+		),
+		fx.Invoke(registerWorkspaceDirs, startDispatcher),
+	).Run()
+}
+
+func newLogger() (*zap.Logger, *zap.SugaredLogger) {
+	zl, _ := zap.NewDevelopment()
+	return zl, zl.Sugar()
+}
+
+func newConfig() (*config.Config, error) {
+	return config.Parse(filepath.Join("example", "tango-config.yaml"))
+}
+
+func newStorage(cfg *config.Config) (storage.Storage, error) {
+	sc := cfg.Storage
+	switch sc.Type {
+	case config.StorageTypeMemory, "":
+		return storage.NewMemoryStorage(), nil
+	case config.StorageTypeDisk:
+		if sc.Disk == nil {
+			return nil, fmt.Errorf("disk storage requires 'disk' configuration")
+		}
+		if sc.Disk.RootPath == "" {
+			return nil, fmt.Errorf("disk storage requires 'root_path' to be set")
+		}
+		return disk.New(sc.Disk.RootPath)
+	default:
+		return nil, fmt.Errorf("unsupported storage type: %q", sc.Type)
 	}
 }
 
-func run() error {
-	zl, _ := zap.NewDevelopment()
-	defer zl.Sync()
-	logger := zl.Sugar()
+// appContext wraps a context.Context so Fx can distinguish it from other
+// context values in the dependency graph.
+type appContext struct {
+	context.Context
+}
 
-	// appCtx is the application-lifetime context. It is cancelled on
-	// SIGINT/SIGTERM so background work (e.g. the controller's async
-	// cache write) is aborted instead of leaking past process exit.
-	appCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stopSignals()
+// newAppContext creates an application-lifetime context that is cancelled
+// when Fx stops the application (SIGINT/SIGTERM).
+func newAppContext(lc fx.Lifecycle) appContext {
+	ctx, cancel := context.WithCancel(context.Background())
+	lc.Append(fx.Hook{
+		OnStop: func(context.Context) error {
+			cancel()
+			return nil
+		},
+	})
+	return appContext{ctx}
+}
 
-	configFilePath := filepath.Join("example", "tango-config.yaml")
-	cfg, err := config.Parse(configFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to parse config: %w", err)
-	}
+func registerWorkspaceDirs(lc fx.Lifecycle, cfg *config.Config) {
+	lc.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			if err := os.MkdirAll(cfg.Service.RepoManagerClonePath, 0o755); err != nil {
+				return fmt.Errorf("create repo manager clone path: %w", err)
+			}
+			return os.MkdirAll(cfg.Service.WorkerRootPath, 0o755)
+		},
+		OnStop: func(context.Context) error {
+			os.RemoveAll(cfg.Service.WorkerRootPath)
+			os.RemoveAll(cfg.Service.RepoManagerClonePath)
+			return nil
+		},
+	})
+}
 
-	store, err := newStorage(cfg.Storage)
-	if err != nil {
-		return fmt.Errorf("failed to create storage: %w", err)
-	}
-	logger.Infof("Using storage type: %s", cfg.Storage.Type)
-
-	// Repo manager and orchestrator
-	repoManagerClonePath := cfg.Service.RepoManagerClonePath
-	workerRootPath := cfg.Service.WorkerRootPath
-	if err := os.MkdirAll(repoManagerClonePath, 0o755); err != nil {
-		return fmt.Errorf("failed to create repo manager clone path: %w", err)
-	}
-	defer os.RemoveAll(repoManagerClonePath)
-	if err := os.MkdirAll(workerRootPath, 0o755); err != nil {
-		return fmt.Errorf("failed to create worker root path: %w", err)
-	}
-	defer os.RemoveAll(workerRootPath)
-
-	rm := repomanager.NewRepoManager(appCtx, repomanager.Params{
-		Git:                  git.New(repoManagerClonePath),
+func newRepoManager(appCtx appContext, cfg *config.Config, logger *zap.SugaredLogger) repomanager.RepoManager {
+	return repomanager.NewRepoManager(appCtx, repomanager.Params{
+		Git:                  git.New(cfg.Service.RepoManagerClonePath),
 		Logger:               logger,
-		RepoManagerClonePath: repoManagerClonePath,
-		WorkerRootPath:       workerRootPath,
+		RepoManagerClonePath: cfg.Service.RepoManagerClonePath,
+		WorkerRootPath:       cfg.Service.WorkerRootPath,
 		PoolSize:             cfg.Service.WorkerPoolSize,
 	})
-	orch := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
-		Storage:        store,
-		RepoManager:    rm,
-		Logger:         logger,
-		GitFactory:     git.New,
-		ConfigFilePath: configFilePath,
-	})
+}
 
-	// Controller (YARPC server implementation). appCtx is forwarded so the
-	// controller's background goroutines are tied to process lifetime.
-	ctrl := controller.NewController(appCtx, controller.Params{
+func newOrchestrator(appCtx appContext, cfg *config.Config, store storage.Storage, rm repomanager.RepoManager, logger *zap.SugaredLogger) orchestrator.Orchestrator {
+	return orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
+		Storage:     store,
+		RepoManager: rm,
+		Logger:      logger,
+		GitFactory:  git.New,
+		Config:      cfg,
+	})
+}
+
+func newController(appCtx appContext, zl *zap.Logger, store storage.Storage, orch orchestrator.Orchestrator) pb.TangoYARPCServer {
+	return controller.NewController(appCtx, controller.Params{
 		Logger:       zl,
 		Storage:      store,
 		Orchestrator: orch,
 	})
+}
 
-	// YARPC transports and dispatcher
+func newDispatcher(ctrl pb.TangoYARPCServer) (*yarpc.Dispatcher, error) {
 	grpcTransport := yarpcgrpc.NewTransport()
 	port := "127.0.0.1:8081"
 	grpcListener, err := net.Listen("tcp", port)
 	if err != nil {
-		return fmt.Errorf("failed to listen on gRPC port: %w", err)
+		return nil, fmt.Errorf("listen on gRPC port: %w", err)
 	}
-
 	inbounds := []transport.Inbound{
 		grpcTransport.NewInbound(grpcListener),
 	}
@@ -118,34 +157,17 @@ func run() error {
 		Inbounds: inbounds,
 	})
 	dispatcher.Register(pb.BuildTangoYARPCProcedures(ctrl))
-
-	if err := dispatcher.Start(); err != nil {
-		return fmt.Errorf("failed to start dispatcher: %w", err)
-	}
-	defer dispatcher.Stop()
-
-	logger.Infof("Tango server is running:")
-	logger.Infof("- gRPC inbound:  %s", port)
-	logger.Infof("Press Ctrl+C to stop.")
-	// Block until SIGINT/SIGTERM cancels appCtx.
-	<-appCtx.Done()
-	return nil
+	return dispatcher, nil
 }
 
-// newStorage creates a Storage implementation based on the provided configuration.
-func newStorage(cfg config.StorageConfig) (storage.Storage, error) {
-	switch cfg.Type {
-	case config.StorageTypeMemory, "":
-		return storage.NewMemoryStorage(), nil
-	case config.StorageTypeDisk:
-		if cfg.Disk == nil {
-			return nil, fmt.Errorf("disk storage requires 'disk' configuration")
-		}
-		if cfg.Disk.RootPath == "" {
-			return nil, fmt.Errorf("disk storage requires 'root_path' to be set")
-		}
-		return disk.New(cfg.Disk.RootPath)
-	default:
-		return nil, fmt.Errorf("unsupported storage type: %q", cfg.Type)
-	}
+func startDispatcher(lc fx.Lifecycle, d *yarpc.Dispatcher, logger *zap.SugaredLogger) {
+	lc.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			logger.Infof("Tango server starting on 127.0.0.1:8081")
+			return d.Start()
+		},
+		OnStop: func(context.Context) error {
+			return d.Stop()
+		},
+	})
 }

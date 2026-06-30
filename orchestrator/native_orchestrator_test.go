@@ -24,6 +24,7 @@ import (
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
 	repomanagermock "github.com/uber/tango/core/repomanager/mock"
@@ -36,6 +37,13 @@ import (
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 )
+
+func testConfig(t *testing.T) *config.Config {
+	t.Helper()
+	cfg, err := config.Parse("testdata/config.yaml")
+	require.NoError(t, err)
+	return cfg
+}
 
 func TestNative_GetTargetGraph_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -68,7 +76,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),
 		GitFactory:     func(dir string) git.Interface { return g },
-		ConfigFilePath: "testdata/config.yaml",
+		Config: testConfig(t),
 	})
 	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
 		Req: &pb.GetTargetGraphRequest{
@@ -125,7 +133,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		Logger:         zaptest.NewLogger(t).Sugar(),
 		GitFactory:     func(dir string) git.Interface { return g },
 		GraphRunner:    graphRunner,
-		ConfigFilePath: "testdata/config.yaml",
+		Config: testConfig(t),
 	})
 	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
 		Req: &pb.GetTargetGraphRequest{BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}},
@@ -156,7 +164,7 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),
 		GitFactory:     func(dir string) git.Interface { return g },
-		ConfigFilePath: "testdata/config.yaml",
+		Config: testConfig(t),
 	})
 	resp, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
 		Req: &pb.GetTargetGraphRequest{BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}},
@@ -195,7 +203,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),
 		GitFactory:     func(dir string) git.Interface { return g },
-		ConfigFilePath: "testdata/config.yaml",
+		Config: testConfig(t),
 	})
 	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
 		Req: &pb.GetTargetGraphRequest{
