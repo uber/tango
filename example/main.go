@@ -45,7 +45,10 @@ func main() {
 }
 
 func run() error {
-	zl, _ := zap.NewDevelopment()
+	zl, err := zap.NewDevelopment()
+	if err != nil {
+		return fmt.Errorf("init logger: %w", err)
+	}
 	defer zl.Sync()
 	logger := zl.Sugar()
 

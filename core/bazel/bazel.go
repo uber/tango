@@ -16,6 +16,7 @@ package bazel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -113,7 +114,7 @@ func detectBazelExecutable(ctx context.Context, bazelCommand string) (string, er
 }
 
 // ensureBazelisk returns the path to a cached bazelisk binary,
-func ensureBazelisk(ctx context.Context) (string, error) {
+func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("cache dir: %w", err)
@@ -148,13 +149,21 @@ func ensureBazelisk(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	// On failure, remove the temp file and fold any removal error into the
+	// returned error. On the success path the file has been renamed into
+	// place, so there is nothing to remove.
+	defer func() {
+		if retErr != nil {
+			retErr = errors.Join(retErr, os.Remove(tmpPath))
+		}
+	}()
 
 	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		tmp.Close()
-		return "", fmt.Errorf("write bazelisk: %w", err)
+		return "", fmt.Errorf("write bazelisk: %w", errors.Join(err, tmp.Close()))
 	}
-	tmp.Close()
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close bazelisk temp: %w", err)
+	}
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
 		return "", fmt.Errorf("chmod bazelisk: %w", err)
 	}
