@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-
 	"time"
 
 	"github.com/uber-go/tally"
@@ -32,46 +31,41 @@ import (
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/graphrunner"
+	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
 
+// GraphRunnerFactory creates a GraphRunner for a materialized workspace.
+// Set at construction time so the request path has no nil-check branching.
+type GraphRunnerFactory func(ctx context.Context, ws workspace.Workspace, gitClient git.Interface, repoCfg config.RepositoryConfig, extraExcludedFiles []string) (graphrunner.GraphRunner, error)
+
 // nativeOrchestrator implements native version of Orchestrator
 type nativeOrchestrator struct {
-	storage     storage.Storage
-	repoManager repomanager.RepoManager
-	logger      *zap.SugaredLogger
-	scope       tally.Scope
-	// gitFactory allows injecting a git.Interface constructor for testing
-	gitFactory  func(directory string) git.Interface
-	graphRunner graphrunner.GraphRunner
-	config      config.RepositoryConfigProvider
+	storage            storage.Storage
+	repoManager        repomanager.RepoManager
+	logger             *zap.SugaredLogger
+	gitFactory         func(directory string) git.Interface
+	graphRunnerFactory GraphRunnerFactory
+	config             config.RepositoryConfigProvider
 
-	// appCtx represents the app's overall lifetime. It is passed in by the
-	// caller at construction and is expected to be cancelled when the whole
-	// application is shutting down (e.g. on SIGTERM/SIGINT). Any future
-	// fire-and-forget goroutines this orchestrator starts should use this
-	// context instead of context.Background() so they abort promptly on
-	// shutdown rather than running unbounded past server teardown.
-	//
-	// Per-request cancellation should still use the request's own context;
-	// appCtx is only for work that intentionally outlives the request.
-	appCtx context.Context
+	// metrics are pre-created at construction time.
+	getTargetGraphScope   tally.Scope
+	getTargetGraphCalls   tally.Counter
+	getTargetGraphSuccess tally.Counter
+	getTargetGraphFailure tally.Counter
 }
 
 type Params struct {
 	fx.In
 
-	// AppCtx is the application-lifetime context. Cancel it when the process
-	// is shutting down to abort any background goroutines the orchestrator spawns.
-	AppCtx      context.Context                `name:"appCtx"`
-	Storage     storage.Storage
-	RepoManager repomanager.RepoManager
-	Logger      *zap.SugaredLogger
-	Scope       tally.Scope                    `optional:"true"`
-	GitFactory  func(directory string) git.Interface `optional:"true"`
-	GraphRunner graphrunner.GraphRunner         `optional:"true"`
-	Config      config.RepositoryConfigProvider
+	Storage            storage.Storage
+	RepoManager        repomanager.RepoManager
+	Logger             *zap.SugaredLogger
+	Scope              tally.Scope                          `optional:"true"`
+	GitFactory         func(directory string) git.Interface `optional:"true"`
+	GraphRunnerFactory GraphRunnerFactory                   `optional:"true"`
+	Config             config.RepositoryConfigProvider
 }
 
 // NewNativeOrchestrator creates a new native orchestrator with the given parameters.
@@ -84,86 +78,113 @@ func NewNativeOrchestrator(p Params) Orchestrator {
 	if gitFactory == nil {
 		gitFactory = git.New
 	}
+	orchScope := scope.SubScope("orchestrator")
+	grFactory := p.GraphRunnerFactory
+	if grFactory == nil {
+		grFactory = defaultGraphRunnerFactory(p.Logger, orchScope)
+	}
+	gtgScope := orchScope.SubScope("get_target_graph")
 	return &nativeOrchestrator{
-		storage:     p.Storage,
-		repoManager: p.RepoManager,
-		logger:      p.Logger,
-		scope:       scope.SubScope("orchestrator"),
-		gitFactory:  gitFactory,
-		graphRunner: p.GraphRunner,
-		config:      p.Config,
-		appCtx:      p.AppCtx,
+		storage:               p.Storage,
+		repoManager:           p.RepoManager,
+		logger:                p.Logger,
+		gitFactory:            gitFactory,
+		graphRunnerFactory:    grFactory,
+		config:                p.Config,
+		getTargetGraphScope:   gtgScope,
+		getTargetGraphCalls:   gtgScope.Counter("calls"),
+		getTargetGraphSuccess: gtgScope.Counter("success"),
+		getTargetGraphFailure: gtgScope.Counter("failure"),
 	}
 }
 
-// GetTargetGraph is used to compute the target graph locally.
-// It leases a workspace, checks out the base revision, applies the change requests, and computes the target graph.
-func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTargetGraphParam) (_ storage.GraphReader, retErr error) {
-	scope := b.scope.SubScope("get_target_graph")
-	scope.Counter("calls").Inc(1)
-	defer func() {
-		if retErr != nil {
-			scope.Counter("failure").Inc(1)
-			var ce common.ClassifiedError
-			if !errors.As(retErr, &ce) {
-				ce = common.WithReason(common.FailureReasonUnknown, common.ErrorTypeInfra, retErr)
-			}
-			scope.Tagged(map[string]string{
-				"failure_type":   ce.Type(),
-				"failure_reason": ce.Reason(),
-			}).Counter("failure_type").Inc(1)
-		} else {
-			scope.Counter("success").Inc(1)
-		}
-	}()
-	logger := b.logger.With(zap.Any("build_description", param.Req.BuildDescription))
-	logger.Infow("GetTargetGraph: Processing request")
-
-	remote := param.Req.BuildDescription.Remote
-	repoCfg, ok := b.config.GetRepositoryConfig(remote)
-	if !ok {
-		return nil, fmt.Errorf("no repository configuration found for remote %q", remote)
-	}
-	ws, err := b.repoManager.Lease(ctx, *param.Req.BuildDescription)
-	if err != nil {
-		return nil, fmt.Errorf("lease workspace: %w", err)
-	}
-	defer func() {
-		err := ws.Release()
+// defaultGraphRunnerFactory returns a factory that creates a NativeGraphRunner
+// backed by a bazel client for the given workspace.
+func defaultGraphRunnerFactory(logger *zap.SugaredLogger, scope tally.Scope) GraphRunnerFactory {
+	return func(ctx context.Context, ws workspace.Workspace, gitClient git.Interface, repoCfg config.RepositoryConfig, extraExcludedFiles []string) (graphrunner.GraphRunner, error) {
+		client, err := bazel.NewBazelClient(ctx, bazel.Params{
+			WorkspacePath: ws.Path(),
+			Logger:        logger,
+			BazelCommand:  repoCfg.BazelCommand,
+			QueryTimeout:  time.Duration(repoCfg.QueryTimeout) * time.Second,
+			StreamLogs:    repoCfg.StreamBazelLogs,
+		})
 		if err != nil {
-			// clean up the workspace if release fails.
+			return nil, fmt.Errorf("create bazel client: %w", err)
+		}
+		return graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
+			BazelClient:        client,
+			GitClient:          gitClient,
+			Config:             repoCfg,
+			ExtraExcludedFiles: extraExcludedFiles,
+			Scope:              scope,
+		}), nil
+	}
+}
+
+// preparedWorkspace holds the result of leasing and preparing a workspace.
+type preparedWorkspace struct {
+	ws      workspace.Workspace
+	git     git.Interface
+	repoCfg config.RepositoryConfig
+}
+
+// prepareWorkspace leases a workspace, checks out the base revision, and applies
+// change requests. The returned cleanup function releases the workspace and must
+// be deferred by the caller.
+func (b *nativeOrchestrator) prepareWorkspace(ctx context.Context, desc *pb.BuildDescription, logger *zap.SugaredLogger) (_ *preparedWorkspace, cleanup func(), retErr error) {
+	repoCfg, ok := b.config.GetRepositoryConfig(desc.Remote)
+	if !ok {
+		return nil, nil, fmt.Errorf("no repository configuration found for remote %q", desc.Remote)
+	}
+	ws, err := b.repoManager.Lease(ctx, *desc)
+	if err != nil {
+		return nil, nil, fmt.Errorf("lease workspace: %w", err)
+	}
+	cleanup = func() {
+		if err := ws.Release(); err != nil {
 			if removeErr := os.RemoveAll(ws.Path()); removeErr != nil {
 				logger.Errorw("GetTargetGraph: Failed to remove workspace", zap.Error(removeErr))
 			}
 		}
+	}
+	defer func() {
+		if retErr != nil {
+			cleanup()
+		}
 	}()
-	err = ws.Checkout(ctx, param.Req.BuildDescription.Remote, param.Req.BuildDescription.BaseSha)
-	if err != nil {
-		return nil, fmt.Errorf("checkout %s@%s: %w", param.Req.BuildDescription.Remote, param.Req.BuildDescription.BaseSha, err)
+	if err := ws.Checkout(ctx, desc.Remote, desc.BaseSha); err != nil {
+		return nil, nil, fmt.Errorf("checkout %s@%s: %w", desc.Remote, desc.BaseSha, err)
 	}
 	logger.Infow("GetTargetGraph: Checked out base revision")
 
-	requests := make([]workspace.Request, 0, len(param.Req.BuildDescription.Requests))
 	gitModule := b.gitFactory(ws.Path())
-	for _, req := range param.Req.BuildDescription.Requests {
-		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.BaseSha, req.GetCommit(), logger)
+	requests := make([]workspace.Request, 0, len(desc.Requests))
+	for _, req := range desc.Requests {
+		r, err := workspace.NewRequest(req.GetUrl(), gitModule, desc.BaseSha, req.GetCommit(), logger)
 		if err != nil {
-			return nil, fmt.Errorf("create request for %q: %w", req.GetUrl(), err)
+			return nil, nil, fmt.Errorf("create request for %q: %w", req.GetUrl(), err)
 		}
-		requests = append(requests, request)
+		requests = append(requests, r)
 	}
-	err = ws.ApplyRequests(ctx, requests)
-	if err != nil {
-		return nil, fmt.Errorf("apply requests: %w", err)
+	if err := ws.ApplyRequests(ctx, requests); err != nil {
+		return nil, nil, fmt.Errorf("apply requests: %w", err)
 	}
 	logger.Infow("GetTargetGraph: Applied requests", zap.Int("request_count", len(requests)))
 
-	// Compute the treehash and download the target graph from storage if exists.
-	treehash, err := gitModule.RevParse(ctx, "HEAD^{tree}")
+	return &preparedWorkspace{ws: ws, git: gitModule, repoCfg: repoCfg}, cleanup, nil
+}
+
+// computeGraph computes (or fetches from cache) the target graph for a prepared
+// workspace and stores the result.
+func (b *nativeOrchestrator) computeGraph(ctx context.Context, pw *preparedWorkspace, param GetTargetGraphParam, logger *zap.SugaredLogger) (storage.GraphReader, error) {
+	desc := param.Req.BuildDescription
+	treehash, err := pw.git.RevParse(ctx, "HEAD^{tree}")
 	if err != nil {
 		return nil, fmt.Errorf("compute treehash: %w", err)
 	}
-	treehashPath := common.GetGraphByTreeHash(param.Req.BuildDescription.Remote, treehash, param.Req.BuildDescription.GetStrategy(), param.Req.GetRequestOptions())
+	treehashPath := common.GetGraphByTreeHash(desc.Remote, treehash, desc.GetStrategy(), param.Req.GetRequestOptions())
+
 	if !param.BypassCache {
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 		if err == nil {
@@ -177,29 +198,12 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	} else {
 		logger.Infow("GetTargetGraph: bypass_cache=true, computing target graph")
 	}
-	// Compute the target graph and store it in storage.
-	runner := b.graphRunner
-	if runner == nil {
-		client, err := bazel.NewBazelClient(ctx, bazel.Params{
-			WorkspacePath: ws.Path(),
-			Logger:        b.logger,
-			BazelCommand:  repoCfg.BazelCommand,
-			QueryTimeout:  time.Duration(repoCfg.QueryTimeout) * time.Second,
-			StreamLogs:    repoCfg.StreamBazelLogs,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create bazel client: %w", err)
-		}
-		// Use default native graph runner
-		runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
-			BazelClient:        client,
-			GitClient:          gitModule,
-			Config:             repoCfg,
-			ExtraExcludedFiles: param.Req.GetRequestOptions().GetExtraExcludeFilesRegex(),
-			Scope:              b.scope,
-		})
+
+	runner, err := b.graphRunnerFactory(ctx, pw.ws, pw.git, pw.repoCfg, param.Req.GetRequestOptions().GetExtraExcludeFilesRegex())
+	if err != nil {
+		return nil, err
 	}
-	result, err := runner.Compute(ctx, ws)
+	result, err := runner.Compute(ctx, pw.ws)
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
@@ -207,14 +211,11 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph to response: %w", err)
 	}
-	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, responses)
-	if err != nil {
+	if err := storage.WriteGraphStream(ctx, b.storage, treehashPath, responses); err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
 	}
-	treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription)
-	treehashReader := bytes.NewReader([]byte(treehash))
-	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
-	if err != nil {
+	treehashCachePath := common.GetTreehashCachePath(desc)
+	if err := b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: bytes.NewReader([]byte(treehash))}); err != nil {
 		return nil, fmt.Errorf("store treehash mapping at %s: %w", treehashCachePath, err)
 	}
 	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
@@ -223,4 +224,35 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	}
 	logger.Infow("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
 	return graphReader, nil
+}
+
+// GetTargetGraph computes the target graph locally.
+func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTargetGraphParam) (_ storage.GraphReader, retErr error) {
+	b.getTargetGraphCalls.Inc(1)
+	defer func() {
+		if retErr != nil {
+			b.getTargetGraphFailure.Inc(1)
+			var ce common.ClassifiedError
+			if !errors.As(retErr, &ce) {
+				ce = common.WithReason(common.FailureReasonUnknown, common.ErrorTypeInfra, retErr)
+			}
+			b.getTargetGraphScope.Tagged(map[string]string{
+				"failure_type":   ce.Type(),
+				"failure_reason": ce.Reason(),
+			}).Counter("failure_type").Inc(1)
+		} else {
+			b.getTargetGraphSuccess.Inc(1)
+		}
+	}()
+
+	logger := b.logger.With(zap.Any("build_description", param.Req.BuildDescription))
+	logger.Infow("GetTargetGraph: Processing request")
+
+	pw, cleanup, err := b.prepareWorkspace(ctx, param.Req.BuildDescription, logger)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	return b.computeGraph(ctx, pw, param, logger)
 }

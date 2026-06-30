@@ -43,17 +43,6 @@ type repoManager struct {
 
 	mu    sync.Mutex
 	pools map[string]*workerPool
-
-	// appCtx represents the app's overall lifetime. It is passed in by the
-	// caller at construction and is expected to be cancelled when the whole
-	// application is shutting down (e.g. on SIGTERM/SIGINT). Any future
-	// fire-and-forget goroutines this manager starts should use this context
-	// instead of context.Background() so they abort promptly on shutdown
-	// rather than running unbounded past server teardown.
-	//
-	// Per-request cancellation should still use the request's own context;
-	// appCtx is only for work that intentionally outlives the request.
-	appCtx context.Context
 }
 
 // workerPool manages a fixed set of worker slots for a single repo.
@@ -77,9 +66,6 @@ type workerSlot struct {
 type Params struct {
 	fx.In
 
-	// AppCtx is the application-lifetime context. Cancel it when the process
-	// is shutting down to abort any background goroutines the manager spawns.
-	AppCtx               context.Context `name:"appCtx"`
 	Git                  git.Interface
 	Logger               *zap.SugaredLogger
 	RepoManagerClonePath string `name:"repoManagerClonePath"`
@@ -96,7 +82,6 @@ func NewRepoManager(p Params) RepoManager {
 		logger:               p.Logger,
 		poolSize:             p.PoolSize,
 		pools:                make(map[string]*workerPool),
-		appCtx:               p.AppCtx,
 	}
 }
 

@@ -31,7 +31,9 @@ import (
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	targethasher "github.com/uber/tango/core/targethasher"
+	"github.com/uber/tango/core/workspace"
 	workspacemock "github.com/uber/tango/core/workspace/workspacemock"
+	"github.com/uber/tango/graphrunner"
 	graphmock "github.com/uber/tango/graphrunner/mock"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/mock/gomock"
@@ -72,7 +74,6 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 
 	o := NewNativeOrchestrator(Params{
-		AppCtx:      context.Background(),
 		Storage:     st,
 		RepoManager: rm,
 		Logger:      zaptest.NewLogger(t).Sugar(),
@@ -129,13 +130,14 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		},
 	}}, nil)
 	o := NewNativeOrchestrator(Params{
-		AppCtx:      context.Background(),
 		Storage:     st,
 		RepoManager: rm,
 		Logger:      zaptest.NewLogger(t).Sugar(),
 		GitFactory:  func(dir string) git.Interface { return g },
-		GraphRunner: graphRunner,
-		Config:      testConfig(t),
+		GraphRunnerFactory: func(context.Context, workspace.Workspace, git.Interface, config.RepositoryConfig, []string) (graphrunner.GraphRunner, error) {
+			return graphRunner, nil
+		},
+		Config: testConfig(t),
 	})
 	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
 		Req: &pb.GetTargetGraphRequest{BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}},
@@ -162,7 +164,6 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 	o := NewNativeOrchestrator(Params{
-		AppCtx:      context.Background(),
 		Storage:     st,
 		RepoManager: rm,
 		Logger:      zaptest.NewLogger(t).Sugar(),
@@ -202,7 +203,6 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 	o := NewNativeOrchestrator(Params{
-		AppCtx:      context.Background(),
 		Storage:     st,
 		RepoManager: rm,
 		Logger:      zaptest.NewLogger(t).Sugar(),

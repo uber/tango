@@ -26,7 +26,7 @@ import (
 // Module wires all Tango service layers: controller, orchestrator, and repo manager.
 //
 // Callers must supply the following values before including this module:
-//   - context.Context named "appCtx" — the application-lifetime context
+//   - context.Context named "appCtx" — the application-lifetime context (used by the controller for background work)
 //   - *zap.Logger and *zap.SugaredLogger — structured loggers
 //   - storage.Storage — blob storage backend
 //   - config.RepositoryConfigProvider — repository configuration
