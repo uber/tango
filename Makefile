@@ -1,4 +1,4 @@
-.PHONY: build test test-integration proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
+.PHONY: build cover test test-integration proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -34,6 +34,12 @@ gazelle:
 	@echo "Running Gazelle to update BUILD files..."
 	@$(BAZEL) run //:gazelle
 	@echo "BUILD files updated!"
+
+# Run tests with coverage and generate cover.out
+cover: ## Run tests with coverage
+	@echo "Running tests with coverage..."
+	@go test -race -coverprofile=cover.out -coverpkg=./... ./...
+	@echo "Coverage report written to cover.out"
 
 # Clean generated files and binaries
 clean:
