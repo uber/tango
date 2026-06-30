@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "module",
+    srcs = ["module.go"],
+    importpath = "github.com/uber/tango/module",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//controller",
+        "//core/repomanager",
+        "//orchestrator",
+        "//tangopb",
+        "@org_uber_go_fx//:fx",
+    ],
+)

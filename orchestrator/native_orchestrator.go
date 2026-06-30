@@ -32,6 +32,7 @@ import (
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/graphrunner"
+	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
 
@@ -42,9 +43,9 @@ type nativeOrchestrator struct {
 	logger      *zap.SugaredLogger
 	scope       tally.Scope
 	// gitFactory allows injecting a git.Interface constructor for testing
-	gitFactory     func(directory string) git.Interface
-	graphRunner    graphrunner.GraphRunner
-	configFilePath string
+	gitFactory  func(directory string) git.Interface
+	graphRunner graphrunner.GraphRunner
+	config      config.RepositoryConfigProvider
 
 	// appCtx represents the app's overall lifetime. It is passed in by the
 	// caller at construction and is expected to be cancelled when the whole
@@ -59,34 +60,39 @@ type nativeOrchestrator struct {
 }
 
 type Params struct {
-	Storage        storage.Storage
-	RepoManager    repomanager.RepoManager
-	Logger         *zap.SugaredLogger
-	Scope          tally.Scope
-	GitFactory     func(directory string) git.Interface
-	GraphRunner    graphrunner.GraphRunner
-	ConfigFilePath string
+	fx.In
+
+	// AppCtx is the application-lifetime context. Cancel it when the process
+	// is shutting down to abort any background goroutines the orchestrator spawns.
+	AppCtx      context.Context                `name:"appCtx"`
+	Storage     storage.Storage
+	RepoManager repomanager.RepoManager
+	Logger      *zap.SugaredLogger
+	Scope       tally.Scope                    `optional:"true"`
+	GitFactory  func(directory string) git.Interface `optional:"true"`
+	GraphRunner graphrunner.GraphRunner         `optional:"true"`
+	Config      config.RepositoryConfigProvider
 }
 
 // NewNativeOrchestrator creates a new native orchestrator with the given parameters.
-//
-// appCtx is the application-lifetime context. Cancel it when the process is
-// shutting down (e.g. wire it to SIGTERM/SIGINT in main) to abort any
-// background goroutines the orchestrator spawns.
-func NewNativeOrchestrator(appCtx context.Context, p Params) Orchestrator {
+func NewNativeOrchestrator(p Params) Orchestrator {
 	scope := p.Scope
 	if scope == nil {
 		scope = tally.NoopScope
 	}
+	gitFactory := p.GitFactory
+	if gitFactory == nil {
+		gitFactory = git.New
+	}
 	return &nativeOrchestrator{
-		storage:        p.Storage,
-		repoManager:    p.RepoManager,
-		logger:         p.Logger,
-		scope:          scope.SubScope("orchestrator"),
-		gitFactory:     p.GitFactory,
-		graphRunner:    p.GraphRunner,
-		configFilePath: p.ConfigFilePath,
-		appCtx:         appCtx,
+		storage:     p.Storage,
+		repoManager: p.RepoManager,
+		logger:      p.Logger,
+		scope:       scope.SubScope("orchestrator"),
+		gitFactory:  gitFactory,
+		graphRunner: p.GraphRunner,
+		config:      p.Config,
+		appCtx:      p.AppCtx,
 	}
 }
 
@@ -113,13 +119,8 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	logger := b.logger.With(zap.Any("build_description", param.Req.BuildDescription))
 	logger.Infow("GetTargetGraph: Processing request")
 
-	// parse the config file
-	cfg, err := config.Parse(b.configFilePath)
-	if err != nil {
-		return nil, fmt.Errorf("parse config %q: %w", b.configFilePath, err)
-	}
 	remote := param.Req.BuildDescription.Remote
-	repoCfg, ok := cfg.GetRepositoryConfig(remote)
+	repoCfg, ok := b.config.GetRepositoryConfig(remote)
 	if !ok {
 		return nil, fmt.Errorf("no repository configuration found for remote %q", remote)
 	}
@@ -143,12 +144,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	logger.Infow("GetTargetGraph: Checked out base revision")
 
 	requests := make([]workspace.Request, 0, len(param.Req.BuildDescription.Requests))
-	factory := b.gitFactory
-	if factory == nil {
-		factory = git.New
-	}
-
-	gitModule := factory(ws.Path())
+	gitModule := b.gitFactory(ws.Path())
 	for _, req := range param.Req.BuildDescription.Requests {
 		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.BaseSha, req.GetCommit(), logger)
 		if err != nil {

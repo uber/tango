@@ -155,7 +155,7 @@ func TestGetChangedTargets_ValidationError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-	c := NewController(context.Background(), Params{Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
+	c := NewController(Params{AppCtx: context.Background(), Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
 
 	err := c.GetChangedTargets(nil, stream)
 	assert.EqualError(t, err, "request cannot be nil")
@@ -196,7 +196,7 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 
 	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
-	c := NewController(context.Background(), Params{
+	c := NewController(Params{AppCtx: context.Background(), 
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -227,7 +227,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
 		Return(storage.DownloadResponse{}, injected).Times(2)
 
-	c := NewController(context.Background(), Params{
+	c := NewController(Params{AppCtx: context.Background(), 
 		Logger:       zap.NewNop(),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -316,7 +316,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 		return nil
 	})
 
-	c := NewController(context.Background(), Params{
+	c := NewController(Params{AppCtx: context.Background(), 
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -423,7 +423,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 		return nil
 	})
 
-	c := NewController(context.Background(), Params{
+	c := NewController(Params{AppCtx: context.Background(), 
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -523,7 +523,7 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
-	c := NewController(appCtx, Params{
+	c := NewController(Params{AppCtx: appCtx, 
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -1159,7 +1159,7 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 		return nil
 	}).Times(2)
 
-	c := NewController(context.Background(), Params{
+	c := NewController(Params{AppCtx: context.Background(), 
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),

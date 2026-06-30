@@ -9,6 +9,7 @@ go_library(
         "//core/git",
         "//core/workspace",
         "//tangopb",
+        "@org_uber_go_fx//:fx",
         "@org_uber_go_zap//:zap",
     ],
 )

@@ -19,18 +19,15 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
 
 	"github.com/uber/tango/config"
-	"github.com/uber/tango/controller"
 	"github.com/uber/tango/core/git"
-	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/storage/disk"
-	"github.com/uber/tango/orchestrator"
+	tangomodule "github.com/uber/tango/module"
 	pb "github.com/uber/tango/tangopb"
+	"go.uber.org/fx"
 	"go.uber.org/yarpc"
 	"go.uber.org/yarpc/api/transport"
 	yarpcgrpc "go.uber.org/yarpc/transport/grpc"
@@ -38,101 +35,119 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to start: %v\n", err)
-		os.Exit(1)
-	}
+	fx.New(
+		tangomodule.Module,
+		fx.Provide(
+			provideConfig,
+			provideStorage,
+			provideLoggers,
+			provideGit,
+			provideAppCtx,
+			pb.NewFxTangoYARPCProcedures(),
+		),
+		fx.Invoke(startServer),
+	).Run()
 }
 
-func run() error {
-	zl, _ := zap.NewDevelopment()
-	defer zl.Sync()
-	logger := zl.Sugar()
-
-	// appCtx is the application-lifetime context. It is cancelled on
-	// SIGINT/SIGTERM so background work (e.g. the controller's async
-	// cache write) is aborted instead of leaking past process exit.
-	appCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stopSignals()
-
+func provideConfig() (*config.Config, config.RepositoryConfigProvider, error) {
 	configFilePath := filepath.Join("example", "tango-config.yaml")
 	cfg, err := config.Parse(configFilePath)
 	if err != nil {
-		return fmt.Errorf("failed to parse config: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse config: %w", err)
 	}
+	return cfg, cfg, nil
+}
 
-	store, err := newStorage(cfg.Storage)
-	if err != nil {
-		return fmt.Errorf("failed to create storage: %w", err)
+func provideStorage(cfg *config.Config) (storage.Storage, error) {
+	return newStorage(cfg.Storage)
+}
+
+type loggerResult struct {
+	fx.Out
+	Logger        *zap.Logger
+	SugaredLogger *zap.SugaredLogger
+}
+
+func provideLoggers() loggerResult {
+	zl, _ := zap.NewDevelopment()
+	return loggerResult{
+		Logger:        zl,
+		SugaredLogger: zl.Sugar(),
 	}
-	logger.Infof("Using storage type: %s", cfg.Storage.Type)
+}
 
-	// Repo manager and orchestrator
+type serviceParams struct {
+	fx.Out
+	RepoManagerClonePath string `name:"repoManagerClonePath"`
+	WorkerRootPath       string `name:"workerRootPath"`
+	WorkerPoolSize       int    `name:"workerPoolSize"`
+}
+
+func provideGit(lc fx.Lifecycle, cfg *config.Config) (git.Interface, serviceParams, error) {
 	repoManagerClonePath := cfg.Service.RepoManagerClonePath
 	workerRootPath := cfg.Service.WorkerRootPath
 	if err := os.MkdirAll(repoManagerClonePath, 0o755); err != nil {
-		return fmt.Errorf("failed to create repo manager clone path: %w", err)
+		return nil, serviceParams{}, fmt.Errorf("failed to create repo manager clone path: %w", err)
 	}
-	defer os.RemoveAll(repoManagerClonePath)
 	if err := os.MkdirAll(workerRootPath, 0o755); err != nil {
-		return fmt.Errorf("failed to create worker root path: %w", err)
+		return nil, serviceParams{}, fmt.Errorf("failed to create worker root path: %w", err)
 	}
-	defer os.RemoveAll(workerRootPath)
-
-	rm := repomanager.NewRepoManager(appCtx, repomanager.Params{
-		Git:                  git.New(repoManagerClonePath),
-		Logger:               logger,
+	lc.Append(fx.StopHook(func() {
+		os.RemoveAll(repoManagerClonePath)
+		os.RemoveAll(workerRootPath)
+	}))
+	return git.New(repoManagerClonePath), serviceParams{
 		RepoManagerClonePath: repoManagerClonePath,
 		WorkerRootPath:       workerRootPath,
-		PoolSize:             cfg.Service.WorkerPoolSize,
-	})
-	orch := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
-		Storage:        store,
-		RepoManager:    rm,
-		Logger:         logger,
-		GitFactory:     git.New,
-		ConfigFilePath: configFilePath,
-	})
+		WorkerPoolSize:       cfg.Service.WorkerPoolSize,
+	}, nil
+}
 
-	// Controller (YARPC server implementation). appCtx is forwarded so the
-	// controller's background goroutines are tied to process lifetime.
-	ctrl := controller.NewController(appCtx, controller.Params{
-		Logger:       zl,
-		Storage:      store,
-		Orchestrator: orch,
-	})
+type appCtxResult struct {
+	fx.Out
+	AppCtx context.Context `name:"appCtx"`
+}
 
-	// YARPC transports and dispatcher
+func provideAppCtx(lc fx.Lifecycle) appCtxResult {
+	ctx, cancel := context.WithCancel(context.Background())
+	lc.Append(fx.StopHook(cancel))
+	return appCtxResult{AppCtx: ctx}
+}
+
+type serverParams struct {
+	fx.In
+	Procedures []transport.Procedure `group:"yarpcfx"`
+	Logger     *zap.SugaredLogger
+}
+
+func startServer(lc fx.Lifecycle, p serverParams) error {
 	grpcTransport := yarpcgrpc.NewTransport()
 	port := "127.0.0.1:8081"
 	grpcListener, err := net.Listen("tcp", port)
 	if err != nil {
 		return fmt.Errorf("failed to listen on gRPC port: %w", err)
 	}
-
-	inbounds := []transport.Inbound{
-		grpcTransport.NewInbound(grpcListener),
-	}
 	dispatcher := yarpc.NewDispatcher(yarpc.Config{
-		Name:     "tango",
-		Inbounds: inbounds,
+		Name: "tango",
+		Inbounds: []transport.Inbound{
+			grpcTransport.NewInbound(grpcListener),
+		},
 	})
-	dispatcher.Register(pb.BuildTangoYARPCProcedures(ctrl))
+	dispatcher.Register(p.Procedures)
 
-	if err := dispatcher.Start(); err != nil {
-		return fmt.Errorf("failed to start dispatcher: %w", err)
-	}
-	defer dispatcher.Stop()
-
-	logger.Infof("Tango server is running:")
-	logger.Infof("- gRPC inbound:  %s", port)
-	logger.Infof("Press Ctrl+C to stop.")
-	// Block until SIGINT/SIGTERM cancels appCtx.
-	<-appCtx.Done()
+	lc.Append(fx.Hook{
+		OnStart: func(context.Context) error {
+			p.Logger.Infof("Tango server starting:")
+			p.Logger.Infof("- gRPC inbound:  %s", port)
+			return dispatcher.Start()
+		},
+		OnStop: func(context.Context) error {
+			return dispatcher.Stop()
+		},
+	})
 	return nil
 }
 
-// newStorage creates a Storage implementation based on the provided configuration.
 func newStorage(cfg config.StorageConfig) (storage.Storage, error) {
 	switch cfg.Type {
 	case config.StorageTypeMemory, "":

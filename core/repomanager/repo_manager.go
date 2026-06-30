@@ -25,6 +25,7 @@ import (
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/tangopb"
+	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
 
@@ -74,19 +75,20 @@ type workerSlot struct {
 
 // Params for creating a RepoManager.
 type Params struct {
+	fx.In
+
+	// AppCtx is the application-lifetime context. Cancel it when the process
+	// is shutting down to abort any background goroutines the manager spawns.
+	AppCtx               context.Context `name:"appCtx"`
 	Git                  git.Interface
 	Logger               *zap.SugaredLogger
-	RepoManagerClonePath string
-	WorkerRootPath       string
-	PoolSize             int
+	RepoManagerClonePath string `name:"repoManagerClonePath"`
+	WorkerRootPath       string `name:"workerRootPath"`
+	PoolSize             int    `name:"workerPoolSize"`
 }
 
 // NewRepoManager creates a new repo manager with pooled worker workspaces.
-//
-// appCtx is the application-lifetime context. Cancel it when the process is
-// shutting down (e.g. wire it to SIGTERM/SIGINT in main) to abort any
-// background goroutines the manager spawns.
-func NewRepoManager(appCtx context.Context, p Params) RepoManager {
+func NewRepoManager(p Params) RepoManager {
 	return &repoManager{
 		git:                  p.Git,
 		repoManagerClonePath: p.RepoManagerClonePath,
@@ -94,7 +96,7 @@ func NewRepoManager(appCtx context.Context, p Params) RepoManager {
 		logger:               p.Logger,
 		poolSize:             p.PoolSize,
 		pools:                make(map[string]*workerPool),
-		appCtx:               appCtx,
+		appCtx:               p.AppCtx,
 	}
 }
 

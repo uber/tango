@@ -20,6 +20,7 @@ go_library(
         "//graphrunner",
         "//tangopb",
         "@com_github_uber_go_tally//:tally",
+        "@org_uber_go_fx//:fx",
         "@org_uber_go_zap//:zap",
     ],
 )
@@ -30,6 +31,7 @@ go_test(
     data = glob(["testdata/**"]),
     embed = [":orchestrator"],
     deps = [
+        "//config",
         "//core/git",
         "//core/git/gitmock",
         "//core/repomanager/mock",
