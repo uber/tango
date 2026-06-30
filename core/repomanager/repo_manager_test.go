@@ -24,7 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	gitmock "github.com/uber/tango/core/git/gitmock"
+	gitmock "github.com/uber/tango/internal/gitmock"
 	"github.com/uber/tango/tangopb"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"

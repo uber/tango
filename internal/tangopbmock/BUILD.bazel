@@ -1,0 +1,13 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "tangopbmock",
+    srcs = ["tangopbmock.go"],
+    importpath = "github.com/uber/tango/internal/tangopbmock",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tangopb",
+        "@org_uber_go_mock//gomock",
+        "@org_uber_go_yarpc//:yarpc",
+    ],
+)

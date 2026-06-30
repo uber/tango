@@ -1,0 +1,12 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "gitmock",
+    srcs = ["gitmock.go"],
+    importpath = "github.com/uber/tango/internal/gitmock",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/git",
+        "@org_uber_go_mock//gomock",
+    ],
+)

@@ -1,0 +1,9 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "commandermock",
+    srcs = ["commandermock.go"],
+    importpath = "github.com/uber/tango/internal/commandermock",
+    visibility = ["//visibility:public"],
+    deps = ["@org_uber_go_mock//gomock"],
+)

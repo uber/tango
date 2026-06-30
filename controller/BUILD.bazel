@@ -39,10 +39,10 @@ go_test(
     deps = [
         "//core/common",
         "//core/storage",
-        "//core/storage/storagemock",
-        "//orchestrator/orchestratormock",
+        "//internal/orchestratormock",
+        "//internal/storagemock",
+        "//internal/tangopbmock",
         "//tangopb",
-        "//tangopb/tangopbmock",
         "@com_github_gogo_protobuf//io",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",

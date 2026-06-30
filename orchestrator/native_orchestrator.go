@@ -27,7 +27,7 @@ import (
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/common"
-	"github.com/uber/tango/core/git"
+	"github.com/uber/tango/internal/git"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/workspace"

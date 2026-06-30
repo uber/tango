@@ -1,9 +1,0 @@
-load("@rules_go//go:def.bzl", "go_library")
-
-go_library(
-    name = "requestmock",
-    srcs = ["requestmock.go"],
-    importpath = "github.com/uber/tango/core/workspace/requestmock",
-    visibility = ["//visibility:public"],
-    deps = ["@org_uber_go_mock//gomock"],
-)

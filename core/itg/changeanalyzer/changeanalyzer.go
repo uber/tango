@@ -23,7 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/uber/tango/core/git"
+	"github.com/uber/tango/internal/git"
 )
 
 // ChangeComplexity represents the complexity level of changes between two refs.

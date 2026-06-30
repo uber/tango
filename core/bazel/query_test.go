@@ -26,7 +26,7 @@ import (
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber/tango/core/bazel/commandermock"
+	"github.com/uber/tango/internal/commandermock"
 	"go.uber.org/goleak"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"

@@ -22,7 +22,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/uber/tango/core/git"
+	"github.com/uber/tango/internal/git"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/tangopb"
 	"go.uber.org/zap"

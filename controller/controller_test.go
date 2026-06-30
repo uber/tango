@@ -19,7 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
+	orchestratormock "github.com/uber/tango/internal/orchestratormock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )

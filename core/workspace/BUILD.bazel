@@ -10,7 +10,7 @@ go_library(
     importpath = "github.com/uber/tango/core/workspace",
     visibility = ["//visibility:public"],
     deps = [
-        "//core/git",
+        "//internal/git",
         "@org_uber_go_zap//:zap",
     ],
 )
@@ -24,9 +24,9 @@ go_test(
     ],
     embed = [":workspace"],
     deps = [
-        "//core/git",
-        "//core/git/gitmock",
-        "//core/workspace/requestmock",
+        "//internal/git",
+        "//internal/gitmock",
+        "//internal/requestmock",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@org_uber_go_mock//gomock",

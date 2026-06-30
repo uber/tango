@@ -1,0 +1,25 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "mock",
+    srcs = ["mock.go"],
+    importpath = "github.com/uber/tango/graphrunner/mock",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core/targethasher",
+        "//core/workspace",
+        "@org_uber_go_mock//gomock",
+    ],
+)
+
+go_library(
+    name = "graphrunnermock",
+    srcs = ["mock.go"],
+    importpath = "github.com/uber/tango/internal/graphrunnermock",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//core/targethasher",
+        "//core/workspace",
+        "@org_uber_go_mock//gomock",
+    ],
+)

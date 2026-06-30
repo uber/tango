@@ -1,0 +1,13 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "orchestratormock",
+    srcs = ["orchestratormock.go"],
+    importpath = "github.com/uber/tango/internal/orchestratormock",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core/storage",
+        "//orchestrator",
+        "@org_uber_go_mock//gomock",
+    ],
+)

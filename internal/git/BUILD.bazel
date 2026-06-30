@@ -1,0 +1,19 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "git",
+    srcs = ["git.go"],
+    importpath = "github.com/uber/tango/internal/git",
+    visibility = ["//visibility:public"],
+    deps = ["//core/execcmd"],
+)
+
+go_test(
+    name = "git_test",
+    srcs = ["git_test.go"],
+    embed = [":git"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

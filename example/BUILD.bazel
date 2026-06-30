@@ -8,10 +8,10 @@ go_library(
     deps = [
         "//config",
         "//controller",
-        "//core/git",
         "//core/repomanager",
         "//core/storage",
         "//core/storage/disk",
+        "//internal/git",
         "//orchestrator",
         "//tangopb",
         "@org_uber_go_yarpc//:yarpc",

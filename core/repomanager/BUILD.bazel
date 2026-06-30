@@ -6,8 +6,8 @@ go_library(
     importpath = "github.com/uber/tango/core/repomanager",
     visibility = ["//visibility:public"],
     deps = [
-        "//core/git",
         "//core/workspace",
+        "//internal/git",
         "//tangopb",
         "@org_uber_go_zap//:zap",
     ],
@@ -18,7 +18,7 @@ go_test(
     srcs = ["repo_manager_test.go"],
     embed = [":repomanager"],
     deps = [
-        "//core/git/gitmock",
+        "//internal/gitmock",
         "//tangopb",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",

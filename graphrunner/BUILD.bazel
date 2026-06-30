@@ -12,9 +12,9 @@ go_library(
     deps = [
         "//config",
         "//core/bazel",
-        "//core/git",
         "//core/targethasher",
         "//core/workspace",
+        "//internal/git",
         "@com_github_uber_go_tally//:tally",
     ],
 )
@@ -25,9 +25,9 @@ go_test(
     embed = [":graphrunner"],
     deps = [
         "//core/bazel",
-        "//core/bazel/bazelmock",
-        "//core/git/gitmock",
         "//core/workspace",
+        "//internal/bazelmock",
+        "//internal/gitmock",
         "@com_github_bazelbuild_buildtools//build_proto",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",

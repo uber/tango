@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/uber/tango/core/git"
+	"github.com/uber/tango/internal/git"
 	"go.uber.org/zap"
 )
 

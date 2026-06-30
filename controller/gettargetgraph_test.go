@@ -26,10 +26,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
-	storagemock "github.com/uber/tango/core/storage/storagemock"
-	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
+	storagemock "github.com/uber/tango/internal/storagemock"
+	orchestratormock "github.com/uber/tango/internal/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
-	tangomock "github.com/uber/tango/tangopb/tangopbmock"
+	tangomock "github.com/uber/tango/internal/tangopbmock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 )
