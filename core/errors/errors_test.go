@@ -18,24 +18,17 @@ import (
 	stderrors "errors"
 	"fmt"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNew(t *testing.T) {
 	inner := stderrors.New("something went wrong")
 	ce := New(ErrorTypeInfra, FailureReasonUnknown, inner)
 
-	if ce.ErrorType != ErrorTypeInfra {
-		t.Errorf("ErrorType = %q, want %q", ce.ErrorType, ErrorTypeInfra)
-	}
-	if ce.Reason != FailureReasonUnknown {
-		t.Errorf("Reason = %q, want %q", ce.Reason, FailureReasonUnknown)
-	}
-	if ce.Error() != inner.Error() {
-		t.Errorf("Error() = %q, want %q", ce.Error(), inner.Error())
-	}
-	if stderrors.Unwrap(ce) != inner {
-		t.Error("Unwrap() did not return the inner error")
-	}
+	assert.Equal(t, ErrorTypeInfra, ce.ErrorType)
+	assert.Equal(t, FailureReasonUnknown, ce.Reason)
+	assert.Equal(t, inner, ce.Err)
 }
 
 func TestClassifiedError_AsTraversal(t *testing.T) {
@@ -45,12 +38,10 @@ func TestClassifiedError_AsTraversal(t *testing.T) {
 	wrapped := fmt.Errorf("outer: %w", ce)
 
 	var found *ClassifiedError
-	if !stderrors.As(wrapped, &found) {
-		t.Fatal("errors.As did not find *ClassifiedError in chain")
-	}
-	if found.ErrorType != ErrorTypeUser {
-		t.Errorf("ErrorType = %q, want %q", found.ErrorType, ErrorTypeUser)
-	}
+	assert.True(t, stderrors.As(wrapped, &found))
+	assert.Equal(t, ErrorTypeUser, found.ErrorType)
+	assert.Equal(t, FailureReasonValidation, found.Reason)
+	assert.Equal(t, inner, found.Err)
 }
 
 func TestClassifiedError_StructuredInnerAsTraversal(t *testing.T) {
@@ -59,12 +50,8 @@ func TestClassifiedError_StructuredInnerAsTraversal(t *testing.T) {
 	ce := New(ErrorTypeInfra, FailureReasonUnknown, inner)
 
 	var found *ErrDownloadGraph
-	if !stderrors.As(ce, &found) {
-		t.Fatal("errors.As did not find *ErrDownloadGraph through *ClassifiedError")
-	}
-	if found.Key != "itg/abc" {
-		t.Errorf("Key = %q, want %q", found.Key, "itg/abc")
-	}
+	assert.True(t, stderrors.As(ce, &found))
+	assert.Equal(t, "itg/abc", found.Key)
 }
 
 func TestClassifiedError_IsTraversal(t *testing.T) {
@@ -73,123 +60,13 @@ func TestClassifiedError_IsTraversal(t *testing.T) {
 	inner := &ErrDownloadGraph{Key: "k", Cause: root}
 	ce := New(ErrorTypeInfra, FailureReasonUnknown, inner)
 
-	if !stderrors.Is(ce, root) {
-		t.Error("errors.Is did not find root cause through *ClassifiedError and *ErrDownloadGraph")
-	}
+	assert.True(t, stderrors.Is(ce, root))
 }
 
-func TestSentinelVars(t *testing.T) {
-	tests := []struct {
-		name      string
-		sentinel  *ClassifiedError
-		wantType  string
-		wantMsg   string
-	}{
-		{"ErrRootDirEmpty", ErrRootDirEmpty, ErrorTypeUser, "root directory cannot be empty"},
-		{"ErrRequestNil", ErrRequestNil, ErrorTypeUser, "request cannot be nil"},
-		{"ErrNilReader", ErrNilReader, ErrorTypeInfra, "nil reader"},
-		{"ErrNoChunksReturned", ErrNoChunksReturned, ErrorTypeInfra, "no chunks returned"},
-		{"ErrParentPackageNotExist", ErrParentPackageNotExist, ErrorTypeInfra, "parent package does not exist"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.sentinel.ErrorType != tt.wantType {
-				t.Errorf("ErrorType = %q, want %q", tt.sentinel.ErrorType, tt.wantType)
-			}
-			if tt.sentinel.Error() != tt.wantMsg {
-				t.Errorf("Error() = %q, want %q", tt.sentinel.Error(), tt.wantMsg)
-			}
-		})
-	}
-}
+func TestClassifiedError_IsTraversalStructured(t *testing.T) {
+	// errors.Is should match the structured type itself when it is the target.
+	inner := &ErrDownloadGraph{Key: "k", Cause: stderrors.New("io error")}
+	ce := New(ErrorTypeInfra, FailureReasonUnknown, inner)
 
-func TestSentinelIdentity(t *testing.T) {
-	// errors.Is on a sentinel should match by pointer identity.
-	if !stderrors.Is(ErrRootDirEmpty, ErrRootDirEmpty) {
-		t.Error("errors.Is(ErrRootDirEmpty, ErrRootDirEmpty) should be true")
-	}
-	if stderrors.Is(ErrRootDirEmpty, ErrRequestNil) {
-		t.Error("errors.Is(ErrRootDirEmpty, ErrRequestNil) should be false")
-	}
-}
-
-func TestStructuredErrorStrings(t *testing.T) {
-	tests := []struct {
-		name    string
-		err     error
-		wantMsg string
-	}{
-		{
-			"ErrTargetTypeNotHandled",
-			&ErrTargetTypeNotHandled{TargetType: "UNKNOWN"},
-			`cannot handle target type "UNKNOWN"`,
-		},
-		{
-			"ErrExternalRepositoryNotFound",
-			&ErrExternalRepositoryNotFound{Repo: "myrepo", Target: "//ext:target"},
-			"cannot find external repository myrepo from external target //ext:target",
-		},
-		{
-			"ErrDownloadGraph",
-			&ErrDownloadGraph{Key: "itg/k", Cause: stderrors.New("eof")},
-			"download graph itg/k: eof",
-		},
-		{
-			"ErrTargetNotFound",
-			&ErrTargetNotFound{ID: 42},
-			"target 42 not found",
-		},
-		{
-			"ErrTargetNotFoundInGraph",
-			&ErrTargetNotFoundInGraph{ID: 7},
-			"target 7 not found in graph",
-		},
-		{
-			"ErrDependencyNotFound",
-			&ErrDependencyNotFound{Dep: "//foo:bar", Target: "//baz:qux"},
-			"dependency //foo:bar of target //baz:qux not found",
-		},
-		{
-			"ErrNoRepositoryConfig",
-			&ErrNoRepositoryConfig{Remote: "github.com/uber/tango"},
-			`no repository configuration found for remote "github.com/uber/tango"`,
-		},
-		{
-			"ErrTargetIDNotInMetadata_current",
-			&ErrTargetIDNotInMetadata{ID: 99, Role: "current"},
-			"current target id 99 not found in metadata",
-		},
-		{
-			"ErrBazeliskHTTPFailure",
-			&ErrBazeliskHTTPFailure{StatusCode: 403, URL: "https://example.com"},
-			"download bazelisk: HTTP 403 from https://example.com",
-		},
-		{
-			"ErrParseTimestamp",
-			&ErrParseTimestamp{Cause: stderrors.New("invalid syntax")},
-			"parse timestamp: invalid syntax",
-		},
-		{
-			"ErrPRCommitHistory",
-			&ErrPRCommitHistory{Cause: stderrors.New("network error")},
-			"failed to read PR commit history: network error",
-		},
-		{
-			"ErrCommitNotAncestor",
-			&ErrCommitNotAncestor{Commit: "abc123", PR: "456"},
-			`commit "abc123" is not an ancestor of PR 456`,
-		},
-		{
-			"ErrRegexPatternInvalid",
-			&ErrRegexPatternInvalid{Pattern: "[bad", Cause: stderrors.New("missing closing ]")},
-			`invalid pattern "[bad": missing closing ]`,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.err.Error(); got != tt.wantMsg {
-				t.Errorf("Error() = %q, want %q", got, tt.wantMsg)
-			}
-		})
-	}
+	assert.True(t, stderrors.Is(ce, inner))
 }

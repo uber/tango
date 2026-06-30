@@ -32,7 +32,7 @@ const (
 	FailureReasonValidation       = "validation"
 )
 
-// ClassifiedError wraps any error with an explicit error type and reason for metrics.
+// ClassifiedError wraps any error with an explicit error type and reason.
 type ClassifiedError struct {
 	ErrorType string
 	Reason    string
@@ -48,7 +48,6 @@ func New(errorType, reason string, err error) *ClassifiedError {
 }
 
 // User Sentinel errors
-
 var (
 	ErrRootDirEmpty                  = New(ErrorTypeUser, FailureReasonValidation, stderrors.New("root directory cannot be empty"))
 	ErrBuildDescriptionEmpty         = New(ErrorTypeUser, FailureReasonValidation, stderrors.New("build description is empty or invalid"))
@@ -63,7 +62,6 @@ var (
 )
 
 // Infra Sentinel errors
-
 var (
 	ErrParentPackageNotExist        = New(ErrorTypeInfra, FailureReasonUnknown, stderrors.New("parent package does not exist"))
 	ErrNilReader                    = New(ErrorTypeInfra, FailureReasonUnknown, stderrors.New("nil reader"))
