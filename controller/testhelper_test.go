@@ -15,21 +15,10 @@
 package controller
 
 import (
-	"context"
-
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/common"
-	"go.uber.org/zap"
 )
 
-func newTestController(logger *zap.Logger) *controller {
-	return &controller{
-		logger:                 logger,
-		scope:                  tally.NoopScope,
-		targetChunkSize:        common.DefaultTargetChunkSize,
-		changedTargetChunkSize: common.DefaultChangedTargetChunkSize,
-		metadataMapChunkSize:   common.DefaultMetadataMapChunkSize,
-		totalDurationBuckets:   _totalDurationBuckets,
-		appCtx:                 context.Background(),
-	}
+func newTestComparer() *targetGraphComparer {
+	return newTargetGraphComparer(tally.NoopScope, common.DefaultChangedTargetChunkSize, common.DefaultMetadataMapChunkSize)
 }

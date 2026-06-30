@@ -133,7 +133,6 @@ func TestValidateGetChangedTargetsRequest(t *testing.T) {
 }
 
 func TestCompareTargetGraphs(t *testing.T) {
-	c := newTestController(zap.NewNop())
 
 	firstGraph := &pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Metadata{
@@ -146,7 +145,7 @@ func TestCompareTargetGraphs(t *testing.T) {
 		},
 	}
 
-	response, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
+	response, err := newTestComparer().Compare(context.Background(), zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 }
@@ -576,7 +575,6 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
-	c := newTestController(zaptest.NewLogger(t))
 
 	first := []*pb.GetTargetGraphResponse{
 		{
@@ -613,7 +611,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := newTestComparer().Compare(context.Background(), zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 	cs := res[0].GetChangedTargets()
@@ -629,7 +627,6 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
-	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: source file A (id 1, hash h1), lib L (id 2, hash h1, dep -> A)
 	first := []*pb.GetTargetGraphResponse{
@@ -685,7 +682,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := newTestComparer().Compare(context.Background(), zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -713,7 +710,6 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
-	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T (id 1, rule), no deps
 	first := []*pb.GetTargetGraphResponse{
@@ -758,7 +754,7 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	// Hash-only change on a rule with no own-config change and no reachable
 	// seed: under "trust the hasher" semantics, an orphan CHANGED rule with
 	// no upstream explanation becomes a distance-0 seed itself.
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := newTestComparer().Compare(context.Background(), zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -769,7 +765,6 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
-	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T (id 1, rule) with deps on A
 	first := []*pb.GetTargetGraphResponse{
@@ -825,7 +820,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := newTestComparer().Compare(context.Background(), zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -845,7 +840,6 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
-	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T with attribute "key1" -> "value1"
 	first := []*pb.GetTargetGraphResponse{
@@ -907,7 +901,7 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := newTestComparer().Compare(context.Background(), zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -918,7 +912,6 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
-	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T with one attribute
 	first := []*pb.GetTargetGraphResponse{
@@ -989,7 +982,7 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := newTestComparer().Compare(context.Background(), zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1256,7 +1249,6 @@ func TestComputeDistances_NilMetadata(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
-	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T (rule) with deps on source file A (id 10) and attributes
 	first := []*pb.GetTargetGraphResponse{
@@ -1329,7 +1321,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := newTestComparer().Compare(context.Background(), zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1349,7 +1341,6 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
-	c := newTestController(zaptest.NewLogger(t))
 
 	// Source file A (id 1) owned by rule L (id 2).
 	// Rule T (id 3) depends on L (sibling rule), NOT directly on A.
@@ -1411,7 +1402,7 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := newTestComparer().Compare(context.Background(), zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1428,7 +1419,6 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 }
 
 func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
-	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T (rule) exists; New: T is gone.
 	first := []*pb.GetTargetGraphResponse{
@@ -1465,7 +1455,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := newTestComparer().Compare(context.Background(), zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
