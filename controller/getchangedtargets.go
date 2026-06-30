@@ -255,7 +255,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, logger, firstGraph, secondGraph, maxDist)
+	changedTargetsResponses, err := newTargetGraphComparer(c.scope, c.changedTargetChunkSize, c.metadataMapChunkSize).Compare(ctx, logger, firstGraph, secondGraph, maxDist)
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -320,13 +320,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	scope.Timer("total_duration").Record(totalDuration)
 	scope.Histogram("total_duration.histogram", c.totalDurationBuckets).RecordDuration(totalDuration)
 	return nil
-}
-
-// compareTargetGraphs diffs two target graph streams and produces a chunked
-// GetChangedTargetsResponse stream.
-func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
-	cmp := newTargetGraphComparer(c.scope, c.changedTargetChunkSize, c.metadataMapChunkSize)
-	return cmp.Compare(ctx, logger, firstGraph, secondGraph, maxDist)
 }
 
 // sendTrimmedChangedTargets streams responses to the client, filtering changed targets to those
