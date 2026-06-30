@@ -43,7 +43,6 @@ func main() {
 			provideLoggers,
 			provideGit,
 			provideAppCtx,
-			pb.NewFxTangoYARPCProcedures(),
 		),
 		fx.Invoke(startServer),
 	).Run()
@@ -116,8 +115,8 @@ func provideAppCtx(lc fx.Lifecycle) appCtxResult {
 
 type serverParams struct {
 	fx.In
-	Procedures []transport.Procedure `group:"yarpcfx"`
-	Logger     *zap.SugaredLogger
+	Server pb.TangoYARPCServer
+	Logger *zap.SugaredLogger
 }
 
 func startServer(lc fx.Lifecycle, p serverParams) error {
@@ -133,7 +132,7 @@ func startServer(lc fx.Lifecycle, p serverParams) error {
 			grpcTransport.NewInbound(grpcListener),
 		},
 	})
-	dispatcher.Register(p.Procedures)
+	dispatcher.Register(pb.BuildTangoYARPCProcedures(p.Server))
 
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
