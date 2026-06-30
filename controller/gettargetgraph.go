@@ -33,6 +33,12 @@ import (
 func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_target_graph")
 	scope.Counter("calls").Inc(1)
+	start := time.Now()
+	ctx, cancelLink := c.linkRequestCtx(stream.Context())
+	defer cancelLink()
+	logger := c.logger.With(
+		zap.Any("build_description", request.GetBuildDescription()),
+	)
 	defer func() {
 		if retErr != nil {
 			scope.Counter("failure").Inc(1)
@@ -41,15 +47,10 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 			scope.Counter("success").Inc(1)
 		}
 	}()
-	start := time.Now()
-	ctx, cancelLink := c.linkRequestCtx(stream.Context())
-	defer cancelLink()
-	logger := c.logger.With(
-		zap.Any("build_description", request.GetBuildDescription()),
-	)
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetBuildDescription().GetRemote())})
 	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
 	if err != nil {
+		logger.Error("GetTargetGraph: failed to get graph", zap.Error(err))
 		return err
 	}
 	if graphReader == nil {
@@ -64,20 +65,18 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 		if err == io.EOF {
 			sendDuration := time.Since(sendStart)
 			totalDuration := time.Since(start)
-			logger.Info("GetTargetGraph: Done streaming",
-				zap.Duration("send_duration", sendDuration),
-				zap.Duration("total_duration", totalDuration),
-			)
 			scope.Timer("send_duration").Record(sendDuration)
 			scope.Timer("total_duration").Record(totalDuration)
 			return nil
 		}
 		if err != nil {
+			logger.Error("GetTargetGraph: failed to read graph stream", zap.Error(err))
 			return common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
 		}
 		toSend := applyOptimizedTargetsOutputConfigToChunk(graphStreamChunk, outputConfig)
 		err = stream.Send(toSend)
 		if err != nil {
+			logger.Error("GetTargetGraph: failed to send graph", zap.Error(err))
 			return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("send graph: %w", err))
 		}
 	}
@@ -94,48 +93,34 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 	if buildDescription.GetBaseSha() == "" || buildDescription.GetRemote() == "" {
 		return nil, fmt.Errorf("build description is missing required fields: base_sha: %s, remote: %s", buildDescription.GetBaseSha(), buildDescription.GetRemote())
 	}
-	logger := c.logger.With(
-		zap.Any("build_description", buildDescription),
-	)
 	if !bypassCache {
 		// Look up the the git treehash based on cache path
 		treehashCachePath := common.GetTreehashCachePath(buildDescription)
 		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
 		if err != nil {
 			if storage.IsNotFound(err) {
-				// Cache miss - blob doesn't exist, need to compute and store target graph
-				logger.Debug("getGraph: treehash not found", zap.Error(err))
+				// Cache miss - fall through to compute
 			} else {
-				// Other errors (network, infra issues) should be retried
-				logger.Error("getGraph: Storage error", zap.Error(err))
-				return nil, err
+				return nil, fmt.Errorf("storage error reading treehash: %w", err)
 			}
 		} else {
 			defer treehashResponse.ReadCloser.Close()
 			treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)
 			if err != nil {
-				logger.Error("getGraph: Error reading treehash", zap.Error(err))
-				return nil, err
+				return nil, fmt.Errorf("read treehash: %w", err)
 			}
-			logger.Info("getGraph: treehash found")
 			treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes), buildDescription.GetStrategy(), requestOptions)
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
 			if err != nil {
 				if ctx.Err() != nil {
-					return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+					return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
 				}
 				if !storage.IsNotFound(err) {
-					logger.Error("getGraph: Error reading graph from Storage", zap.Error(err))
-					return nil, common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
+					return nil, fmt.Errorf("read graph from storage: %w", err)
 				}
-				logger.Warn("getGraph: graph not found at treehash path", zap.Error(err))
 			} else {
-				logger.Info("getGraph: loaded graph from storage",
-					zap.Duration("storage_duration", time.Since(storageStart)),
-					zap.Duration("total_duration", time.Since(start)),
-				)
 				scope := c.scope.SubScope("get_graph")
 				scope.Counter("graph_cache_hit").Inc(1)
 				scope.Timer("storage_duration").Record(time.Since(storageStart))
@@ -143,25 +128,15 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 				return graphReader, nil
 			}
 		}
-	} else {
-		logger.Info("getGraph: bypass_cache=true, skipping cache lookup")
 	}
 	computeStart := time.Now()
 	graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: &pb.GetTargetGraphRequest{BuildDescription: buildDescription, OutputConfig: outputConfig, RequestOptions: requestOptions}, BypassCache: bypassCache})
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+			return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
 		}
-		var ce common.ClassifiedError
-		if errors.As(err, &ce) {
-			return nil, err
-		}
-		return nil, common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
+		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	logger.Info("getGraph: computed target graph",
-		zap.Duration("compute_duration", time.Since(computeStart)),
-		zap.Duration("total_duration", time.Since(start)),
-	)
 	scope := c.scope.SubScope("get_graph")
 	scope.Timer("compute_duration").Record(time.Since(computeStart))
 	scope.Timer("total_duration").Record(time.Since(start))

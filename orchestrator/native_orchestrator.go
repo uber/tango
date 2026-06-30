@@ -117,7 +117,6 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		}
 	}()
 	logger := b.logger.With(zap.Any("build_description", param.Req.BuildDescription))
-	logger.Infow("GetTargetGraph: Processing request")
 
 	remote := param.Req.BuildDescription.Remote
 	repoCfg, ok := b.config.GetRepositoryConfig(remote)
@@ -129,11 +128,10 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 		return nil, fmt.Errorf("lease workspace: %w", err)
 	}
 	defer func() {
-		err := ws.Release()
-		if err != nil {
-			// clean up the workspace if release fails.
+		if releaseErr := ws.Release(); releaseErr != nil {
+			logger.Warnw("GetTargetGraph: failed to release workspace", zap.Error(releaseErr))
 			if removeErr := os.RemoveAll(ws.Path()); removeErr != nil {
-				logger.Errorw("GetTargetGraph: Failed to remove workspace", zap.Error(removeErr))
+				logger.Warnw("GetTargetGraph: failed to remove workspace", zap.Error(removeErr))
 			}
 		}
 	}()
@@ -141,7 +139,6 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("checkout %s@%s: %w", param.Req.BuildDescription.Remote, param.Req.BuildDescription.BaseSha, err)
 	}
-	logger.Infow("GetTargetGraph: Checked out base revision")
 
 	requests := make([]workspace.Request, 0, len(param.Req.BuildDescription.Requests))
 	factory := b.gitFactory
@@ -161,7 +158,6 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("apply requests: %w", err)
 	}
-	logger.Infow("GetTargetGraph: Applied requests", zap.Int("request_count", len(requests)))
 
 	// Compute the treehash and download the target graph from storage if exists.
 	treehash, err := gitModule.RevParse(ctx, "HEAD^{tree}")
@@ -172,15 +168,11 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if !param.BypassCache {
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 		if err == nil {
-			logger.Infow("GetTargetGraph: Cache hit on treehash", zap.String("treehash", treehash))
 			return graphReader, nil
 		}
 		if !storage.IsNotFound(err) {
 			return nil, fmt.Errorf("read graph at treehash %s: %w", treehash, err)
 		}
-		logger.Infow("GetTargetGraph: Treehash not found, computing target graph", zap.String("treehash", treehash))
-	} else {
-		logger.Infow("GetTargetGraph: bypass_cache=true, computing target graph")
 	}
 	// Compute the target graph and store it in storage.
 	runner := b.graphRunner
@@ -226,6 +218,5 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("create graph reader at %s: %w", treehashPath, err)
 	}
-	logger.Infow("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
 	return graphReader, nil
 }

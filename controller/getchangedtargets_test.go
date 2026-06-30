@@ -27,7 +27,6 @@ import (
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
@@ -146,7 +145,7 @@ func TestCompareTargetGraphs(t *testing.T) {
 		},
 	}
 
-	response, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
+	response, err := c.compareTargetGraphs(context.Background(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 }
@@ -158,7 +157,7 @@ func TestGetChangedTargets_ValidationError(t *testing.T) {
 	c := NewController(context.Background(), Params{Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
 
 	err := c.GetChangedTargets(nil, stream)
-	assert.EqualError(t, err, "request cannot be nil")
+	assert.EqualError(t, err, "validate request: request cannot be nil")
 }
 
 func TestGetChangedTargets_CacheHit(t *testing.T) {
@@ -219,10 +218,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 
 	storagemock := storagemock.NewMockStorage(ctrl)
 	// A non-NotFound storage error on a treehash read must surface as a failed
-	// request (with failureReasonTreehashRead) rather than be silently treated
-	// as a cache miss. Both revision treehashes are read in parallel, so two Get
-	// calls happen; the handler returns the first failure (and drops the
-	// cancelled sibling's error) before any graph fetch happens.
+	// request rather than be silently treated as a cache miss.
 	injected := errors.New("storage exploded")
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
 		Return(storage.DownloadResponse{}, injected).Times(2)
@@ -242,10 +238,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 	err := c.GetChangedTargets(request, stream)
 	require.Error(t, err)
 	require.ErrorIs(t, err, injected)
-	var ce common.ClassifiedError
-	require.True(t, errors.As(err, &ce), "expected ClassifiedError, got %T", err)
-	assert.Equal(t, failureReasonTreehashRead, ce.Reason())
-	assert.Equal(t, common.ErrorTypeInfra, ce.Type())
+	assert.Contains(t, err.Error(), "read revision treehash")
 }
 
 func TestReadTreehash(t *testing.T) {
@@ -613,7 +606,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(context.Background(), first, second, -1)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 	cs := res[0].GetChangedTargets()
@@ -685,7 +678,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(context.Background(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -758,7 +751,7 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	// Hash-only change on a rule with no own-config change and no reachable
 	// seed: under "trust the hasher" semantics, an orphan CHANGED rule with
 	// no upstream explanation becomes a distance-0 seed itself.
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(context.Background(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -825,7 +818,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(context.Background(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -907,7 +900,7 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(context.Background(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -989,7 +982,7 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(context.Background(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1329,7 +1322,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(context.Background(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1411,7 +1404,7 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(context.Background(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1465,7 +1458,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(context.Background(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)

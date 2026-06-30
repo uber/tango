@@ -43,6 +43,7 @@ type job struct {
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets")
 	scope.Counter("calls").Inc(1)
+	logger := c.logger
 	defer func() {
 		if retErr != nil {
 			scope.Counter("failure").Inc(1)
@@ -52,18 +53,17 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		}
 	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
-		return common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)
+		logger.Error("GetChangedTargets: validation failed", zap.Error(err))
+		return fmt.Errorf("validate request: %w", err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
 	start := time.Now()
-	logger := c.logger.With(
+	logger = c.logger.With(
 		zap.Any("first_revision", request.GetFirstRevision()),
 		zap.Any("second_revision", request.GetSecondRevision()),
 	)
-
-	logger.Info("GetChangedTargets: Processing request")
 
 	// Default max_distance to -1 (no filtering) when the client omits OutputConfig
 	// entirely. When OutputConfig is supplied, take max_distance at face value —
@@ -82,14 +82,14 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		cacheStart := time.Now()
 		treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
 		if err != nil {
-			logger.Error("GetChangedTargets: Failed to read revision treehash", zap.Error(err))
-			return common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
+			logger.Error("GetChangedTargets: failed to read revision treehash", zap.Error(err))
+			return fmt.Errorf("read revision treehash: %w", err)
 		}
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
 			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
-				logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
+				logger.Warn("GetChangedTargets: failed to read from cache, proceeding to compute", zap.Error(cacheErr))
 			} else if cachedReader != nil {
 				// Buffer all responses before sending any. A concurrent goroutine write may have
 				// left a partial blob in storage; buffering lets us detect corruption and fall
@@ -98,9 +98,8 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 				var readErr error
 				for {
 					if err := ctx.Err(); err != nil {
-						cachedReader.Close()
-						// Client gave up while we were draining the cache. Surface as a user-cancelled error.
-						return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)
+						closeErr := cachedReader.Close()
+						return errors.Join(err, closeErr)
 					}
 					var resp *pb.GetChangedTargetsResponse
 					resp, readErr = cachedReader.Read()
@@ -113,26 +112,21 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 					}
 					cached = append(cached, resp)
 				}
-				cachedReader.Close()
+				if closeErr := cachedReader.Close(); closeErr != nil {
+					logger.Warn("GetChangedTargets: failed to close cached reader", zap.Error(closeErr))
+				}
 
 				if readErr != nil {
-					// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
-					logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
+					logger.Warn("GetChangedTargets: cached result is incomplete, recomputing", zap.Error(readErr))
 				} else {
 					cacheReadDuration := time.Since(cacheStart)
-					logger.Info("GetChangedTargets: Cache hit, streaming from storage",
-						zap.Duration("cache_read_duration", cacheReadDuration),
-					)
 					scope.Counter("changed_targets_cache_hit").Inc(1)
 					scope.Timer("cache_read_duration").Record(cacheReadDuration)
 					if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
-						logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
-						return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send cached response: %w", sendErr))
+						logger.Error("GetChangedTargets: failed to send cached response", zap.Error(sendErr))
+						return fmt.Errorf("failed to send cached response: %w", sendErr)
 					}
 					totalDuration := time.Since(start)
-					logger.Info("GetChangedTargets: Successfully streamed from cache",
-						zap.Duration("total_duration", totalDuration),
-					)
 					scope.Timer("total_duration").Record(totalDuration)
 					scope.Histogram("total_duration.histogram", c.totalDurationBuckets).RecordDuration(totalDuration)
 					return nil
@@ -223,14 +217,10 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}
 
 	graphFetchDuration := time.Since(graphFetchStart)
-	logger.Info("GetChangedTargets: Both graphs fetched",
-		zap.Duration("graph_fetch_duration", graphFetchDuration),
-	)
 	scope.Timer("graph_fetch_duration").Record(graphFetchDuration)
 
 	if ctx.Err() != nil {
-		// If the context was cancelled by the upstream, just return the original error without additional augmentation
-		return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+		return ctx.Err()
 	}
 
 	// Process errors, only aggregating the ones that are original ones and not a result of the other job being cancelled
@@ -246,6 +236,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}
 
 	if err != nil {
+		logger.Error("GetChangedTargets: failed to get target graphs", zap.Error(err))
 		return err
 	}
 	firstGraph := jobs[0].graphStreamChunks
@@ -255,21 +246,18 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	jobs[1].graphStreamChunks = nil
 
 	compareStart := time.Now()
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, logger, firstGraph, secondGraph, maxDist)
+	changedTargetsResponses, err := c.compareTargetGraphs(ctx, firstGraph, secondGraph, maxDist)
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
 	if err != nil {
 		if ctx.Err() != nil {
-			return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+			return ctx.Err()
 		}
-		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
-		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))
+		logger.Error("GetChangedTargets: failed to compare target graphs", zap.Error(err))
+		return fmt.Errorf("failed to compare target graphs: %w", err)
 	}
 	compareDuration := time.Since(compareStart)
-	logger.Info("GetChangedTargets: Target graphs compared",
-		zap.Duration("compare_duration", compareDuration),
-	)
 	scope.Timer("compare_duration").Record(compareDuration)
 
 	// Cache the computed result concurrently so it doesn't block the stream send.
@@ -306,17 +294,13 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	sendStart := time.Now()
 	if err := sendTrimmedChangedTargets(stream, changedTargetsResponses, maxDist, request.GetOutputConfig()); err != nil {
-		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
-		return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send response: %w", err))
+		logger.Error("GetChangedTargets: failed to send response", zap.Error(err))
+		return fmt.Errorf("failed to send response: %w", err)
 	}
 	sendDuration := time.Since(sendStart)
 	scope.Timer("send_duration").Record(sendDuration)
 
 	totalDuration := time.Since(start)
-	logger.Info("GetChangedTargets: Successfully processed request",
-		zap.Duration("send_duration", sendDuration),
-		zap.Duration("total_duration", totalDuration),
-	)
 	scope.Timer("total_duration").Record(totalDuration)
 	scope.Histogram("total_duration.histogram", c.totalDurationBuckets).RecordDuration(totalDuration)
 	return nil
@@ -331,10 +315,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 // targets get their distance from BFS over the reverse-dep graph.
 // Output IDs are re-mapped into a canonical per-call namespace so the
 // response metadata only carries the names actually referenced.
-func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(ctx context.Context, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
 	start := time.Now()
 	scope := c.scope.SubScope("compare_target_graphs")
-	logger.Info("compareTargetGraphs: Computing differences between target graphs")
 
 	// 1) Extract targets and metadata; index by canonical names
 	indexStart := time.Now()
@@ -592,9 +575,6 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 		})
 	}
 	totalDuration := time.Since(start)
-	logger.Info("compareTargetGraphs: Done",
-		zap.Duration("total_duration", totalDuration),
-	)
 	scope.Timer("total_duration").Record(totalDuration)
 	return results, nil
 }
