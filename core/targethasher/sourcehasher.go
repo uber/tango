@@ -172,19 +172,6 @@ func pathForTarget(root, target string) string {
 	return filepath.Join(root, parts[0], parts[1])
 }
 
-func hashRule(f *buildpb.Rule, targetHashes map[string]*Target) ([]byte, error) {
-	h := newHash()
-	HashRuleCommon(f, h)
-	for _, dep := range f.GetRuleInput() {
-		if dephash, ok := targetHashes[dep]; ok {
-			h.Write(dephash.Hash)
-		} else {
-			return nil, fmt.Errorf("%q missing hash for dependency %q", f.GetName(), dep)
-		}
-	}
-	return h.Sum(nil), nil
-}
-
 // HashRuleCommon hashes the common elements of a buildpb.Rule.
 func HashRuleCommon(r *buildpb.Rule, h hash.Hash) {
 	// Name                        *string
