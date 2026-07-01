@@ -50,12 +50,8 @@ func main() {
 
 	grpcTransport := yarpcgrpc.NewTransport()
 	out := grpcTransport.NewSingleOutbound(*addr)
-	zl, err := zap.NewDevelopment()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
-		os.Exit(1)
-	}
-	defer zl.Sync()
+	zl, _ := zap.NewDevelopment()
+	defer zl.Sync() //nolint:errcheck // best-effort flush
 	logger := zl.Sugar()
 	dispatcher := yarpc.NewDispatcher(yarpc.Config{
 		Name: "tango-client",
@@ -67,7 +63,7 @@ func main() {
 		logger.Errorf("start dispatcher: %w", err)
 		os.Exit(1)
 	}
-	defer dispatcher.Stop()
+	defer dispatcher.Stop() //nolint:errcheck // best-effort cleanup
 
 	client := pb.NewTangoYARPCClient(dispatcher.ClientConfig("tango"))
 
@@ -159,7 +155,7 @@ func callGetTargetGraph(ctx context.Context, client pb.TangoYARPCClient, logger 
 	if err != nil {
 		return fmt.Errorf("GetTargetGraph: %w", err)
 	}
-	defer stream.CloseSend()
+	defer stream.CloseSend() //nolint:errcheck // best-effort cleanup
 
 	for {
 		msg, err := stream.Recv()
@@ -204,7 +200,7 @@ func callGetChangedTargets(ctx context.Context, client pb.TangoYARPCClient, logg
 	if err != nil {
 		return fmt.Errorf("GetChangedTargets: %w", err)
 	}
-	defer stream.CloseSend()
+	defer stream.CloseSend() //nolint:errcheck // best-effort cleanup
 
 	for {
 		msg, err := stream.Recv()

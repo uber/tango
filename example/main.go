@@ -45,11 +45,8 @@ func main() {
 }
 
 func run() error {
-	zl, err := zap.NewDevelopment()
-	if err != nil {
-		return fmt.Errorf("init logger: %w", err)
-	}
-	defer zl.Sync()
+	zl, _ := zap.NewDevelopment()
+	defer zl.Sync() //nolint:errcheck // best-effort flush
 	logger := zl.Sugar()
 
 	// appCtx is the application-lifetime context. It is cancelled on
@@ -131,7 +128,7 @@ func run() error {
 	if err := dispatcher.Start(); err != nil {
 		return fmt.Errorf("failed to start dispatcher: %w", err)
 	}
-	defer dispatcher.Stop()
+	defer dispatcher.Stop() //nolint:errcheck // best-effort cleanup
 
 	logger.Infof("Tango server is running:")
 	logger.Infof("- gRPC inbound:  %s", port)

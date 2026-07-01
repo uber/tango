@@ -340,7 +340,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	stream.EXPECT().Context().Return(t.Context())
 
 	var sentResponses []*pb.GetChangedTargetsResponse
-	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, opts ...interface{}) error {
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, _ ...interface{}) error {
 		sentResponses = append(sentResponses, resp)
 		return nil
 	}).Times(2)

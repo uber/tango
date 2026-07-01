@@ -72,7 +72,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 		Storage:     st,
 		RepoManager: rm,
 		Logger:      zaptest.NewLogger(t).Sugar(),
-		GitFactory:  func(dir string) git.Interface { return g },
+		GitFactory:  func(_ string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 	graphRunner := graphmock.NewMockGraphRunner(ctrl)
 	graphRunner.EXPECT().Compute(gomock.Any(), gomock.Any()).Return(targethasher.Result{Targets: map[string]*targethasher.Target{
-		"//:a": &targethasher.Target{
+		"//:a": {
 			Name:     "//:a",
 			RuleType: "go_library",
 		},
@@ -130,7 +130,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		Storage:     st,
 		RepoManager: rm,
 		Logger:      zaptest.NewLogger(t).Sugar(),
-		GitFactory:  func(dir string) git.Interface { return g },
+		GitFactory:  func(_ string) git.Interface { return g },
 		GraphRunner: graphRunner,
 		Config:      testConfig(t),
 	})
@@ -161,7 +161,7 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 		Storage:     st,
 		RepoManager: rm,
 		Logger:      zaptest.NewLogger(t).Sugar(),
-		GitFactory:  func(dir string) git.Interface { return g },
+		GitFactory:  func(_ string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
@@ -199,7 +199,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 		Storage:     st,
 		RepoManager: rm,
 		Logger:      zaptest.NewLogger(t).Sugar(),
-		GitFactory:  func(dir string) git.Interface { return g },
+		GitFactory:  func(_ string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)

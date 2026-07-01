@@ -22,11 +22,9 @@ import (
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	set "github.com/deckarep/golang-set/v2"
-	"github.com/golang/mock/gomock"
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/uber/tango/core/bazel"
 )
@@ -77,7 +75,7 @@ func TestContextCancellation(t *testing.T) {
 
 	// verify fromProto honors context cancellation
 	qr := &buildpb.QueryResult{
-		Target: []*buildpb.Target{&buildpb.Target{}},
+		Target: []*buildpb.Target{{}},
 	}
 	result, err := fromProto(ctx, qr, nil, "", set.NewSet[string](), set.NewSet[string](), nil, false)
 	assert.Equal(t, EmptyResult(), result)
@@ -219,15 +217,15 @@ func Test_RemoveAttrs(t *testing.T) {
 		Rule: &buildpb.Rule{
 			Name: StringPtr("//pkg:go_default_library"),
 			Attribute: []*buildpb.Attribute{
-				&buildpb.Attribute{
+				{
 					Name:        StringPtr("url"),
 					StringValue: StringPtr("some_url"),
 				},
-				&buildpb.Attribute{
+				{
 					Name:            StringPtr("urls"),
 					StringListValue: []string{"url1", "url2"},
 				},
-				&buildpb.Attribute{
+				{
 					Name:        StringPtr("to_keep"),
 					StringValue: StringPtr("target1"),
 				},
@@ -245,15 +243,15 @@ func Test_RemoveAttrs(t *testing.T) {
 		Rule: &buildpb.Rule{
 			Name: StringPtr("//external:some_rule"),
 			Attribute: []*buildpb.Attribute{
-				&buildpb.Attribute{
+				{
 					Name:        StringPtr("url"),
 					StringValue: StringPtr("some_url"),
 				},
-				&buildpb.Attribute{
+				{
 					Name:            StringPtr("urls"),
 					StringListValue: []string{"url1", "url2"},
 				},
-				&buildpb.Attribute{
+				{
 					Name:        StringPtr("to_keep"),
 					StringValue: StringPtr("external"),
 				},
@@ -274,25 +272,6 @@ func Test_RemoveAttrs(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, external.External)
 	assert.Equal(t, []byte{0x7c, 0xde, 0x91, 0xc2, 0x94, 0x1a, 0x22, 0xf3, 0xb2, 0x18, 0x7c, 0x21, 0xbf, 0x32, 0x17, 0xc0, 0xa3, 0xf0, 0xc, 0x77}, external.HashWithoutDeps)
-}
-
-func validateResultIsStable(t *testing.T, baseResult, result Result) {
-	t.Helper()
-	require.ElementsMatch(t, baseResult.TargetNames, result.TargetNames)
-	for _, targetName := range baseResult.TargetNames {
-		base, ok := baseResult.Targets[targetName]
-		require.True(t, ok)
-		res, ok := result.Targets[targetName]
-		require.True(t, ok)
-		assert.Equal(t, base.Hash, res.Hash)
-	}
-}
-
-func assertEqualTargetHash(t *testing.T, expected, actual Target) {
-	opt := cmpopts.IgnoreUnexported(Target{})
-	// too many nested attributes to compare
-	ignore := cmpopts.IgnoreFields(Target{}, "Attributes", "SourceFile", "Rule")
-	assert.True(t, cmp.Equal(expected, actual, opt, ignore), cmp.Diff(expected, actual, opt))
 }
 
 func Test_fromProto(t *testing.T) {

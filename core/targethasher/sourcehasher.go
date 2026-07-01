@@ -72,7 +72,7 @@ func NewSourceHasher(p Params) SourceHasher {
 }
 
 // HashSourceFile does a no-op hash for the noOpHasher.
-func (hh *noOpHasher) HashSourceFile(sourceFile *buildpb.SourceFile) ([]byte, error) {
+func (hh *noOpHasher) HashSourceFile(_ *buildpb.SourceFile) ([]byte, error) {
 	return nil, nil
 }
 
@@ -123,7 +123,7 @@ func hashFile(path string) (hash.Hash, error) {
 	hash := newHash()
 	// Using same SHA1 hashing algorithm as git to ensure file hashes
 	// are always the same: https://alblue.bandlem.com/2011/08/git-tip-of-week-objects.html
-	hash.Write([]byte(fmt.Sprintf("blob %d\000", fi.Size())))
+	fmt.Fprintf(hash, "blob %d\000", fi.Size())
 	if _, err := io.Copy(hash, f); err != nil {
 		return nil, err
 	}
@@ -167,6 +167,8 @@ func externalTargetForRule(t string) string {
 }
 
 // HashRuleCommon hashes the common elements of a buildpb.Rule.
+//
+//nolint:errcheck // hash.Hash.Write never returns an error
 func HashRuleCommon(r *buildpb.Rule, h hash.Hash) {
 	// Name                        *string
 	io.WriteString(h, r.GetName())
@@ -210,6 +212,7 @@ func HashRuleCommon(r *buildpb.Rule, h hash.Hash) {
 	io.WriteString(h, r.GetSkylarkEnvironmentHashCode())
 }
 
+//nolint:errcheck // hash.Hash.Write never returns an error
 func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
 	// generator_location is present if the rule is generated from a macro, but
 	// should not be hashed as the generating macro's location in a build file

@@ -66,7 +66,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("creating logger: %w", err)
 	}
-	defer logger.Sync()
+	defer logger.Sync() //nolint:errcheck // best-effort flush
 
 	parentCtx := context.Background()
 

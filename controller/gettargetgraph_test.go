@@ -378,5 +378,5 @@ func newMockReadCloser(data []byte) io.ReadCloser {
 
 type errReadCloser struct{ err error }
 
-func (e *errReadCloser) Read(p []byte) (int, error) { return 0, e.err }
+func (e *errReadCloser) Read(_ []byte) (int, error) { return 0, e.err }
 func (e *errReadCloser) Close() error               { return nil }
