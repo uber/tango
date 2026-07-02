@@ -1,0 +1,24 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "mapper",
+    srcs = ["errors.go"],
+    importpath = "github.com/uber/tango/mapper",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core/errors",
+        "//tangopb",
+    ],
+)
+
+go_test(
+    name = "mapper_test",
+    srcs = ["errors_test.go"],
+    embed = [":mapper"],
+    deps = [
+        "//core/errors",
+        "//tangopb",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)
