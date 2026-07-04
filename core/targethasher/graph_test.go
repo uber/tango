@@ -22,9 +22,9 @@ import (
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	set "github.com/deckarep/golang-set/v2"
+	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 
 	"github.com/uber/tango/core/bazel"
 )
