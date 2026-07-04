@@ -24,28 +24,38 @@ import (
 )
 
 func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
-	buf := make([]byte, 32*1024)
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		n, readErr := src.Read(buf)
-		if n > 0 {
-			if _, writeErr := dst.Write(buf[:n]); writeErr != nil {
-				return writeErr
-			}
-		}
-		if readErr != nil {
-			if readErr == io.EOF {
-				return nil
-			}
-			return readErr
-		}
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(dst, src)
+		done <- err
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
 	}
 }
 
 func streamAndParseTargets(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb.QueryResult, error) {
-	return getQueryResult(ctx, src, dst)
+	type result struct {
+		queryResult *buildpb.QueryResult
+		err         error
+	}
+	done := make(chan result, 1)
+
+	go func() {
+		queryResult, err := getQueryResult(ctx, src, dst)
+		done <- result{queryResult: queryResult, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-done:
+		return res.queryResult, res.err
+	}
 }
 
 // cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
