@@ -42,9 +42,9 @@ type nativeOrchestrator struct {
 	logger      *zap.SugaredLogger
 	scope       tally.Scope
 	// gitFactory allows injecting a git.Interface constructor for testing
-	gitFactory     func(directory string) git.Interface
-	graphRunner    graphrunner.GraphRunner
-	config         *config.Config
+	gitFactory  func(directory string) git.Interface
+	graphRunner graphrunner.GraphRunner
+	config      *config.Config
 	// appCtx represents the app's overall lifetime. It is passed in by the
 	// caller at construction and is expected to be cancelled when the whole
 	// application is shutting down (e.g. on SIGTERM/SIGINT). Any future
@@ -85,14 +85,14 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 	}
 
 	return &nativeOrchestrator{
-		storage:        p.Storage,
-		repoManager:    p.RepoManager,
-		logger:         p.Logger,
-		scope:          scope.SubScope("orchestrator"),
-		gitFactory:     p.GitFactory,
-		graphRunner:    p.GraphRunner,
-		appCtx:         appCtx,
-		config:         cfg,
+		storage:     p.Storage,
+		repoManager: p.RepoManager,
+		logger:      p.Logger,
+		scope:       scope.SubScope("orchestrator"),
+		gitFactory:  p.GitFactory,
+		graphRunner: p.GraphRunner,
+		appCtx:      appCtx,
+		config:      cfg,
 	}, nil
 }
 
