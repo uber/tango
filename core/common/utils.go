@@ -174,10 +174,11 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 
 		depIDs := make([]int32, 0, len(t.Deps))
 		for _, depName := range t.Deps {
-			if _, ok := targetNamesMapping[depName]; !ok {
+			depID, ok := targetNamesMapping[depName]
+			if !ok {
 				continue
 			}
-			depIDs = append(depIDs, targetNamesMapping[depName])
+			depIDs = append(depIDs, depID)
 		}
 
 		ot := &tangopb.OptimizedTarget{
