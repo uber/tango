@@ -63,13 +63,14 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 
-	o := NewNativeOrchestrator(context.Background(), Params{
+	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:        st,
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),
 		GitFactory:     func(dir string) git.Interface { return g },
 		ConfigFilePath: "testdata/config.yaml",
 	})
+	require.NoError(t, err)
 	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
 		Req: &pb.GetTargetGraphRequest{
 			BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"},
@@ -119,7 +120,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 			RuleType: "go_library",
 		},
 	}}, nil)
-	o := NewNativeOrchestrator(context.Background(), Params{
+	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:        st,
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),
@@ -127,6 +128,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		GraphRunner:    graphRunner,
 		ConfigFilePath: "testdata/config.yaml",
 	})
+	require.Nil(t, err)
 	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
 		Req: &pb.GetTargetGraphRequest{BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}},
 	})
@@ -151,13 +153,14 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 	ws.EXPECT().Release().Return(nil)
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
-	o := NewNativeOrchestrator(context.Background(), Params{
+	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:        st,
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),
 		GitFactory:     func(dir string) git.Interface { return g },
 		ConfigFilePath: "testdata/config.yaml",
 	})
+	require.NoError(t, err)
 	resp, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
 		Req: &pb.GetTargetGraphRequest{BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}},
 	})
@@ -190,13 +193,14 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	ws.EXPECT().Release().Return(nil)
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
-	o := NewNativeOrchestrator(context.Background(), Params{
+	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:        st,
 		RepoManager:    rm,
 		Logger:         zaptest.NewLogger(t).Sugar(),
 		GitFactory:     func(dir string) git.Interface { return g },
 		ConfigFilePath: "testdata/config.yaml",
 	})
+	require.NoError(t, err)
 	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
 		Req: &pb.GetTargetGraphRequest{
 			BuildDescription: &pb.BuildDescription{
