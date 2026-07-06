@@ -42,10 +42,9 @@ type nativeOrchestrator struct {
 	logger      *zap.SugaredLogger
 	scope       tally.Scope
 	// gitFactory allows injecting a git.Interface constructor for testing
-	gitFactory     func(directory string) git.Interface
-	graphRunner    graphrunner.GraphRunner
-	configFilePath string
-
+	gitFactory  func(directory string) git.Interface
+	graphRunner graphrunner.GraphRunner
+	config      *config.Config
 	// appCtx represents the app's overall lifetime. It is passed in by the
 	// caller at construction and is expected to be cancelled when the whole
 	// application is shutting down (e.g. on SIGTERM/SIGINT). Any future
@@ -73,21 +72,28 @@ type Params struct {
 // appCtx is the application-lifetime context. Cancel it when the process is
 // shutting down (e.g. wire it to SIGTERM/SIGINT in main) to abort any
 // background goroutines the orchestrator spawns.
-func NewNativeOrchestrator(appCtx context.Context, p Params) Orchestrator {
+func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, error) {
 	scope := p.Scope
 	if scope == nil {
 		scope = tally.NoopScope
 	}
-	return &nativeOrchestrator{
-		storage:        p.Storage,
-		repoManager:    p.RepoManager,
-		logger:         p.Logger,
-		scope:          scope.SubScope("orchestrator"),
-		gitFactory:     p.GitFactory,
-		graphRunner:    p.GraphRunner,
-		configFilePath: p.ConfigFilePath,
-		appCtx:         appCtx,
+
+	// parse the config file
+	cfg, err := config.Parse(p.ConfigFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("parse config %q: %w", p.ConfigFilePath, err)
 	}
+
+	return &nativeOrchestrator{
+		storage:     p.Storage,
+		repoManager: p.RepoManager,
+		logger:      p.Logger,
+		scope:       scope.SubScope("orchestrator"),
+		gitFactory:  p.GitFactory,
+		graphRunner: p.GraphRunner,
+		appCtx:      appCtx,
+		config:      cfg,
+	}, nil
 }
 
 // GetTargetGraph is used to compute the target graph locally.
@@ -113,13 +119,8 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	logger := b.logger.With(zap.Any("build_description", param.Req.BuildDescription))
 	logger.Infow("GetTargetGraph: Processing request")
 
-	// parse the config file
-	cfg, err := config.Parse(b.configFilePath)
-	if err != nil {
-		return nil, fmt.Errorf("parse config %q: %w", b.configFilePath, err)
-	}
 	remote := param.Req.BuildDescription.Remote
-	repoCfg, ok := cfg.GetRepositoryConfig(remote)
+	repoCfg, ok := b.config.GetRepositoryConfig(remote)
 	if !ok {
 		return nil, fmt.Errorf("no repository configuration found for remote %q", remote)
 	}

@@ -89,13 +89,16 @@ func run() error {
 		WorkerRootPath:       workerRootPath,
 		PoolSize:             cfg.Service.WorkerPoolSize,
 	})
-	orch := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
+	orch, err := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
 		Storage:        store,
 		RepoManager:    rm,
 		Logger:         logger,
 		GitFactory:     git.New,
 		ConfigFilePath: configFilePath,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to setup orchestrator: %w", err)
+	}
 
 	// Controller (YARPC server implementation). appCtx is forwarded so the
 	// controller's background goroutines are tied to process lifetime.
