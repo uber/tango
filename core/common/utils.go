@@ -148,16 +148,9 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 	}
 
 	ruleTypeMapper := NewNameIDMapper()
-	getRuleTypeID := func(key string) int32 { return ruleTypeMapper.ID(key) }
-
 	tagMapper := NewNameIDMapper()
-	getTagID := func(key string) int32 { return tagMapper.ID(key) }
-
 	attrNameMapper := NewNameIDMapper()
-	getAttrNameID := func(key string) int32 { return attrNameMapper.ID(key) }
-
 	attrStrValMapper := NewNameIDMapper()
-	getAttrStrValID := func(key string) int32 { return attrStrValMapper.ID(key) }
 
 	// Build the optimized targets slice
 	optimizedTargets := make([]*tangopb.OptimizedTarget, 0, len(result.Targets))
@@ -189,7 +182,7 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 
 		// RuleType
 		if t.RuleType != "" {
-			id := getRuleTypeID(t.RuleType)
+			id := ruleTypeMapper.ID(t.RuleType)
 			ot.RuleType = id
 		}
 
@@ -197,7 +190,7 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 		if len(t.Tags) > 0 {
 			tagIDs := make([]int32, 0, len(t.Tags))
 			for _, tag := range t.Tags {
-				tagIDs = append(tagIDs, getTagID(tag))
+				tagIDs = append(tagIDs, tagMapper.ID(tag))
 			}
 			ot.Tags = tagIDs
 		}
@@ -208,8 +201,8 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 			for _, attr := range t.Attributes {
 				// Only include STRING attributes with non-nil name and value to avoid nil dereferences.
 				if attr.GetType() == buildpb.Attribute_STRING && attr.Name != nil && attr.StringValue != nil {
-					nameID := getAttrNameID(*attr.Name)
-					valID := getAttrStrValID(*attr.StringValue)
+					nameID := attrNameMapper.ID(*attr.Name)
+					valID := attrStrValMapper.ID(*attr.StringValue)
 					attrs[nameID] = valID
 				}
 			}

@@ -381,13 +381,6 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 	tagMapper := common.NewNameIDMapper()
 	attrNameMapper := common.NewNameIDMapper()
 	attrValMapper := common.NewNameIDMapper()
-	// These functions are used to transpose the target into the canonical ID space.
-	// When called, we attempt to find the ID for the name in the metadata and return the ID.
-	getTargetId := func(name string) int32 { return targetMapper.ID(name) }
-	getRuleTypeId := func(name string) int32 { return ruleTypeMapper.ID(name) }
-	getTagId := func(name string) int32 { return tagMapper.ID(name) }
-	getAttrNameId := func(name string) int32 { return attrNameMapper.ID(name) }
-	getAttrValId := func(name string) int32 { return attrValMapper.ID(name) }
 
 	// Pass 1: walk second revision. Targets not in first revision are NEW (seeds).
 	// Targets in both with differing hashes are CHANGED; source-file CHANGED
@@ -406,7 +399,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 					secondMetadata.GetTagMapping(),
 					secondMetadata.GetAttributeNameMapping(),
 					secondMetadata.GetAttributeStringValueMapping(),
-					getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+					targetMapper.ID, ruleTypeMapper.ID, tagMapper.ID, attrNameMapper.ID, attrValMapper.ID,
 				),
 			}
 			seeds[name] = struct{}{}
@@ -428,7 +421,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 			secondMetadata.GetTagMapping(),
 			secondMetadata.GetAttributeNameMapping(),
 			secondMetadata.GetAttributeStringValueMapping(),
-			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+			targetMapper.ID, ruleTypeMapper.ID, tagMapper.ID, attrNameMapper.ID, attrValMapper.ID,
 		)
 		oldTarget := transposeOptimizedTarget(
 			oldT,
@@ -437,7 +430,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 			firstMetadata.GetTagMapping(),
 			firstMetadata.GetAttributeNameMapping(),
 			firstMetadata.GetAttributeStringValueMapping(),
-			getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+			targetMapper.ID, ruleTypeMapper.ID, tagMapper.ID, attrNameMapper.ID, attrValMapper.ID,
 		)
 		changedByName[name] = &pb.ChangedTarget{
 			ChangeType: pb.CHANGE_TYPE_CHANGED,
@@ -527,7 +520,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 				firstMetadata.GetTagMapping(),
 				firstMetadata.GetAttributeNameMapping(),
 				firstMetadata.GetAttributeStringValueMapping(),
-				getTargetId, getRuleTypeId, getTagId, getAttrNameId, getAttrValId,
+				targetMapper.ID, ruleTypeMapper.ID, tagMapper.ID, attrNameMapper.ID, attrValMapper.ID,
 			),
 		}
 		seeds[name] = struct{}{}
