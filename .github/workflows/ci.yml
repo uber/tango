@@ -105,7 +105,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          # This job executes untrusted PR code (gazelle, gofmt, goimports).
+          # This job executes untrusted PR code (gazelle, golangci-lint).
           persist-credentials: false
 
       - name: Set up Go
@@ -117,15 +117,12 @@ jobs:
         run: make gazelle
 
       - name: Run linters
-        run: |
-          gofmt -w .
-          go install golang.org/x/tools/cmd/goimports@latest
-          goimports -w .
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
 
-      - name: Verify no uncommitted changes from linters
+      - name: Verify no uncommitted changes from gazelle
         run: |
           if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::Code is not formatted. Please run 'make gazelle', 'gofmt -w .', and 'goimports -w .' locally and commit the results."
+            echo "::error::Code is not formatted. Please run 'make gazelle' locally and commit the results."
             git diff
             exit 1
           fi
