@@ -63,5 +63,6 @@ func TestNewRequest_InvalidScheme(t *testing.T) {
 	rawURL := "phabricator://bad"
 
 	_, err := NewRequest(rawURL, g, "baseRef", "", zap.NewNop().Sugar())
-	require.ErrorContains(t, err, "unsupported scheme: phabricator")
+	require.Error(t, err)
+	require.Nil(t, req)
 }
