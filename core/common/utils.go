@@ -24,7 +24,6 @@ import (
 	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
-	"github.com/uber/tango/config"
 	tgerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/tangopb"

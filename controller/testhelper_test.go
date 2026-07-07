@@ -18,7 +18,7 @@ import (
 	"context"
 
 	"github.com/uber-go/tally"
-	"github.com/uber/tango/config"
+	tgerrors "github.com/uber/tango/core/errors"
 	"go.uber.org/zap"
 )
 

@@ -20,6 +20,7 @@ import (
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
+	tgerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
