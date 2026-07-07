@@ -128,7 +128,8 @@ func (g *OptimizedGraph) upsertExternalRuleTarget(target *targethasher.Target, i
 		oldTarget.Deps = depIDs
 		oldTarget.HashWithoutDeps = target.HashWithoutDeps
 		oldTarget.External = target.External
-		return g.invalidateHashRecursively(oldTarget.ReverseDeps, invalidated)
+		g.invalidateHashRecursively(oldTarget.ReverseDeps, invalidated)
+		return nil
 	}
 
 	optimizedTarget := &OptimizedTarget{

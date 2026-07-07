@@ -63,7 +63,7 @@ func TestInvalidateHashRecursively(t *testing.T) {
 		cID := g.TargetNameToID["//pkg:c"]
 
 		invalidated := NewIntSet()
-		require.NoError(t, g.invalidateHashRecursively(g.OptimizedTargets[aID].ReverseDeps, invalidated))
+		g.invalidateHashRecursively(g.OptimizedTargets[aID].ReverseDeps, invalidated)
 
 		// b and c should be invalidated (they are reverse deps of a)
 		assert.Nil(t, g.OptimizedTargets[bID].Hash)
@@ -86,7 +86,7 @@ func TestInvalidateHashRecursively(t *testing.T) {
 		aID := g.TargetNameToID["//pkg:a"]
 
 		invalidated := NewIntSet()
-		require.NoError(t, g.invalidateHashRecursively(g.OptimizedTargets[aID].ReverseDeps, invalidated))
+		g.invalidateHashRecursively(g.OptimizedTargets[aID].ReverseDeps, invalidated)
 
 		// b has a nil hash and is thus skipped; invalidated stays empty
 		assert.Empty(t, invalidated.UnsortedList())

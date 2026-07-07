@@ -88,11 +88,12 @@ func (g *OptimizedGraph) removeTarget(target *OptimizedTarget, invalidated IntSe
 	delete(g.TargetNameToID, g.TargetIDToString[id])
 	delete(g.TargetIDToString, id)
 	invalidated.Delete(id)
-	return g.invalidateHashRecursively(target.ReverseDeps, invalidated)
+	g.invalidateHashRecursively(target.ReverseDeps, invalidated)
+	return nil
 }
 
 // invalidateHashRecursively invalidates hashes of the given targets and all their reverse deps.
-func (g *OptimizedGraph) invalidateHashRecursively(ids IntSet, invalidated IntSet) error {
+func (g *OptimizedGraph) invalidateHashRecursively(ids IntSet, invalidated IntSet) {
 	candidates := make([]int, 0, len(ids))
 	for id := range ids {
 		candidates = append(candidates, id)
@@ -112,7 +113,6 @@ func (g *OptimizedGraph) invalidateHashRecursively(ids IntSet, invalidated IntSe
 			candidates = append(candidates, id)
 		}
 	}
-	return nil
 }
 
 // checkDeletedTargets removes targets that have been deleted from the graph.
@@ -204,9 +204,7 @@ func (g *OptimizedGraph) upsertTarget(target *targethasher.Target, invalidated I
 		}
 	}
 
-	if err := g.invalidateHashRecursively(g.OptimizedTargets[id].ReverseDeps, invalidated); err != nil {
-		return err
-	}
+	g.invalidateHashRecursively(g.OptimizedTargets[id].ReverseDeps, invalidated)
 	if target.Hash == nil {
 		invalidated.Insert(id)
 	}
