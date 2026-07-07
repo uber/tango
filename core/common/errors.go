@@ -62,6 +62,7 @@ func WithReason(reason, errorType string, err error) ClassifiedError {
 	return &classifiedErr{reason: reason, errorType: errorType, err: err}
 }
 
+// TODO: Move to core/common/errors.go once the errors framework is implemented.
 // ErrClientCancelled is the cause passed to context.CancelCauseFunc when the
 // client disconnects. Check with errors.Is(context.Cause(ctx), ErrClientCancelled).
 var ErrClientCancelled = errors.New("client cancelled")
