@@ -560,9 +560,6 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 	return results, nil
 }
 
-// cancelCheckInterval is how often long-running loops check ctx.Err().
-const cancelCheckInterval = 4096
-
 // getTargetsAndMetadata builds ID->target maps and merges metadata from a target graph stream.
 // Metadata may arrive in multiple chunks (e.g. when target_id_mapping exceeds the gRPC message
 // size limit); all chunks are merged into a single Metadata so callers can use it uniformly.
@@ -611,7 +608,7 @@ func buildNameIndex(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarg
 	byName := make(map[string]*pb.OptimizedTarget, len(targetsByID))
 	i := 0
 	for id, t := range targetsByID {
-		if i%cancelCheckInterval == 0 && ctx.Err() != nil {
+		if i%common.CancelCheckInterval == 0 && ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		i++
@@ -963,7 +960,7 @@ func computeDistances(ctx context.Context, changedByName map[string]*pb.ChangedT
 	reverseDeps := make(map[string][]string, len(targetsByName))
 	revDepIter := 0
 	for name, t := range targetsByName {
-		if revDepIter%cancelCheckInterval == 0 && ctx.Err() != nil {
+		if revDepIter%common.CancelCheckInterval == 0 && ctx.Err() != nil {
 			return ctx.Err()
 		}
 		revDepIter++
@@ -991,7 +988,7 @@ func computeDistances(ctx context.Context, changedByName map[string]*pb.ChangedT
 	// BFS from seeds through reverseDeps. Shortest distance wins.
 	bfsIter := 0
 	for len(queue) > 0 {
-		if bfsIter%cancelCheckInterval == 0 && ctx.Err() != nil {
+		if bfsIter%common.CancelCheckInterval == 0 && ctx.Err() != nil {
 			return ctx.Err()
 		}
 		bfsIter++
