@@ -14,6 +14,8 @@
 
 package common
 
+import "errors"
+
 // Error type values for the failure_type metrics tag.
 const (
 	ErrorTypeUser  = "user"
@@ -22,6 +24,7 @@ const (
 
 // Common failure_reason tag values shared across packages.
 const (
+	FailureReasonClientCancelled  = "client_cancelled"
 	FailureReasonCancelled        = "cancelled"
 	FailureReasonDeadlineExceeded = "deadline_exceeded"
 	FailureReasonUnknown          = "unknown"
@@ -58,3 +61,7 @@ func (e *classifiedErr) Type() string   { return e.errorType }
 func WithReason(reason, errorType string, err error) ClassifiedError {
 	return &classifiedErr{reason: reason, errorType: errorType, err: err}
 }
+
+// ErrClientCancelled is the cause passed to context.CancelCauseFunc when the
+// client disconnects. Check with errors.Is(context.Cause(ctx), ErrClientCancelled).
+var ErrClientCancelled = errors.New("client cancelled")

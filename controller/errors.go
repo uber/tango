@@ -44,6 +44,8 @@ func emitFailureMetric(scope tally.Scope, err error) {
 	switch {
 	case errors.As(err, &ce):
 		// already classified — use the error's own reason and type
+	case errors.Is(err, common.ErrClientCancelled):
+		ce = common.WithReason(common.FailureReasonClientCancelled, common.ErrorTypeUser, err)
 	case errors.Is(err, context.Canceled):
 		ce = common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)
 	case errors.Is(err, context.DeadlineExceeded):
