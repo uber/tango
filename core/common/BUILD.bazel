@@ -11,6 +11,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//config",
+        "//core/errors",
         "//core/targethasher",
         "//tangopb",
         "@com_github_bazelbuild_buildtools//build_proto",

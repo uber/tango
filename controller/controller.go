@@ -65,15 +65,15 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	}
 	targetChunkSize := p.ChunkConfig.TargetChunkSize
 	if targetChunkSize <= 0 {
-		targetChunkSize = config.DefaultTargetChunkSize
+		targetChunkSize = tgerrors.DefaultTargetChunkSize
 	}
 	changedTargetChunkSize := p.ChunkConfig.ChangedTargetChunkSize
 	if changedTargetChunkSize <= 0 {
-		changedTargetChunkSize = config.DefaultChangedTargetChunkSize
+		changedTargetChunkSize = tgerrors.DefaultChangedTargetChunkSize
 	}
 	metadataMapChunkSize := p.ChunkConfig.MetadataMapChunkSize
 	if metadataMapChunkSize <= 0 {
-		metadataMapChunkSize = config.DefaultMetadataMapChunkSize
+		metadataMapChunkSize = tgerrors.DefaultMetadataMapChunkSize
 	}
 	return &controller{
 		logger:                 p.Logger,

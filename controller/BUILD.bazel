@@ -16,6 +16,7 @@ go_library(
     deps = [
         "//config",
         "//core/common",
+        "//core/errors",
         "//core/storage",
         "//orchestrator",
         "//tangopb",

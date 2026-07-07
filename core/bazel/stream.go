@@ -22,7 +22,7 @@ import (
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"google.golang.org/protobuf/encoding/protodelim"
 
-	"github.com/uber/tango/config"
+	tgerrors "github.com/uber/tango/core/errors"
 )
 
 func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
@@ -72,7 +72,7 @@ func getQueryResult(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb
 	}
 	var parseErr error
 	for i := 0; ; i++ {
-		if i%config.CancelCheckInterval == 0 {
+		if i%tgerrors.CancelCheckInterval == 0 {
 			if err := ctx.Err(); err != nil {
 				return result, err
 			}

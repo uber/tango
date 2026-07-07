@@ -30,11 +30,6 @@ const (
 	// the 64MB gRPC message limit for large monorepos, so they are split across multiple messages.
 	// At ~85 bytes/entry (60-char avg target name + proto overhead), 50 000 entries ≈ 4.25MB per chunk.
 	DefaultMetadataMapChunkSize = 50_000
-
-	// CancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
-	// Picked to keep overhead negligible while still surfacing cancellation in <100ms
-	// for typical target rates.
-	CancelCheckInterval = 4096
 )
 
 // ServiceConfig holds operational configuration for the Tango service.

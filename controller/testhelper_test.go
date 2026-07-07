@@ -26,9 +26,9 @@ func newTestController(logger *zap.Logger) *controller {
 	return &controller{
 		logger:                 logger,
 		scope:                  tally.NoopScope,
-		targetChunkSize:        config.DefaultTargetChunkSize,
-		changedTargetChunkSize: config.DefaultChangedTargetChunkSize,
-		metadataMapChunkSize:   config.DefaultMetadataMapChunkSize,
+		targetChunkSize:        tgerrors.DefaultTargetChunkSize,
+		changedTargetChunkSize: tgerrors.DefaultChangedTargetChunkSize,
+		metadataMapChunkSize:   tgerrors.DefaultMetadataMapChunkSize,
 		totalDurationBuckets:   _totalDurationBuckets,
 		appCtx:                 context.Background(),
 	}
