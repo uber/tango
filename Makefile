@@ -1,4 +1,4 @@
-.PHONY: build test proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
+.PHONY: build test test-integration proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -14,6 +14,12 @@ test:
 	@echo "Running all tests..."
 	@$(BAZEL) test //...
 	@echo "All tests passed!"
+
+# Run integration tests (requires bazel; may take several minutes)
+test-integration:
+	@echo "Running integration tests..."
+	@$(BAZEL) test //integration:integration_test --test_output=errors --test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel)
+	@echo "Integration tests passed!"
 
 # Generate protobuf files using protoc
 proto:
@@ -81,10 +87,11 @@ help:
 	@echo "Available targets:"
 	@echo ""
 	@echo "Build & Test:"
-	@echo "  make build         - Build all targets"
-	@echo "  make test          - Run all tests"
-	@echo "  make gazelle       - Update BUILD.bazel files"
-	@echo "  make clean         - Clean generated files and binaries"
+	@echo "  make build            - Build all targets"
+	@echo "  make test             - Run all tests"
+	@echo "  make test-integration - Run integration tests (slow)"
+	@echo "  make gazelle          - Update BUILD.bazel files"
+	@echo "  make clean            - Clean generated files and binaries"
 	@echo ""
 	@echo "Protobuf:"
 	@echo "  make proto         - Generate protobuf files (gogoslick, grpc, yarpc)"
