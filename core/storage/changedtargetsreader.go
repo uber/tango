@@ -15,11 +15,8 @@
 package storage
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 
-	gogio "github.com/gogo/protobuf/io"
 	pb "github.com/uber/tango/tangopb"
 )
 
@@ -43,12 +40,5 @@ func NewChangedTargetsReader(ctx context.Context, st Storage, key string) (Chang
 // WriteChangedTargetsStream writes a list of GetChangedTargetsResponse messages to storage.
 // The messages are written as length-delimited protobuf, allowing streaming reads.
 func WriteChangedTargetsStream(ctx context.Context, st Storage, key string, responses []*pb.GetChangedTargetsResponse) error {
-	buf := &bytes.Buffer{}
-	w := gogio.NewDelimitedWriter(buf)
-	for _, r := range responses {
-		if err := w.WriteMsg(r); err != nil {
-			return fmt.Errorf("write delimited: %w", err)
-		}
-	}
-	return st.Put(ctx, UploadRequest{Key: key, Reader: bytes.NewReader(buf.Bytes())})
+	return writeStream[pb.GetChangedTargetsResponse](ctx, st, key, responses)
 }
