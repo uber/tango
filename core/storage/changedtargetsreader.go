@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 
 	gogio "github.com/gogo/protobuf/io"
 	pb "github.com/uber/tango/tangopb"
@@ -30,37 +29,15 @@ type ChangedTargetsReader interface {
 	Close() error
 }
 
-type changedTargetsReaderCloser struct {
-	reader gogio.ReadCloser
-}
-
-func (r *changedTargetsReaderCloser) Read() (*pb.GetChangedTargetsResponse, error) {
-	m := new(pb.GetChangedTargetsResponse)
-	if err := r.reader.ReadMsg(m); err != nil {
-		return nil, err
-	}
-	if m.GetItem() == nil {
-		return nil, io.EOF
-	}
-	return m, nil
-}
-
-func (r *changedTargetsReaderCloser) Close() error {
-	if r.reader != nil {
-		return r.reader.Close()
-	}
-	return nil
-}
-
 // NewChangedTargetsReader returns a ChangedTargetsReader that reads from storage at key.
 func NewChangedTargetsReader(ctx context.Context, st Storage, key string) (ChangedTargetsReader, error) {
-	resp, err := st.Get(ctx, DownloadRequest{Key: key})
+	r, err := newReader[pb.GetChangedTargetsResponse](ctx, st, key, 32<<20, func(m *pb.GetChangedTargetsResponse) bool {
+		return m.GetItem() == nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &changedTargetsReaderCloser{
-		reader: gogio.NewDelimitedReader(resp.ReadCloser, 32<<20),
-	}, nil
+	return r, nil
 }
 
 // WriteChangedTargetsStream writes a list of GetChangedTargetsResponse messages to storage.

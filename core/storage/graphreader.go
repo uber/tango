@@ -16,9 +16,7 @@ package storage
 
 import (
 	"context"
-	"io"
 
-	gogio "github.com/gogo/protobuf/io"
 	pb "github.com/uber/tango/tangopb"
 )
 
@@ -30,40 +28,13 @@ type GraphReader interface {
 	Close() error
 }
 
-// graphReader is a io.Reader that, when Read is invoked,
-// streams the delimited GetTargetGraphResponse messages from Storage to the provided YARPC server stream.
-// After streaming completes, subsequent Read calls return io.EOF.
-type graphReaderCloser struct {
-	reader gogio.ReadCloser
-}
-
-// Read reads the next message from the storage.
-func (g *graphReaderCloser) Read() (*pb.GetTargetGraphResponse, error) {
-	m := new(pb.GetTargetGraphResponse)
-	err := g.reader.ReadMsg(m)
-	if err != nil {
-		return nil, err
-	}
-	if m.GetItem() == nil {
-		return nil, io.EOF
-	}
-	return m, nil
-}
-
-func (g *graphReaderCloser) Close() error {
-	if g.reader != nil {
-		return g.reader.Close()
-	}
-	return nil
-}
-
 // NewGraphReader returns a GraphReader that, when read, will fetch the stored graph at key
 func NewGraphReader(ctx context.Context, st Storage, key string) (GraphReader, error) {
-	resp, err := st.Get(ctx, DownloadRequest{Key: key})
+	r, err := newReader[pb.GetTargetGraphResponse](ctx, st, key, 512<<20, func(m *pb.GetTargetGraphResponse) bool { // 512MB/message limit
+		return m.GetItem() == nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &graphReaderCloser{
-		reader: gogio.NewDelimitedReader(resp.ReadCloser, 512<<20), // 512MB/message limit
-	}, nil
+	return r, nil
 }
