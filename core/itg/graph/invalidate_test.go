@@ -76,20 +76,24 @@ func TestInvalidateHashRecursively(t *testing.T) {
 		assert.False(t, invalidated.Contains(aID))
 	})
 
-	t.Run("targets with nil hash are skipped", func(t *testing.T) {
+	t.Run("targets with nil hash and their reverse deps are invalidated", func(t *testing.T) {
 		t.Parallel()
 		targets := map[string]*targethasher.Target{
 			"//pkg:a": {Name: "//pkg:a", RuleType: "go_library"},                            // Hash=nil
 			"//pkg:b": {Name: "//pkg:b", RuleType: "go_library", Deps: []string{"//pkg:a"}}, // Hash=nil
+			"//pkg:c": {Name: "//pkg:c", RuleType: "go_library", Hash: []byte{1}, Deps: []string{"//pkg:b"}},
 		}
 		g := OptimizeGraph(targets)
 		aID := g.TargetNameToID["//pkg:a"]
+		bID := g.TargetNameToID["//pkg:b"]
+		cID := g.TargetNameToID["//pkg:c"]
 
 		invalidated := NewIntSet()
 		require.NoError(t, g.invalidateHashRecursively(g.OptimizedTargets[aID].ReverseDeps, invalidated))
 
-		// b has a nil hash and is thus skipped; invalidated stays empty
-		assert.Empty(t, invalidated.UnsortedList())
+		assert.True(t, invalidated.Contains(bID))
+		assert.True(t, invalidated.Contains(cID))
+		assert.Nil(t, g.OptimizedTargets[cID].Hash)
 	})
 
 	t.Run("missing target returns an error", func(t *testing.T) {

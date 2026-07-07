@@ -105,7 +105,7 @@ func (g *OptimizedGraph) invalidateHashRecursively(ids IntSet, invalidated IntSe
 		if !ok {
 			return fmt.Errorf("target %d not found", targetID)
 		}
-		if target.Hash == nil {
+		if invalidated.Contains(targetID) {
 			continue
 		}
 
