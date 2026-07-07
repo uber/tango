@@ -31,10 +31,12 @@ import (
 // The writer goroutine checks ctx before each message so a cancellation
 // unwinds the encode loop promptly instead of waiting for Put to notice and
 // stop reading; the context error is propagated to the reader. If Put returns
-// before draining the pipe, the reader is closed to unblock (and terminate)
-// the writer goroutine either way.
+// before draining the pipe, the reader is closed to unblock the writer. The
+// goroutine is joined before returning, and its error is returned when Put
+// succeeds.
 func writeStream[T any, PT protoMessage[T]](ctx context.Context, st Storage, key string, msgs []PT) error {
 	pr, pw := io.Pipe()
+	writerErr := make(chan error, 1)
 	go func() {
 		w := gogio.NewDelimitedWriter(pw) // varint-length-delimited
 		var err error
@@ -48,11 +50,16 @@ func writeStream[T any, PT protoMessage[T]](ctx context.Context, st Storage, key
 			}
 		}
 		pw.CloseWithError(err)
+		writerErr <- err
 	}()
-	err := st.Put(ctx, UploadRequest{Key: key, Reader: pr})
+	putErr := st.Put(ctx, UploadRequest{Key: key, Reader: pr})
 	// Unblock the writer goroutine if Put stopped reading early.
-	pr.CloseWithError(err)
-	return err
+	pr.CloseWithError(putErr)
+	writeErr := <-writerErr
+	if putErr != nil {
+		return putErr
+	}
+	return writeErr
 }
 
 // WriteGraphStream writes a list of GetTargetGraphResponse messages to the storage.

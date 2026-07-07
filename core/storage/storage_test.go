@@ -24,6 +24,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var errMarshal = errors.New("marshal failed")
+
+type marshalErrorMessage struct{}
+
+func (*marshalErrorMessage) Reset()         {}
+func (*marshalErrorMessage) String() string { return "" }
+func (*marshalErrorMessage) ProtoMessage()  {}
+func (*marshalErrorMessage) Marshal() ([]byte, error) {
+	return nil, errMarshal
+}
+
+type discardStorage struct{}
+
+func (discardStorage) Get(context.Context, DownloadRequest) (DownloadResponse, error) {
+	return DownloadResponse{}, nil
+}
+
+func (discardStorage) Put(context.Context, UploadRequest) error { return nil }
+
+func (discardStorage) Exists(context.Context, string) (bool, error) { return false, nil }
+
+func (discardStorage) List(context.Context, string) ([]string, error) { return nil, nil }
+
+func TestWriteStreamReturnsWriterError(t *testing.T) {
+	err := writeStream[marshalErrorMessage](
+		context.Background(),
+		discardStorage{},
+		"key",
+		[]*marshalErrorMessage{{}},
+	)
+
+	require.ErrorIs(t, err, errMarshal)
+}
+
 func TestMemoryStorage_List(t *testing.T) {
 	ctx := context.Background()
 	s := NewMemoryStorage()
