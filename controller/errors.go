@@ -39,12 +39,12 @@ const (
 // emitFailureMetric tags the failure counter with the reason and type from the
 // error's ClassifiedError. Context errors are recognised explicitly; everything
 // else falls back to unknown/infra.
-func emitFailureMetric(scope tally.Scope, err error) {
+func emitFailureMetric(ctx context.Context, scope tally.Scope, err error) {
 	var ce common.ClassifiedError
 	switch {
 	case errors.As(err, &ce):
 		// already classified — use the error's own reason and type
-	case errors.Is(err, common.ErrClientCancelled):
+	case errors.Is(context.Cause(ctx), common.ErrClientCancelled):
 		ce = common.WithReason(common.FailureReasonClientCancelled, common.ErrorTypeUser, err)
 	case errors.Is(err, context.Canceled):
 		ce = common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)

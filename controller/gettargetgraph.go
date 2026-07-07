@@ -33,17 +33,17 @@ import (
 func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_target_graph")
 	scope.Counter("calls").Inc(1)
+	ctx, cancelLink := c.linkRequestCtx(stream.Context())
+	defer cancelLink()
 	defer func() {
 		if retErr != nil {
 			scope.Counter("failure").Inc(1)
-			emitFailureMetric(scope, retErr)
+			emitFailureMetric(ctx, scope, retErr)
 		} else {
 			scope.Counter("success").Inc(1)
 		}
 	}()
 	start := time.Now()
-	ctx, cancelLink := c.linkRequestCtx(stream.Context())
-	defer cancelLink()
 	logger := c.logger.With(
 		zap.Any("build_description", request.GetBuildDescription()),
 	)

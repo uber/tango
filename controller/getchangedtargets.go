@@ -43,20 +43,21 @@ type job struct {
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets")
 	scope.Counter("calls").Inc(1)
-	defer func() {
-		if retErr != nil {
-			scope.Counter("failure").Inc(1)
-			emitFailureMetric(scope, retErr)
-		} else {
-			scope.Counter("success").Inc(1)
-		}
-	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
+		scope.Counter("failure").Inc(1)
 		return common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
+	defer func() {
+		if retErr != nil {
+			scope.Counter("failure").Inc(1)
+			emitFailureMetric(ctx, scope, retErr)
+		} else {
+			scope.Counter("success").Inc(1)
+		}
+	}()
 	start := time.Now()
 	logger := c.logger.With(
 		zap.Any("first_revision", request.GetFirstRevision()),
