@@ -114,11 +114,6 @@ func HashRequestOptions(opts *tangopb.RequestOptions) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-// CancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
-// Picked to keep overhead negligible while still surfacing cancellation in <100ms
-// for typical target rates.
-const CancelCheckInterval = 4096
-
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse
 func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result) ([]*tangopb.GetTargetGraphResponse, error) {
 	// Map target names to ids. This list is topologically sorted, so the ids are stable.
@@ -139,7 +134,7 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 
 	n := 0
 	for _, t := range result.Targets {
-		if n%CancelCheckInterval == 0 {
+		if n%config.CancelCheckInterval == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
