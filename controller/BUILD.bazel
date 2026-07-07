@@ -38,8 +38,8 @@ go_test(
     ],
     embed = [":controller"],
     deps = [
+        "//config",
         "//core/common",
-        "//core/errors",
         "//core/storage",
         "//core/storage/storagemock",
         "//orchestrator/orchestratormock",

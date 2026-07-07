@@ -20,7 +20,6 @@ import (
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
-	tgerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
@@ -66,15 +65,15 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	}
 	targetChunkSize := p.ChunkConfig.TargetChunkSize
 	if targetChunkSize <= 0 {
-		targetChunkSize = tgerrors.DefaultTargetChunkSize
+		targetChunkSize = config.DefaultTargetChunkSize
 	}
 	changedTargetChunkSize := p.ChunkConfig.ChangedTargetChunkSize
 	if changedTargetChunkSize <= 0 {
-		changedTargetChunkSize = tgerrors.DefaultChangedTargetChunkSize
+		changedTargetChunkSize = config.DefaultChangedTargetChunkSize
 	}
 	metadataMapChunkSize := p.ChunkConfig.MetadataMapChunkSize
 	if metadataMapChunkSize <= 0 {
-		metadataMapChunkSize = tgerrors.DefaultMetadataMapChunkSize
+		metadataMapChunkSize = config.DefaultMetadataMapChunkSize
 	}
 	return &controller{
 		logger:                 p.Logger,

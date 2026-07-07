@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
+	"github.com/uber/tango/config"
 	tgerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/tangopb"
@@ -202,14 +203,14 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 	attrStrValIDToVal := attrStrValMapper.Invert()
 
 	// chunk targets into multiple messages for streaming
-	responses := chunkTargets(optimizedTargets, tgerrors.DefaultTargetChunkSize)
+	responses := chunkTargets(optimizedTargets, config.DefaultTargetChunkSize)
 	for _, meta := range ChunkMetadata(
 		targetIDToName,
 		ruleTypeIDToName,
 		tagIDToName,
 		attrNameIDToName,
 		attrStrValIDToVal,
-		tgerrors.DefaultMetadataMapChunkSize,
+		config.DefaultMetadataMapChunkSize,
 	) {
 		responses = append(responses, &tangopb.GetTargetGraphResponse{
 			Item: &tangopb.GetTargetGraphResponse_Metadata{Metadata: meta},
@@ -221,7 +222,7 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 
 func chunkTargets(targets []*tangopb.OptimizedTarget, chunkSize int) []*tangopb.GetTargetGraphResponse {
 	if chunkSize <= 0 {
-		chunkSize = tgerrors.DefaultTargetChunkSize
+		chunkSize = config.DefaultTargetChunkSize
 	}
 
 	// at least one chunk
@@ -272,7 +273,7 @@ func ChunkMetadata(
 	chunkSize int,
 ) []*tangopb.Metadata {
 	if chunkSize <= 0 {
-		chunkSize = tgerrors.DefaultMetadataMapChunkSize
+		chunkSize = config.DefaultMetadataMapChunkSize
 	}
 
 	targetChunks := splitMap(targetIDToName, chunkSize)
