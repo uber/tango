@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/tangopb"
 )
@@ -114,6 +115,11 @@ func HashRequestOptions(opts *tangopb.RequestOptions) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
+// CancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
+// Picked to keep overhead negligible while still surfacing cancellation in <100ms
+// for typical target rates.
+const CancelCheckInterval = config.CancelCheckInterval
+
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse
 func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result) ([]*tangopb.GetTargetGraphResponse, error) {
 	// Map target names to ids. This list is topologically sorted, so the ids are stable.
@@ -201,14 +207,14 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 	attrStrValIDToVal := attrStrValMapper.Invert()
 
 	// chunk targets into multiple messages for streaming
-	responses := chunkTargets(optimizedTargets, DefaultTargetChunkSize)
+	responses := chunkTargets(optimizedTargets, config.DefaultTargetChunkSize)
 	for _, meta := range ChunkMetadata(
 		targetIDToName,
 		ruleTypeIDToName,
 		tagIDToName,
 		attrNameIDToName,
 		attrStrValIDToVal,
-		DefaultMetadataMapChunkSize,
+		config.DefaultMetadataMapChunkSize,
 	) {
 		responses = append(responses, &tangopb.GetTargetGraphResponse{
 			Item: &tangopb.GetTargetGraphResponse_Metadata{Metadata: meta},
@@ -220,7 +226,7 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 
 func chunkTargets(targets []*tangopb.OptimizedTarget, chunkSize int) []*tangopb.GetTargetGraphResponse {
 	if chunkSize <= 0 {
-		chunkSize = DefaultTargetChunkSize
+		chunkSize = config.DefaultTargetChunkSize
 	}
 
 	// at least one chunk
@@ -271,7 +277,7 @@ func ChunkMetadata(
 	chunkSize int,
 ) []*tangopb.Metadata {
 	if chunkSize <= 0 {
-		chunkSize = DefaultMetadataMapChunkSize
+		chunkSize = config.DefaultMetadataMapChunkSize
 	}
 
 	targetChunks := splitMap(targetIDToName, chunkSize)
