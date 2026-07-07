@@ -123,17 +123,16 @@ func (c *impl) RevParse(ctx context.Context, ref string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Log returns up to limit commit SHAs reachable from ref, most recent first.
+// IsAncestor reports whether ancestorRef is an ancestor of descendantRef.
 func (c *impl) IsAncestor(ctx context.Context, ancestorRef, descendantRef string) (bool, error) {
 	_, err := c.runner.output(ctx, c.directory, "git", "merge-base", "--is-ancestor", ancestorRef, descendantRef)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if exitErr.ExitCode() == 1 {
-				return false, nil
-			}
-			// an exit code other than 1 indicates an error
-			return false, fmt.Errorf("check if ref %s is ancestor of %s: %w", ancestorRef, descendantRef, err)
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return false, nil
 		}
+		// an exit code other than 1, or a non-ExitError failure (context canceled,
+		// git binary missing, I/O error), indicates the check itself failed.
+		return false, fmt.Errorf("check if ref %s is ancestor of %s: %w", ancestorRef, descendantRef, err)
 	}
 	return true, nil
 }

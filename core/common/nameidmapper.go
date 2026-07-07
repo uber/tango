@@ -43,11 +43,6 @@ func (a *NameIDMapper) ID(name string) int32 {
 	return id
 }
 
-// Mapping returns the underlying name->id map.
-func (a *NameIDMapper) Mapping() map[string]int32 {
-	return a.nameToID
-}
-
 // Invert returns an id->name map built from the current name->id map.
 func (a *NameIDMapper) Invert() map[int32]string {
 	out := make(map[int32]string, len(a.nameToID))
