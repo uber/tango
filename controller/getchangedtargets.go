@@ -43,7 +43,6 @@ type job struct {
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets")
 	scope.Counter("calls").Inc(1)
-	logger := c.logger
 	defer func() {
 		if retErr != nil {
 			scope.Counter("failure").Inc(1)
@@ -53,14 +52,14 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		}
 	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
-		logger.Error("GetChangedTargets: validation failed", zap.Error(err))
+		c.logger.Error("GetChangedTargets: validation failed", zap.Error(err))
 		return fmt.Errorf("validate request: %w", err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
 	start := time.Now()
-	logger = c.logger.With(
+	logger := c.logger.With(
 		zap.Any("first_revision", request.GetFirstRevision()),
 		zap.Any("second_revision", request.GetSecondRevision()),
 	)
