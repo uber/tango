@@ -376,11 +376,11 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 	seeds := make(map[string]struct{})
 
 	// 3) Create canonical mappers for IDs (targets, rule types, tags, attributes)
-	targetMapper := common.NewNameIDMapper()
-	ruleTypeMapper := common.NewNameIDMapper()
-	tagMapper := common.NewNameIDMapper()
-	attrNameMapper := common.NewNameIDMapper()
-	attrValMapper := common.NewNameIDMapper()
+	// and a per-revision transposer that remaps each revision's targets into the
+	// shared canonical ID space.
+	mappers := newCanonicalMappers()
+	firstTx := mappers.transposer(firstMetadata)
+	secondTx := mappers.transposer(secondMetadata)
 
 	// Pass 1: walk second revision. Targets not in first revision are NEW (seeds).
 	// Targets in both with differing hashes are CHANGED; source-file CHANGED
@@ -392,15 +392,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 		if !exists {
 			changedByName[name] = &pb.ChangedTarget{
 				ChangeType: pb.CHANGE_TYPE_NEW,
-				NewTarget: transposeOptimizedTarget(
-					newT,
-					secondMetadata.GetTargetIdMapping(),
-					secondMetadata.GetRuleTypeMapping(),
-					secondMetadata.GetTagMapping(),
-					secondMetadata.GetAttributeNameMapping(),
-					secondMetadata.GetAttributeStringValueMapping(),
-					targetMapper.ID, ruleTypeMapper.ID, tagMapper.ID, attrNameMapper.ID, attrValMapper.ID,
-				),
+				NewTarget:  secondTx.transpose(newT),
 			}
 			seeds[name] = struct{}{}
 			continue
@@ -414,24 +406,8 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 		if sourceFileRuleTypeID != -1 && newT.GetRuleType() == sourceFileRuleTypeID {
 			seeds[name] = struct{}{}
 		}
-		newTarget := transposeOptimizedTarget(
-			newT,
-			secondMetadata.GetTargetIdMapping(),
-			secondMetadata.GetRuleTypeMapping(),
-			secondMetadata.GetTagMapping(),
-			secondMetadata.GetAttributeNameMapping(),
-			secondMetadata.GetAttributeStringValueMapping(),
-			targetMapper.ID, ruleTypeMapper.ID, tagMapper.ID, attrNameMapper.ID, attrValMapper.ID,
-		)
-		oldTarget := transposeOptimizedTarget(
-			oldT,
-			firstMetadata.GetTargetIdMapping(),
-			firstMetadata.GetRuleTypeMapping(),
-			firstMetadata.GetTagMapping(),
-			firstMetadata.GetAttributeNameMapping(),
-			firstMetadata.GetAttributeStringValueMapping(),
-			targetMapper.ID, ruleTypeMapper.ID, tagMapper.ID, attrNameMapper.ID, attrValMapper.ID,
-		)
+		newTarget := secondTx.transpose(newT)
+		oldTarget := firstTx.transpose(oldT)
 		changedByName[name] = &pb.ChangedTarget{
 			ChangeType: pb.CHANGE_TYPE_CHANGED,
 			OldTarget:  oldTarget,
@@ -513,15 +489,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 		}
 		changedByName[name] = &pb.ChangedTarget{
 			ChangeType: pb.CHANGE_TYPE_DELETED,
-			OldTarget: transposeOptimizedTarget(
-				oldT,
-				firstMetadata.GetTargetIdMapping(),
-				firstMetadata.GetRuleTypeMapping(),
-				firstMetadata.GetTagMapping(),
-				firstMetadata.GetAttributeNameMapping(),
-				firstMetadata.GetAttributeStringValueMapping(),
-				targetMapper.ID, ruleTypeMapper.ID, tagMapper.ID, attrNameMapper.ID, attrValMapper.ID,
-			),
+			OldTarget:  firstTx.transpose(oldT),
 		}
 		seeds[name] = struct{}{}
 	}
@@ -571,11 +539,11 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 		})
 	}
 	for _, meta := range common.ChunkMetadata(
-		targetMapper.Invert(),
-		ruleTypeMapper.Invert(),
-		tagMapper.Invert(),
-		attrNameMapper.Invert(),
-		attrValMapper.Invert(),
+		mappers.target.Invert(),
+		mappers.ruleType.Invert(),
+		mappers.tag.Invert(),
+		mappers.attrName.Invert(),
+		mappers.attrVal.Invert(),
 		c.metadataMapChunkSize,
 	) {
 		results = append(results, &pb.GetChangedTargetsResponse{
@@ -847,25 +815,60 @@ func validateTargetNames(oldTarget, newTarget *pb.OptimizedTarget, oldMeta, newM
 	return nil
 }
 
-// transposeOptimizedTarget remaps a target into the canonical ID space using name-based mappers.
-func transposeOptimizedTarget(
-	src *pb.OptimizedTarget,
-	oldTargetIdMap map[int32]string,
-	oldRuleTypeIdMap map[int32]string,
-	oldTagIdMap map[int32]string,
-	attrNameIdMap map[int32]string,
-	attrValIdMap map[int32]string,
-	getTargetId func(string) int32,
-	getRuleTypeId func(string) int32,
-	getTagId func(string) int32,
-	getAttrNameId func(string) int32,
-	getAttrValId func(string) int32,
-) *pb.OptimizedTarget {
+// canonicalMappers holds the per-call name->ID mappers that unify both
+// revisions into a single canonical ID namespace. The same set is shared by the
+// transposers for each revision so identical names map to identical IDs.
+type canonicalMappers struct {
+	target   *common.NameIDMapper
+	ruleType *common.NameIDMapper
+	tag      *common.NameIDMapper
+	attrName *common.NameIDMapper
+	attrVal  *common.NameIDMapper
+}
+
+// newCanonicalMappers creates an empty set of canonical mappers.
+func newCanonicalMappers() *canonicalMappers {
+	return &canonicalMappers{
+		target:   common.NewNameIDMapper(),
+		ruleType: common.NewNameIDMapper(),
+		tag:      common.NewNameIDMapper(),
+		attrName: common.NewNameIDMapper(),
+		attrVal:  common.NewNameIDMapper(),
+	}
+}
+
+// transposer builds a targetTransposer for a single revision's metadata,
+// resolving its ID->name maps once so per-target transposition is a map lookup.
+func (m *canonicalMappers) transposer(md *pb.Metadata) targetTransposer {
+	return targetTransposer{
+		targetIDMap:   md.GetTargetIdMapping(),
+		ruleTypeIDMap: md.GetRuleTypeMapping(),
+		tagIDMap:      md.GetTagMapping(),
+		attrNameIDMap: md.GetAttributeNameMapping(),
+		attrValIDMap:  md.GetAttributeStringValueMapping(),
+		mappers:       m,
+	}
+}
+
+// targetTransposer remaps targets from one revision's ID space into the shared
+// canonical ID space. The source ID->name maps come from that revision's
+// metadata; the name->ID mappers are shared across revisions.
+type targetTransposer struct {
+	targetIDMap   map[int32]string
+	ruleTypeIDMap map[int32]string
+	tagIDMap      map[int32]string
+	attrNameIDMap map[int32]string
+	attrValIDMap  map[int32]string
+	mappers       *canonicalMappers
+}
+
+// transpose remaps src into the canonical ID space, returning nil for a nil src.
+func (t targetTransposer) transpose(src *pb.OptimizedTarget) *pb.OptimizedTarget {
 	if src == nil {
 		return nil
 	}
 	dst := &pb.OptimizedTarget{
-		Id:       getTargetId(oldTargetIdMap[src.GetId()]),
+		Id:       t.mappers.target.ID(t.targetIDMap[src.GetId()]),
 		Hash:     src.GetHash(),
 		Root:     src.GetRoot(),
 		External: src.GetExternal(),
@@ -875,19 +878,19 @@ func transposeOptimizedTarget(
 	if len(deps) > 0 {
 		out := make([]int32, 0, len(deps))
 		for _, d := range deps {
-			out = append(out, getTargetId(oldTargetIdMap[d]))
+			out = append(out, t.mappers.target.ID(t.targetIDMap[d]))
 		}
 		dst.DirectDependencies = out
 	}
 	// Rule type
-	if rtName := oldRuleTypeIdMap[src.GetRuleType()]; rtName != "" {
-		dst.RuleType = getRuleTypeId(rtName)
+	if rtName := t.ruleTypeIDMap[src.GetRuleType()]; rtName != "" {
+		dst.RuleType = t.mappers.ruleType.ID(rtName)
 	}
 	// Tags
 	if tags := src.GetTags(); len(tags) > 0 {
 		out := make([]int32, 0, len(tags))
 		for _, tg := range tags {
-			out = append(out, getTagId(oldTagIdMap[tg]))
+			out = append(out, t.mappers.tag.ID(t.tagIDMap[tg]))
 		}
 		dst.Tags = out
 	}
@@ -895,9 +898,9 @@ func transposeOptimizedTarget(
 	if attrs := src.GetAttributes(); len(attrs) > 0 {
 		out := make(map[int32]int32, len(attrs))
 		for k, v := range attrs {
-			name := attrNameIdMap[k]
-			val := attrValIdMap[v]
-			out[getAttrNameId(name)] = getAttrValId(val)
+			name := t.attrNameIDMap[k]
+			val := t.attrValIDMap[v]
+			out[t.mappers.attrName.ID(name)] = t.mappers.attrVal.ID(val)
 		}
 		dst.Attributes = out
 	}
