@@ -91,6 +91,17 @@ func TestInvalidateHashRecursively(t *testing.T) {
 		// b has a nil hash and is thus skipped; invalidated stays empty
 		assert.Empty(t, invalidated.UnsortedList())
 	})
+
+	t.Run("missing target returns an error", func(t *testing.T) {
+		t.Parallel()
+
+		g := OptimizeGraph(map[string]*targethasher.Target{})
+		ids := NewIntSet()
+		ids.Insert(42)
+		err := g.invalidateHashRecursively(ids, NewIntSet())
+
+		require.Error(t, err)
+	})
 }
 
 // --- removeTarget ---
