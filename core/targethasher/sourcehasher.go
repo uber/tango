@@ -166,12 +166,6 @@ func externalTargetForRule(t string) string {
 	return externalWorkspaceRulePrefix + strings.TrimLeft(strings.Split(t, "//")[0], "@")
 }
 
-func pathForTarget(root, target string) string {
-	// //path/to:target.go -> $root/path/to/target.go
-	parts := strings.SplitN(strings.TrimPrefix(target, "//"), ":", 2)
-	return filepath.Join(root, parts[0], parts[1])
-}
-
 // HashRuleCommon hashes the common elements of a buildpb.Rule.
 func HashRuleCommon(r *buildpb.Rule, h hash.Hash) {
 	// Name                        *string
