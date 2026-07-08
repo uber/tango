@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"time"
@@ -38,15 +39,11 @@ type Params struct {
 	Orchestrator  orchestrator.Orchestrator
 	Scope         tally.Scope
 	ChunkConfig   config.ChunkConfig `optional:"true"`
-	MaxGoroutines int                `optional:"true"`
+	MaxGoroutines int
 }
 
 // _totalDurationBuckets covers 0–15 minutes in 10-second linear intervals.
 var _totalDurationBuckets = tally.MustMakeLinearDurationBuckets(10*time.Second, 10*time.Second, 90)
-
-const (
-	_defaultMaxGoroutines = 1000
-)
 
 type controller struct {
 	logger                 *zap.Logger
@@ -67,7 +64,7 @@ type controller struct {
 
 // NewController creates a new controller. appCtx is cancelled on process
 // shutdown to abort background work.
-func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
+func NewController(appCtx context.Context, p Params) (pb.TangoYARPCServer, error) {
 	scope := p.Scope
 	if scope == nil {
 		scope = tally.NoopScope
@@ -86,7 +83,7 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	}
 	maxGoroutines := p.MaxGoroutines
 	if maxGoroutines <= 0 {
-		maxGoroutines = _defaultMaxGoroutines
+		return nil, errors.New("max_goroutines must be > 0; set service.max_goroutines in config")
 	}
 	return &controller{
 		logger:                 p.Logger,
@@ -99,7 +96,7 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 		totalDurationBuckets:   _totalDurationBuckets,
 		appCtx:                 appCtx,
 		maxGoroutines:          maxGoroutines,
-	}
+	}, nil
 }
 
 // linkRequestCtx returns a context derived from reqCtx that is also cancelled
@@ -128,6 +125,7 @@ func (c *controller) linkRequestCtx(reqCtx context.Context) (context.Context, co
 // the configured limit.
 func (c *controller) checkGoroutineLimit() error {
 	if runtime.NumGoroutine() > c.maxGoroutines {
+		// TODO: classify error with the errors framework so we can emit a metric for this specific error type.
 		return fmt.Errorf("goroutine limit exceeded: %d > %d", runtime.NumGoroutine(), c.maxGoroutines)
 	}
 	return nil

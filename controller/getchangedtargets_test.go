@@ -168,7 +168,88 @@ func TestGetChangedTargets_GoroutineLimitExceeded(t *testing.T) {
 
 	err := c.GetChangedTargets(request, stream)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "goroutine limit exceeded")
+}
+
+func TestGetChangedTargets_GoroutineLimitExceeded_CacheLookup(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+
+	c := newTestController(zap.NewNop())
+	c.orchestrator = orchestratormock.NewMockOrchestrator(ctrl)
+	c.storage = storagemock.NewMockStorage(ctrl)
+	c.maxGoroutines = 1
+
+	request := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+	}
+
+	err := c.GetChangedTargets(request, stream)
+	require.Error(t, err)
+}
+
+func TestGetChangedTargets_GoroutineLimitExceeded_CacheWrite(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+
+	st := storagemock.NewMockStorage(ctrl)
+
+	var graphBuf bytes.Buffer
+	w := gogio.NewDelimitedWriter(&graphBuf)
+	w.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{
+			Targets: &pb.OptimizedTargets{
+				Targets: []*pb.OptimizedTarget{{Id: 1, Hash: "h1", RuleType: 100}},
+			},
+		},
+	})
+	w.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{
+			Metadata: &pb.Metadata{
+				TargetIdMapping: map[int32]string{1: "//app:t1"},
+				RuleTypeMapping: map[int32]string{100: "go_library"},
+			},
+		},
+	})
+	graphBytes := graphBuf.Bytes()
+
+	c := newTestController(zap.NewNop())
+	c.orchestrator = orchestratormock.NewMockOrchestrator(ctrl)
+	c.storage = st
+	c.maxGoroutines = 1000000
+
+	getCount := 0
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
+			getCount++
+			switch {
+			case strings.Contains(req.Key, "compared-targets"):
+				return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
+			case strings.Contains(req.Key, "sha1"):
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
+			case strings.Contains(req.Key, "sha2"):
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
+			case strings.Contains(req.Key, "treehash"):
+				// Lower the limit on the last graph read so the cache write
+				// goroutine check fails after graph comparison completes.
+				if getCount >= 6 {
+					c.maxGoroutines = 1
+				}
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graphBytes))}, nil
+			default:
+				return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
+			}
+		}).AnyTimes()
+
+	request := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+	}
+
+	err := c.GetChangedTargets(request, stream)
+	require.Error(t, err)
 }
 
 func TestGetChangedTargets_ValidationError(t *testing.T) {
