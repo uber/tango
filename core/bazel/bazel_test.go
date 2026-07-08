@@ -16,7 +16,7 @@ package bazel
 
 import (
 	"context"
-	"os/exec"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -61,6 +61,7 @@ func TestNewBazelClient(t *testing.T) {
 			assert.Equal(t, tt.params.WorkspacePath, client.workspacePath)
 			assert.Equal(t, tt.params.EnvVarsMap, client.envVarsMap)
 			assert.Equal(t, tt.params.Logger, client.logger)
+			assert.Equal(t, os.TempDir(), client.tempDir)
 			assert.NotNil(t, client.execCommandContext)
 		})
 	}
@@ -79,8 +80,10 @@ func TestNewBazelClient_WithNilExecCommand(t *testing.T) {
 
 	cmd := client.execCommandContext(context.Background(), "test", "arg1")
 	require.NotNil(t, cmd)
-	execCmd, ok := cmd.(*exec.Cmd)
+	execCmd, ok := cmd.(*execCommander)
 	require.True(t, ok)
 	assert.Equal(t, "/workspace", execCmd.Dir)
 	assert.Contains(t, execCmd.Env, "KEY=value")
+	assert.NotNil(t, execCmd.Cancel)
+	assert.Positive(t, execCmd.WaitDelay)
 }

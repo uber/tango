@@ -23,31 +23,17 @@ import (
 	"google.golang.org/protobuf/encoding/protodelim"
 )
 
-// streamOutput copies src into dst until the stream ends. The copy blocks
-// until it is unblocked externally — by the process exiting and closing the
-// pipe write end, or by the caller force-closing the read end — so when ctx
-// has ended, any copy error is just fallout from that shutdown and the
-// context error is reported instead.
-func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
-	_, err := io.Copy(dst, src)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return ctxErr
-	}
-	return err
-}
-
 // cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
 // Picked to keep overhead negligible while still surfacing cancellation in <100ms
 // for typical target rates.
 const cancelCheckInterval = 1024
 
 // getQueryResult reads a QueryResult containing targets from the stream and returns it.
-func getQueryResult(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb.QueryResult, error) {
+func getQueryResult(ctx context.Context, src io.Reader) (*buildpb.QueryResult, error) {
 	result := &buildpb.QueryResult{
 		Target: make([]*buildpb.Target, 0),
 	}
-	tr := io.TeeReader(src, dst)
-	br := bufio.NewReader(tr)
+	br := bufio.NewReader(src)
 	unmarshalOpts := protodelim.UnmarshalOptions{
 		MaxSize: 64 * 1024 * 1024, // 64MB limit
 	}

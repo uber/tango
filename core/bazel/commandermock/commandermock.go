@@ -40,60 +40,16 @@ func (m *Mockcommander) EXPECT() *MockcommanderMockRecorder {
 	return m.recorder
 }
 
-// Start mocks base method.
-func (m *Mockcommander) Start() error {
+// Run mocks base method.
+func (m *Mockcommander) Run(stdout, stderr io.Writer) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Start")
+	ret := m.ctrl.Call(m, "Run", stdout, stderr)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// Start indicates an expected call of Start.
-func (mr *MockcommanderMockRecorder) Start() *gomock.Call {
+// Run indicates an expected call of Run.
+func (mr *MockcommanderMockRecorder) Run(stdout, stderr any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*Mockcommander)(nil).Start))
-}
-
-// StderrPipe mocks base method.
-func (m *Mockcommander) StderrPipe() (io.ReadCloser, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StderrPipe")
-	ret0, _ := ret[0].(io.ReadCloser)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// StderrPipe indicates an expected call of StderrPipe.
-func (mr *MockcommanderMockRecorder) StderrPipe() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StderrPipe", reflect.TypeOf((*Mockcommander)(nil).StderrPipe))
-}
-
-// StdoutPipe mocks base method.
-func (m *Mockcommander) StdoutPipe() (io.ReadCloser, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StdoutPipe")
-	ret0, _ := ret[0].(io.ReadCloser)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// StdoutPipe indicates an expected call of StdoutPipe.
-func (mr *MockcommanderMockRecorder) StdoutPipe() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StdoutPipe", reflect.TypeOf((*Mockcommander)(nil).StdoutPipe))
-}
-
-// Wait mocks base method.
-func (m *Mockcommander) Wait() error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Wait")
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// Wait indicates an expected call of Wait.
-func (mr *MockcommanderMockRecorder) Wait() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Wait", reflect.TypeOf((*Mockcommander)(nil).Wait))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Run", reflect.TypeOf((*Mockcommander)(nil).Run), stdout, stderr)
 }

@@ -26,15 +26,12 @@ import (
 	"time"
 )
 
-// GracePeriod is how long the child has to exit after SIGTERM before the Go
-// runtime escalates to SIGKILL via Cmd.WaitDelay. Exported so callers that
-// layer their own shutdown timeouts on top of a command (e.g. force-closing
-// its I/O pipes) can schedule them to fire only after the kill sequence has
-// run its course.
-const GracePeriod = 10 * time.Second
+// gracePeriod is how long the child has to exit after SIGTERM before the Go
+// runtime escalates to SIGKILL via Cmd.WaitDelay.
+const gracePeriod = 10 * time.Second
 
 // CommandContext is a drop-in replacement for exec.CommandContext that sends
-// SIGTERM when ctx is canceled and escalates to SIGKILL after GracePeriod if
+// SIGTERM when ctx is canceled and escalates to SIGKILL after gracePeriod if
 // the process is still running. This gives child processes (e.g. git, bazel)
 // a chance to release lock files and disconnect cleanly before being killed.
 func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
@@ -46,6 +43,6 @@ func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 		}
 		return err
 	}
-	cmd.WaitDelay = GracePeriod
+	cmd.WaitDelay = gracePeriod
 	return cmd
 }

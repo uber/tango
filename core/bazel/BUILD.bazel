@@ -15,7 +15,6 @@ go_library(
         "@com_github_bazelbuild_buildtools//build_proto",
         "@org_golang_google_protobuf//encoding/protodelim",
         "@org_golang_google_protobuf//proto",
-        "@org_golang_x_sync//errgroup",
         "@org_uber_go_zap//:zap",
     ],
 )
@@ -24,16 +23,17 @@ go_test(
     name = "bazel_test",
     srcs = [
         "bazel_test.go",
+        "command_test.go",
         "query_test.go",
     ],
     embed = [":bazel"],
     deps = [
         "//core/bazel/commandermock",
+        "//core/execcmd",
         "@com_github_bazelbuild_buildtools//build_proto",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@org_golang_google_protobuf//encoding/protodelim",
-        "@org_uber_go_goleak//:goleak",
         "@org_uber_go_mock//gomock",
         "@org_uber_go_zap//:zap",
     ],
