@@ -26,24 +26,23 @@ import (
 	"time"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
+	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber/tango/core/bazel/commandermock"
-	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protodelim"
 )
 
 func TestExecuteQuery_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
+	mockCmd := NewMockCommander(ctrl)
 	protoData := marshalTarget(t, "//pkg:target")
 	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).DoAndReturn(func(stdout, _ io.Writer) error {
 		_, err := stdout.Write(protoData)
 		return err
 	})
 
-	client := newTestClient(t, func(context.Context, string, ...string) commander { return mockCmd })
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
 	resp, err := client.ExecuteQuery(context.Background(), &QueryRequest{Query: "//..."})
 
 	require.NoError(t, err)
@@ -53,11 +52,11 @@ func TestExecuteQuery_Success(t *testing.T) {
 
 func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
+	mockCmd := NewMockCommander(ctrl)
 	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).Return(nil)
 
 	var capturedArgs []string
-	client := newTestClient(t, func(_ context.Context, _ string, args ...string) commander {
+	client := newTestClient(t, func(_ context.Context, _ string, args ...string) Commander {
 		capturedArgs = args
 		return mockCmd
 	})
@@ -80,14 +79,14 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 
 func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
+	mockCmd := NewMockCommander(ctrl)
 	var cmdCtx context.Context
 	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).DoAndReturn(func(io.Writer, io.Writer) error {
 		<-cmdCtx.Done()
 		return errors.New("signal: terminated")
 	})
 
-	client := newTestClient(t, func(ctx context.Context, _ string, _ ...string) commander {
+	client := newTestClient(t, func(ctx context.Context, _ string, _ ...string) Commander {
 		cmdCtx = ctx
 		return mockCmd
 	})
@@ -101,8 +100,8 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 
 func TestExecuteQueryInternal_PreCanceledContext(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
-	client := newTestClient(t, func(context.Context, string, ...string) commander { return mockCmd })
+	mockCmd := NewMockCommander(ctrl)
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -114,7 +113,7 @@ func TestExecuteQueryInternal_PreCanceledContext(t *testing.T) {
 
 func TestExecuteQueryInternal_CancelDuringParsing(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
+	mockCmd := NewMockCommander(ctrl)
 	ctx, cancel := context.WithCancel(context.Background())
 	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).DoAndReturn(func(stdout, _ io.Writer) error {
 		_, err := stdout.Write(marshalTarget(t, "//pkg:target"))
@@ -122,7 +121,7 @@ func TestExecuteQueryInternal_CancelDuringParsing(t *testing.T) {
 		return err
 	})
 
-	client := newTestClient(t, func(context.Context, string, ...string) commander { return mockCmd })
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
 	result, err := client.executeQueryInternal(ctx, "//...", nil)
 
 	require.ErrorIs(t, err, context.Canceled)
@@ -131,7 +130,7 @@ func TestExecuteQueryInternal_CancelDuringParsing(t *testing.T) {
 
 func TestExecuteQueryInternal_CapturesCompleteOutput(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
+	mockCmd := NewMockCommander(ctrl)
 	const targetCount = 100
 	const stderrTail = "FINAL STDERR LINE"
 	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).DoAndReturn(func(stdout, stderr io.Writer) error {
@@ -147,7 +146,7 @@ func TestExecuteQueryInternal_CapturesCompleteOutput(t *testing.T) {
 		return errors.New("exit status 7")
 	})
 
-	client := newTestClient(t, func(context.Context, string, ...string) commander { return mockCmd })
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
 	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
 
 	require.Error(t, err)
@@ -157,13 +156,13 @@ func TestExecuteQueryInternal_CapturesCompleteOutput(t *testing.T) {
 
 func TestExecuteQueryInternal_ParseFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
+	mockCmd := NewMockCommander(ctrl)
 	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).DoAndReturn(func(stdout, _ io.Writer) error {
 		_, err := io.WriteString(stdout, "not a streamed proto")
 		return err
 	})
 
-	client := newTestClient(t, func(context.Context, string, ...string) commander { return mockCmd })
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
 	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
 
 	require.Error(t, err)
@@ -172,10 +171,10 @@ func TestExecuteQueryInternal_ParseFailure(t *testing.T) {
 
 func TestExecuteQueryInternal_StreamLogs(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
+	mockCmd := NewMockCommander(ctrl)
 	mockCmd.EXPECT().Run(gomock.Any(), os.Stderr).Return(errors.New("exit status 1"))
 
-	client := newTestClient(t, func(context.Context, string, ...string) commander { return mockCmd })
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
 	client.streamLogs = true
 	_, err := client.executeQueryInternal(context.Background(), "//...", nil)
 	require.Error(t, err)
@@ -183,10 +182,10 @@ func TestExecuteQueryInternal_StreamLogs(t *testing.T) {
 
 func TestExecuteQuery_ErrorCase(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
+	mockCmd := NewMockCommander(ctrl)
 	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).Return(errors.New("command failed"))
 
-	client := newTestClient(t, func(context.Context, string, ...string) commander { return mockCmd })
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
 	resp, err := client.ExecuteQuery(context.Background(), &QueryRequest{Query: "//..."})
 
 	require.Error(t, err)
@@ -207,7 +206,7 @@ func marshalTarget(t *testing.T, name string) []byte {
 	return out.Bytes()
 }
 
-func newTestClient(t *testing.T, execCmd func(context.Context, string, ...string) commander) *BazelClient {
+func newTestClient(t *testing.T, execCmd func(context.Context, string, ...string) Commander) *BazelClient {
 	t.Helper()
 	client, err := NewBazelClient(context.Background(), Params{
 		BazelCommand:       "bazel",

@@ -55,7 +55,7 @@ type BazelClient struct {
 	envVarsMap         map[string]string
 	bazelCommand       string
 	logger             *zap.SugaredLogger
-	execCommandContext func(ctx context.Context, name string, arg ...string) commander
+	execCommandContext func(ctx context.Context, name string, arg ...string) Commander
 	queryTimeout       time.Duration
 	tempDir            string
 	streamLogs         bool
@@ -66,7 +66,7 @@ type Params struct {
 	WorkspacePath      string
 	EnvVarsMap         map[string]string
 	Logger             *zap.SugaredLogger
-	ExecCommandContext func(ctx context.Context, name string, arg ...string) commander
+	ExecCommandContext func(ctx context.Context, name string, arg ...string) Commander
 	QueryTimeout       time.Duration
 	StreamLogs         bool
 }
@@ -74,7 +74,7 @@ type Params struct {
 func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 	execCmd := p.ExecCommandContext
 	if execCmd == nil {
-		execCmd = func(ctx context.Context, name string, arg ...string) commander {
+		execCmd = func(ctx context.Context, name string, arg ...string) Commander {
 			cmd := execcmd.CommandContext(ctx, name, arg...)
 			cmd.Dir = p.WorkspacePath
 			for key, value := range p.EnvVarsMap {

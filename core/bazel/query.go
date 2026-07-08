@@ -28,7 +28,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func (b *BazelClient) setupCommand(ctx context.Context, query string, startupOptions []string, additionalArgs ...string) commander {
+func (b *BazelClient) setupCommand(ctx context.Context, query string, startupOptions []string, additionalArgs ...string) Commander {
 	// Build command: bazel <startupOpts> query <AdditionalArgs> --output=streamed_proto <Query>
 	args := make([]string, 0, len(startupOptions)+1+len(additionalArgs)+2)
 	args = append(args, startupOptions...)

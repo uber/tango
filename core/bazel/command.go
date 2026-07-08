@@ -19,7 +19,8 @@ import (
 	"os/exec"
 )
 
-type commander interface {
+// Commander runs a command with the supplied output destinations.
+type Commander interface {
 	Run(stdout, stderr io.Writer) error
 }
 

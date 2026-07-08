@@ -1,3 +1,4 @@
+load("@rules_go//extras:gomock.bzl", "gomock")
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
@@ -24,17 +25,25 @@ go_test(
     srcs = [
         "bazel_test.go",
         "command_test.go",
+        "mock_commander_test.go",
         "query_test.go",
     ],
     embed = [":bazel"],
     deps = [
-        "//core/bazel/commandermock",
         "//core/execcmd",
         "@com_github_bazelbuild_buildtools//build_proto",
+        "@com_github_golang_mock//gomock",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@org_golang_google_protobuf//encoding/protodelim",
-        "@org_uber_go_mock//gomock",
         "@org_uber_go_zap//:zap",
     ],
+)
+
+gomock(
+    name = "mock_commander",
+    out = "mock_commander_test.go",
+    interfaces = ["Commander"],
+    library = ":bazel",
+    package = "bazel",
 )
