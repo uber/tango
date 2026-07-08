@@ -20,6 +20,7 @@ type ServiceConfig struct {
 	RepoManagerClonePath string      `yaml:"repo_manager_clone_path"` // root directory for origin repo clones
 	WorkerRootPath       string      `yaml:"worker_root_path"`        // root directory for worker workspace checkouts; defaults to repo_manager_clone_path/.workers
 	Chunking             ChunkConfig `yaml:"chunking"`                // streaming chunk sizes; zero values fall back to package defaults
+	MaxGoroutines        int         `yaml:"max_goroutines"`          // reject requests when runtime goroutine count exceeds this
 }
 
 // ChunkConfig controls the number of entries per gRPC stream message.

@@ -103,9 +103,11 @@ func run() error {
 	// Controller (YARPC server implementation). appCtx is forwarded so the
 	// controller's background goroutines are tied to process lifetime.
 	ctrl := controller.NewController(appCtx, controller.Params{
-		Logger:       zl,
-		Storage:      store,
-		Orchestrator: orch,
+		Logger:        zl,
+		Storage:       store,
+		Orchestrator:  orch,
+		ChunkConfig:   cfg.Service.Chunking,
+		MaxGoroutines: cfg.Service.MaxGoroutines,
 	})
 
 	// YARPC transports and dispatcher

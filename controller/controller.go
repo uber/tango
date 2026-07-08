@@ -16,6 +16,8 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/uber-go/tally"
@@ -31,15 +33,20 @@ import (
 // Params are the parameters for the controller.
 type Params struct {
 	fx.In
-	Logger       *zap.Logger
-	Storage      storage.Storage
-	Orchestrator orchestrator.Orchestrator
-	Scope        tally.Scope        `optional:"true"`
-	ChunkConfig  config.ChunkConfig `optional:"true"`
+	Logger        *zap.Logger
+	Storage       storage.Storage
+	Orchestrator  orchestrator.Orchestrator
+	Scope         tally.Scope
+	ChunkConfig   config.ChunkConfig `optional:"true"`
+	MaxGoroutines int                `optional:"true"`
 }
 
 // _totalDurationBuckets covers 0–15 minutes in 10-second linear intervals.
 var _totalDurationBuckets = tally.MustMakeLinearDurationBuckets(10*time.Second, 10*time.Second, 90)
+
+const (
+	_defaultMaxGoroutines = 1000
+)
 
 type controller struct {
 	logger                 *zap.Logger
@@ -50,6 +57,7 @@ type controller struct {
 	changedTargetChunkSize int
 	metadataMapChunkSize   int
 	totalDurationBuckets   tally.Buckets
+	maxGoroutines          int
 
 	// appCtx is the application lifetime; cancel it on process shutdown.
 	// Used by linkRequestCtx and any fire-and-forget goroutines so they
@@ -76,6 +84,10 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	if metadataMapChunkSize <= 0 {
 		metadataMapChunkSize = common.DefaultMetadataMapChunkSize
 	}
+	maxGoroutines := p.MaxGoroutines
+	if maxGoroutines <= 0 {
+		maxGoroutines = _defaultMaxGoroutines
+	}
 	return &controller{
 		logger:                 p.Logger,
 		storage:                p.Storage,
@@ -86,6 +98,7 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 		metadataMapChunkSize:   metadataMapChunkSize,
 		totalDurationBuckets:   _totalDurationBuckets,
 		appCtx:                 appCtx,
+		maxGoroutines:          maxGoroutines,
 	}
 }
 
@@ -109,4 +122,13 @@ func (c *controller) linkRequestCtx(reqCtx context.Context) (context.Context, co
 		stop()
 		cancel()
 	}
+}
+
+// checkGoroutineLimit returns an error if the current goroutine count exceeds
+// the configured limit.
+func (c *controller) checkGoroutineLimit() error {
+	if runtime.NumGoroutine() > c.maxGoroutines {
+		return fmt.Errorf("goroutine limit exceeded: %d > %d", runtime.NumGoroutine(), c.maxGoroutines)
+	}
+	return nil
 }

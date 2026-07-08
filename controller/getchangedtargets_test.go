@@ -151,6 +151,26 @@ func TestCompareTargetGraphs(t *testing.T) {
 	require.NotNil(t, response)
 }
 
+func TestGetChangedTargets_GoroutineLimitExceeded(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+
+	c := newTestController(zap.NewNop())
+	c.orchestrator = orchestratormock.NewMockOrchestrator(ctrl)
+	c.maxGoroutines = 1
+
+	request := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		BypassCache:    true,
+	}
+
+	err := c.GetChangedTargets(request, stream)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "goroutine limit exceeded")
+}
+
 func TestGetChangedTargets_ValidationError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)

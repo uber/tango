@@ -80,7 +80,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// rather than silent degradation.
 	if !request.GetBypassCache() {
 		cacheStart := time.Now()
-		treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
+		treehash1, treehash2, err := c.readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
 		if err != nil {
 			logger.Error("GetChangedTargets: Failed to read revision treehash", zap.Error(err))
 			return common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
@@ -160,6 +160,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	results := make(chan graphResult, len(jobs))
 	graphFetchStart := time.Now()
 
+	if err := c.checkGoroutineLimit(); err != nil {
+		return err
+	}
 	for i := 0; i < len(jobs); i++ {
 		i := i
 		go func(idx int) {
@@ -276,6 +279,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// Re-read treehashes inside the goroutine — the orchestrator may have stored them
 	// during computation. Both the goroutine and the send loop below only read
 	// changedTargetsResponses, so concurrent access is safe.
+	if err := c.checkGoroutineLimit(); err != nil {
+		return err
+	}
 	go func() {
 		// Use c.appCtx directly: the cache write is fire-and-forget and must
 		// outlive the request (so a client disconnect doesn't abort it) but
@@ -284,7 +290,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		// is cancelled on shutdown. Per-operation deadlines are the storage
 		// backend's responsibility — the controller is backend-agnostic and
 		// must not encode any one implementation's I/O budget.
-		treehash1, treehash2, err := readTreehashParallel(c.appCtx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
+		treehash1, treehash2, err := c.readTreehashParallel(c.appCtx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
 		if err != nil {
 			// Goroutine outlives the handler so we can't return; log loudly and
 			// abandon the cache write. Surfacing infra failures matters more than
@@ -1065,7 +1071,10 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 // wasting work on a result that will be discarded anyway. The cancelled sibling's error
 // is dropped — only the original failure is returned, so a self-inflicted
 // context.Canceled never masks the real reason the lookup failed.
-func readTreehashParallel(ctx context.Context, st storage.Storage, first, second *pb.BuildDescription) (string, string, error) {
+func (c *controller) readTreehashParallel(ctx context.Context, st storage.Storage, first, second *pb.BuildDescription) (string, string, error) {
+	if err := c.checkGoroutineLimit(); err != nil {
+		return "", "", err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
