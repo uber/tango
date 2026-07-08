@@ -419,13 +419,13 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 		}
 		hashParam.TargetName = name
 		if _, err := HashRecursively(ctx, hashParam); err != nil {
-			return Result{}, err
+			return EmptyResult(), err
 		}
 	}
 	for _, name := range roots {
 		hashParam.TargetName = name
 		if _, err := HashRecursively(ctx, hashParam); err != nil {
-			return Result{}, err
+			return EmptyResult(), err
 		}
 	}
 
@@ -465,7 +465,7 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 
 			hashParam.TargetName = name
 			if _, err := HashRecursively(ctx, hashParam); err != nil {
-				return Result{}, err
+				return EmptyResult(), err
 			}
 		}
 	}

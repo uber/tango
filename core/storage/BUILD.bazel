@@ -8,6 +8,7 @@ go_library(
         "graphreader.go",
         "graphwriter.go",
         "memstorage.go",
+        "reader.go",
         "storage.go",
     ],
     importpath = "github.com/uber/tango/core/storage",
@@ -15,6 +16,7 @@ go_library(
     deps = [
         "//tangopb",
         "@com_github_gogo_protobuf//io",
+        "@com_github_gogo_protobuf//proto",
     ],
 )
 

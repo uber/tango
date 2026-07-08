@@ -325,15 +325,16 @@ func (g *OptimizedGraph) getOrGenerateTargetID(targetName string) int {
 	return id
 }
 
-func getOrGenerate(key string, m map[string]int) int {
-	if _, ok := m[key]; !ok {
-		m[key] = len(m)
+func getOrGenerate(key string, m map[string]int) (val int) {
+	val, ok := m[key]
+	if !ok {
+		m[key], val = len(m), len(m)
 	}
-	return m[key]
+	return
 }
 
 func getOrGenerateRecordReverse(key string, m map[string]int, reverseM map[int]string) int {
 	id := getOrGenerate(key, m)
 	reverseM[id] = key
-	return m[key]
+	return id
 }

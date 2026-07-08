@@ -50,7 +50,11 @@ func main() {
 
 	grpcTransport := yarpcgrpc.NewTransport()
 	out := grpcTransport.NewSingleOutbound(*addr)
-	zl, _ := zap.NewDevelopment()
+	zl, err := zap.NewDevelopment()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
+		os.Exit(1)
+	}
 	defer zl.Sync()
 	logger := zl.Sugar()
 	dispatcher := yarpc.NewDispatcher(yarpc.Config{

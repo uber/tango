@@ -16,6 +16,7 @@ package workspace
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 
 	"github.com/uber/tango/core/git"
@@ -37,5 +38,5 @@ func NewRequest(rawURL string, g git.Interface, baseRef string, commit string, l
 	case "github":
 		return NewGitRequest(g, u.Path, baseRef, commit, logger), nil
 	}
-	return nil, nil
+	return nil, fmt.Errorf("unsupported scheme: %v", u.Scheme)
 }

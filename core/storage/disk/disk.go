@@ -30,9 +30,11 @@ type diskStorage struct {
 	rootDir string
 }
 
+var _ storage.Storage = (*diskStorage)(nil)
+
 // New creates a new disk-based storage that implements storage.Storage.
 // The rootDir is the base directory where all blobs will be stored.
-func New(rootDir string) (*diskStorage, error) {
+func New(rootDir string) (storage.Storage, error) {
 	if rootDir == "" {
 		return nil, errors.New("root directory cannot be empty")
 	}
