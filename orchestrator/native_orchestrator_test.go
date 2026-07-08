@@ -95,7 +95,10 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	// First attempt returns NotFound to trigger compute path.
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "missing"})
 	// Expect writes (graph list and treehash cache mapping)
-	st.EXPECT().Put(gomock.Any(), gomock.Any()).Return(nil).MinTimes(2)
+	st.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.UploadRequest) error {
+		_, err := io.Copy(io.Discard, req.Reader)
+		return err
+	}).MinTimes(2)
 	// After compute, second read returns a valid delimited stream with one message
 	var buf bytes.Buffer
 	_ = gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
