@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"go.uber.org/zap"
@@ -74,8 +75,6 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	if b.streamLogs {
 		stderrSink = os.Stderr
 	}
-	// orchestrate `allOfFailFast`
-	// create a `g` group and a new `gCtx` derived from our 15 minute timeout `ctx`.
 	g, gCtx := errgroup.WithContext(cmdCtx)
 
 	// Start the process
@@ -84,16 +83,47 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	}
 	// stream and parse targets
 	g.Go(func() error {
-		var err error
-		queryResults, err = streamAndParseTargets(gCtx, stdout, &stdoutBuf)
-		return err
+		res, err := getQueryResult(gCtx, stdout, &stdoutBuf)
+		if err != nil {
+			return err
+		}
+		queryResults = res
+		return nil
 	})
 	// stream stderr
 	g.Go(func() error {
 		return streamOutput(gCtx, stderr, stderrSink)
 	})
-	waitErr := cmd.Wait()
+
+	// The stream reads normally end with EOF when the process dies and the
+	// kernel closes the pipe write ends. But a descendant of a killed process
+	// that inherited the pipes can hold the write ends open indefinitely
+	// (go.dev/issue/23019). cmd.Wait would force-close the parent ends, but we
+	// only call Wait after the reads finish, so this watchdog is what
+	// guarantees the reads can't block forever.
+	readsDone := make(chan struct{})
+	go func() {
+		select {
+		case <-readsDone:
+			return
+		case <-cmdCtx.Done():
+		}
+		timer := time.NewTimer(b.pipeUnblockDelay)
+		defer timer.Stop()
+		select {
+		case <-readsDone:
+		case <-timer.C:
+			stdout.Close()
+			stderr.Close()
+		}
+	}()
+
+	// Drain the streams before reaping the process: cmd.Wait closes the parent
+	// pipe ends as soon as the process exits, which would truncate whatever
+	// the readers hadn't consumed yet and race on the output buffers.
 	streamErr := g.Wait()
+	close(readsDone)
+	waitErr := cmd.Wait()
 	if waitErr != nil {
 		return queryResults, b.wrapQueryFailure("bazel query failed", waitErr, &stderrBuf)
 	}

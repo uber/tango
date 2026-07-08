@@ -23,41 +23,17 @@ import (
 	"google.golang.org/protobuf/encoding/protodelim"
 )
 
+// streamOutput copies src into dst until the stream ends. The copy blocks
+// until it is unblocked externally — by the process exiting and closing the
+// pipe write end, or by the caller force-closing the read end — so when ctx
+// has ended, any copy error is just fallout from that shutdown and the
+// context error is reported instead.
 func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
-	done := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(dst, src)
-		done <- err
-	}()
-
-	select {
-	case <-ctx.Done():
-		<-done
-		return ctx.Err()
-	case err := <-done:
-		return err
+	_, err := io.Copy(dst, src)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
 	}
-}
-
-func streamAndParseTargets(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb.QueryResult, error) {
-	type result struct {
-		queryResult *buildpb.QueryResult
-		err         error
-	}
-	done := make(chan result, 1)
-
-	go func() {
-		queryResult, err := getQueryResult(ctx, src, dst)
-		done <- result{queryResult: queryResult, err: err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		<-done
-		return nil, ctx.Err()
-	case res := <-done:
-		return res.queryResult, res.err
-	}
+	return err
 }
 
 // cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
@@ -94,6 +70,10 @@ func getQueryResult(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb
 		}
 		result.Target = append(result.Target, &target)
 	}
-
+	// Like streamOutput, prefer the context error over whatever the shutdown
+	// did to the stream mid-parse.
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	return result, parseErr
 }

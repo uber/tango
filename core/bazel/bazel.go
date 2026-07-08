@@ -32,6 +32,13 @@ import (
 const (
 	// default query timeout if not provided in config
 	_queryTimeout = 15 * time.Minute
+	// _pipeUnblockDelay is how long after the command context ends a query
+	// waits before force-closing the stdout/stderr pipes to unblock stream
+	// reads that never saw EOF (a descendant of the killed process can inherit
+	// the pipe write ends and hold them open, see go.dev/issue/23019). It
+	// exceeds execcmd.GracePeriod so the SIGTERM→SIGKILL sequence gets a
+	// chance to end the streams with a natural EOF first.
+	_pipeUnblockDelay = execcmd.GracePeriod + 5*time.Second
 )
 
 type QueryRequest struct {
@@ -56,6 +63,7 @@ type BazelClient struct {
 	logger             *zap.SugaredLogger
 	execCommandContext func(ctx context.Context, name string, arg ...string) commander
 	queryTimeout       time.Duration
+	pipeUnblockDelay   time.Duration
 	streamLogs         bool
 }
 
@@ -98,6 +106,7 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 		logger:             p.Logger,
 		execCommandContext: execCmd,
 		queryTimeout:       timeout,
+		pipeUnblockDelay:   _pipeUnblockDelay,
 		streamLogs:         p.StreamLogs,
 	}, nil
 }
