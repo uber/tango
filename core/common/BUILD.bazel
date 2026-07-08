@@ -26,6 +26,7 @@ go_test(
     ],
     embed = [":common"],
     deps = [
+        "//config",
         "//core/targethasher",
         "//tangopb",
         "@com_github_stretchr_testify//assert",
