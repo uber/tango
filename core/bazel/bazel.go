@@ -26,9 +26,12 @@ import (
 	"time"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/execcmd"
 	"go.uber.org/zap"
 )
+
+func newBazelError(err error) error { return tangoerrors.NewInternal(tangoerrors.FailureSourceBazel, err) }
 
 const (
 	// default query timeout if not provided in config
@@ -89,7 +92,7 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 	}
 	bazelCommand, err := detectBazelExecutable(ctx, p.BazelCommand)
 	if err != nil {
-		return nil, fmt.Errorf("detect bazel executable: %w", err)
+		return nil, newBazelError(fmt.Errorf("detect bazel executable: %w", err))
 	}
 	p.Logger.Debugw("NewBazelClient", zap.String("bazelCommand", bazelCommand), zap.String("workspacePath", p.WorkspacePath))
 	return &BazelClient{
@@ -117,11 +120,11 @@ func detectBazelExecutable(ctx context.Context, bazelCommand string) (string, er
 func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
-		return "", fmt.Errorf("cache dir: %w", err)
+		return "", newBazelError(fmt.Errorf("cache dir: %w", err))
 	}
 	dir := filepath.Join(cacheDir, "tango", "bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("mkdir cache: %w", err)
+		return "", newBazelError(fmt.Errorf("mkdir cache: %w", err))
 	}
 	dest := filepath.Join(dir, "bazelisk")
 	if _, err := os.Stat(dest); err == nil {
@@ -133,20 +136,20 @@ func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", fmt.Errorf("build bazelisk request: %w", err)
+		return "", newBazelError(fmt.Errorf("build bazelisk request: %w", err))
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("download bazelisk: %w", err)
+		return "", newBazelError(fmt.Errorf("download bazelisk: %w", err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download bazelisk: HTTP %d from %s", resp.StatusCode, url)
+		return "", newBazelError(fmt.Errorf("download bazelisk: HTTP %d from %s", resp.StatusCode, url))
 	}
 	// Write to a temp file then atomically rename to avoid partial binaries.
 	tmp, err := os.CreateTemp(filepath.Dir(dest), ".bazelisk-*")
 	if err != nil {
-		return "", fmt.Errorf("create temp file: %w", err)
+		return "", newBazelError(fmt.Errorf("create temp file: %w", err))
 	}
 	tmpPath := tmp.Name()
 	// On failure, remove the temp file and fold any removal error into the
@@ -159,16 +162,16 @@ func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 	}()
 
 	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		return "", fmt.Errorf("write bazelisk: %w", errors.Join(err, tmp.Close()))
+		return "", newBazelError(fmt.Errorf("write bazelisk: %w", errors.Join(err, tmp.Close())))
 	}
 	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("close bazelisk temp: %w", err)
+		return "", newBazelError(fmt.Errorf("close bazelisk temp: %w", err))
 	}
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		return "", fmt.Errorf("chmod bazelisk: %w", err)
+		return "", newBazelError(fmt.Errorf("chmod bazelisk: %w", err))
 	}
 	if err := os.Rename(tmpPath, dest); err != nil {
-		return "", fmt.Errorf("install bazelisk: %w", err)
+		return "", newBazelError(fmt.Errorf("install bazelisk: %w", err))
 	}
 	return dest, nil
 }

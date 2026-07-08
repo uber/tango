@@ -5,7 +5,10 @@ go_library(
     srcs = ["disk.go"],
     importpath = "github.com/uber/tango/core/storage/disk",
     visibility = ["//visibility:public"],
-    deps = ["//core/storage"],
+    deps = [
+        "//core/errors",
+        "//core/storage",
+    ],
 )
 
 go_test(

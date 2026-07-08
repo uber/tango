@@ -19,9 +19,14 @@ import (
 	"fmt"
 	"path/filepath"
 
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
 	"go.uber.org/zap"
 )
+
+func newWorkspaceError(err error) error {
+	return tangoerrors.NewInternal(tangoerrors.FailureSourceWorkspace, err)
+}
 
 type gitRequest struct {
 	git       git.Interface
@@ -49,32 +54,32 @@ func (r *gitRequest) Apply(ctx context.Context) error {
 	ref := fmt.Sprintf("+pull/%s/head:pull/%s/head", r.requestID, r.requestID)
 	err := r.git.Fetch(ctx, "origin", ref, "--force", "--no-tags")
 	if err != nil {
-		return fmt.Errorf("fetch PR %s: %w", r.requestID, err)
+		return newWorkspaceError(fmt.Errorf("fetch PR %s: %w", r.requestID, err))
 	}
 	if r.commit != "" {
 		isAncestor, err := r.git.IsAncestor(ctx, r.commit, fmt.Sprintf("pull/%s/head", r.requestID))
 		if err != nil {
-			return fmt.Errorf("failed to read PR commit history: %w", err)
+			return newWorkspaceError(fmt.Errorf("failed to read PR commit history: %w", err))
 		}
 		if !isAncestor {
-			return fmt.Errorf("commit %q is not an ancestor of PR %s", r.commit, r.requestID)
+			return newWorkspaceError(fmt.Errorf("commit %q is not an ancestor of PR %s", r.commit, r.requestID))
 		}
 	}
 	patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
 	if err != nil {
-		return fmt.Errorf("compute diff for PR %s: %w", r.requestID, err)
+		return newWorkspaceError(fmt.Errorf("compute diff for PR %s: %w", r.requestID, err))
 	}
 	err = r.git.ApplyPatch(ctx, patch)
 	if err != nil {
-		return fmt.Errorf("apply patch for PR %s: %w", r.requestID, err)
+		return newWorkspaceError(fmt.Errorf("apply patch for PR %s: %w", r.requestID, err))
 	}
 	err = r.git.Commit(ctx, fmt.Sprintf("Applied PR: %s", r.requestID), "--allow-empty")
 	if err != nil {
-		return fmt.Errorf("commit PR %s: %w", r.requestID, err)
+		return newWorkspaceError(fmt.Errorf("commit PR %s: %w", r.requestID, err))
 	}
 	err = r.git.SubmoduleUpdate(ctx)
 	if err != nil {
-		return fmt.Errorf("update submodules for PR %s: %w", r.requestID, err)
+		return newWorkspaceError(fmt.Errorf("update submodules for PR %s: %w", r.requestID, err))
 	}
 	r.logger.Infow("gitRequest: Successfully applied PR", zap.String("request_id", r.requestID))
 	return nil

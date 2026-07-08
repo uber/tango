@@ -27,6 +27,7 @@ import (
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/common"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
@@ -34,6 +35,10 @@ import (
 	"github.com/uber/tango/graphrunner"
 	"go.uber.org/zap"
 )
+
+func newOrchestratorError(err error) error {
+	return tangoerrors.NewInternal(tangoerrors.FailureSourceOrchestrator, err)
+}
 
 // nativeOrchestrator implements native version of Orchestrator
 type nativeOrchestrator struct {
@@ -81,7 +86,7 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 	// parse the config file
 	cfg, err := config.Parse(p.ConfigFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("parse config %q: %w", p.ConfigFilePath, err)
+		return nil, newOrchestratorError(fmt.Errorf("parse config %q: %w", p.ConfigFilePath, err))
 	}
 
 	return &nativeOrchestrator{
@@ -122,11 +127,11 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	remote := param.Req.BuildDescription.Remote
 	repoCfg, ok := b.config.GetRepositoryConfig(remote)
 	if !ok {
-		return nil, fmt.Errorf("no repository configuration found for remote %q", remote)
+		return nil, newOrchestratorError(fmt.Errorf("no repository configuration found for remote %q", remote))
 	}
 	ws, err := b.repoManager.Lease(ctx, *param.Req.BuildDescription)
 	if err != nil {
-		return nil, fmt.Errorf("lease workspace: %w", err)
+		return nil, newOrchestratorError(fmt.Errorf("lease workspace: %w", err))
 	}
 	defer func() {
 		err := ws.Release()
@@ -139,7 +144,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	}()
 	err = ws.Checkout(ctx, param.Req.BuildDescription.Remote, param.Req.BuildDescription.BaseSha)
 	if err != nil {
-		return nil, fmt.Errorf("checkout %s@%s: %w", param.Req.BuildDescription.Remote, param.Req.BuildDescription.BaseSha, err)
+		return nil, newOrchestratorError(fmt.Errorf("checkout %s@%s: %w", param.Req.BuildDescription.Remote, param.Req.BuildDescription.BaseSha, err))
 	}
 	logger.Infow("GetTargetGraph: Checked out base revision")
 
@@ -153,20 +158,20 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	for _, req := range param.Req.BuildDescription.Requests {
 		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.BaseSha, req.GetCommit(), logger)
 		if err != nil {
-			return nil, fmt.Errorf("create request for %q: %w", req.GetUrl(), err)
+			return nil, newOrchestratorError(fmt.Errorf("create request for %q: %w", req.GetUrl(), err))
 		}
 		requests = append(requests, request)
 	}
 	err = ws.ApplyRequests(ctx, requests)
 	if err != nil {
-		return nil, fmt.Errorf("apply requests: %w", err)
+		return nil, newOrchestratorError(fmt.Errorf("apply requests: %w", err))
 	}
 	logger.Infow("GetTargetGraph: Applied requests", zap.Int("request_count", len(requests)))
 
 	// Compute the treehash and download the target graph from storage if exists.
 	treehash, err := gitModule.RevParse(ctx, "HEAD^{tree}")
 	if err != nil {
-		return nil, fmt.Errorf("compute treehash: %w", err)
+		return nil, newOrchestratorError(fmt.Errorf("compute treehash: %w", err))
 	}
 	treehashPath := common.GetGraphByTreeHash(param.Req.BuildDescription.Remote, treehash, param.Req.BuildDescription.GetStrategy(), param.Req.GetRequestOptions())
 	if !param.BypassCache {
@@ -176,7 +181,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			return graphReader, nil
 		}
 		if !storage.IsNotFound(err) {
-			return nil, fmt.Errorf("read graph at treehash %s: %w", treehash, err)
+			return nil, newOrchestratorError(fmt.Errorf("read graph at treehash %s: %w", treehash, err))
 		}
 		logger.Infow("GetTargetGraph: Treehash not found, computing target graph", zap.String("treehash", treehash))
 	} else {
@@ -193,7 +198,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			StreamLogs:    repoCfg.StreamBazelLogs,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("create bazel client: %w", err)
+			return nil, newOrchestratorError(fmt.Errorf("create bazel client: %w", err))
 		}
 		// Use default native graph runner
 		runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
@@ -206,25 +211,25 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	}
 	result, err := runner.Compute(ctx, ws)
 	if err != nil {
-		return nil, fmt.Errorf("compute target graph: %w", err)
+		return nil, newOrchestratorError(fmt.Errorf("compute target graph: %w", err))
 	}
 	responses, err := common.ResultToGetTargetGraphResponse(ctx, result)
 	if err != nil {
-		return nil, fmt.Errorf("convert target graph to response: %w", err)
+		return nil, newOrchestratorError(fmt.Errorf("convert target graph to response: %w", err))
 	}
 	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, responses)
 	if err != nil {
-		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
+		return nil, newOrchestratorError(fmt.Errorf("write graph to storage at %s: %w", treehashPath, err))
 	}
 	treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription)
 	treehashReader := bytes.NewReader([]byte(treehash))
 	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
 	if err != nil {
-		return nil, fmt.Errorf("store treehash mapping at %s: %w", treehashCachePath, err)
+		return nil, newOrchestratorError(fmt.Errorf("store treehash mapping at %s: %w", treehashCachePath, err))
 	}
 	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 	if err != nil {
-		return nil, fmt.Errorf("create graph reader at %s: %w", treehashPath, err)
+		return nil, newOrchestratorError(fmt.Errorf("create graph reader at %s: %w", treehashPath, err))
 	}
 	logger.Infow("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
 	return graphReader, nil

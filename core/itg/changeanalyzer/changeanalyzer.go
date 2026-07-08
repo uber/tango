@@ -24,6 +24,7 @@ import (
 	"regexp"
 
 	"github.com/uber/tango/core/git"
+	"github.com/uber/tango/core/itg/utils"
 )
 
 // ChangeComplexity represents the complexity level of changes between two refs.
@@ -110,15 +111,15 @@ type Config struct {
 func NewAnalyzer(g git.Interface, cfg Config) (Analyzer, error) {
 	buildPatterns, err := compilePatterns(cfg.BuildFilePatterns)
 	if err != nil {
-		return nil, fmt.Errorf("compiling build file patterns: %w", err)
+		return nil, utils.NewITGUserError(fmt.Errorf("compiling build file patterns: %w", err))
 	}
 	criticalPatterns, err := compilePatterns(cfg.CriticalFilePatterns)
 	if err != nil {
-		return nil, fmt.Errorf("compiling critical file patterns: %w", err)
+		return nil, utils.NewITGUserError(fmt.Errorf("compiling critical file patterns: %w", err))
 	}
 	ignoredPatterns, err := compilePatterns(cfg.IgnoredFilePatterns)
 	if err != nil {
-		return nil, fmt.Errorf("compiling ignored file patterns: %w", err)
+		return nil, utils.NewITGUserError(fmt.Errorf("compiling ignored file patterns: %w", err))
 	}
 	return &analyzer{
 		git:                  g,
@@ -133,7 +134,7 @@ func compilePatterns(patterns []string) ([]*regexp.Regexp, error) {
 	for _, p := range patterns {
 		re, err := regexp.Compile(p)
 		if err != nil {
-			return nil, fmt.Errorf("invalid pattern %q: %w", p, err)
+			return nil, utils.NewITGUserError(fmt.Errorf("invalid pattern %q: %w", p, err))
 		}
 		compiled = append(compiled, re)
 	}
@@ -151,12 +152,12 @@ func (a *analyzer) AnalyzeChange(ctx context.Context, request *AnalyzeChangeRequ
 
 		errFetch := a.git.Fetch(ctx, "origin", "main", "--no-tags")
 		if errFetch != nil {
-			return nil, errors.Join(err, fmt.Errorf("fetch origin/main: %w", errFetch))
+			return nil, utils.NewITGInternalError(errors.Join(err, fmt.Errorf("fetch origin/main: %w", errFetch)))
 		}
 		changes, err = a.git.DiffWithStatus(ctx, request.BaseRef, request.TargetRef)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("git diff: %w", err)
+		return nil, utils.NewITGInternalError(fmt.Errorf("git diff: %w", err))
 	}
 
 	response := &AnalyzeChangeResponse{

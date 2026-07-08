@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/tangopb"
@@ -98,6 +99,10 @@ func NewRepoManager(appCtx context.Context, p Params) RepoManager {
 	}
 }
 
+func newRepoManagerError(err error) error {
+	return tangoerrors.NewInternal(tangoerrors.FailureSourceRepoManager, err)
+}
+
 func (r *repoManager) poolFor(repo string) *workerPool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -153,7 +158,7 @@ func (r *repoManager) Lease(ctx context.Context, desc tangopb.BuildDescription) 
 	if !slot.created {
 		if err := r.createWorker(ctx, pool.originDir, slot.dir); err != nil {
 			pool.avail <- slot // return slot so others can retry
-			return nil, fmt.Errorf("create worker: %w", err)
+			return nil, newRepoManagerError(fmt.Errorf("create worker: %w", err))
 		}
 		slot.created = true
 	}
@@ -183,11 +188,11 @@ func (p *workerPool) ensureOrigin(ctx context.Context, g git.Interface, remote s
 	}
 
 	if err := os.MkdirAll(filepath.Dir(p.originDir), 0o755); err != nil {
-		return fmt.Errorf("mkdir origin dir: %w", err)
+		return newRepoManagerError(fmt.Errorf("mkdir origin dir: %w", err))
 	}
 	if err := g.Clone(ctx, remote, p.originDir, "-c", "gc.auto=0"); err != nil {
 		os.RemoveAll(p.originDir)
-		return fmt.Errorf("clone origin: %w", err)
+		return newRepoManagerError(fmt.Errorf("clone origin: %w", err))
 	}
 	p.cloned = true
 	return nil

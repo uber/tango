@@ -26,6 +26,7 @@ import (
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/bazelbuild/buildtools/labels"
 	set "github.com/deckarep/golang-set/v2"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -121,6 +122,14 @@ func EmptyResult() Result {
 	}
 }
 
+func newTargetHasherError(err error) error {
+	return tangoerrors.NewInternal(tangoerrors.FailureSourceTargetHasher, err)
+}
+
+func newTargetHasherUserError(err error) error {
+	return tangoerrors.NewUser(tangoerrors.FailureSourceTargetHasher, err)
+}
+
 // FromProto calculates a target hash graph based on a query result and workspace root
 // Because `bazel query --output=proto --order_output=full` is very expensive, we make all the
 // required computations in this function, so Bazel can be executed with `--order_output=no`.
@@ -132,7 +141,7 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 	for _, pattern := range hashConfig.ExcludedRegex {
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			return EmptyResult(), fmt.Errorf("failed to compile excluded regex pattern %q: %w", pattern, err)
+			return EmptyResult(), newTargetHasherUserError(fmt.Errorf("failed to compile excluded regex pattern %q: %w", pattern, err))
 		}
 		excludedRegex = append(excludedRegex, re)
 	}
@@ -245,7 +254,7 @@ func toTarget(t *buildpb.Target) (*Target, error) {
 			External: isExternalTarget(targetName),
 		}, nil
 	default:
-		return nil, fmt.Errorf("cannot handle target type %q", buildpb.Target_Discriminator_name[int32(*t.Type)])
+		return nil, newTargetHasherError(fmt.Errorf("cannot handle target type %q", buildpb.Target_Discriminator_name[int32(*t.Type)]))
 	}
 }
 
@@ -573,7 +582,7 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 					}
 					return []byte{}, nil
 				}
-				return nil, fmt.Errorf("cannot find external repository %s from external target %s", translatedExternalTargetName, p.TargetName)
+				return nil, newTargetHasherError(fmt.Errorf("cannot find external repository %s from external target %s", translatedExternalTargetName, p.TargetName))
 			}
 		} else {
 			// External rule target: hash via real deps so in-repo dep changes propagate correctly.
@@ -587,7 +596,7 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 		// //third_party/github.com/docker/docker:com_github_docker_docker_invalid_host_fix.patch
 
 		if l.Repository != "" {
-			return nil, fmt.Errorf("unexpected repository from target %s", p.TargetName)
+			return nil, newTargetHasherError(fmt.Errorf("unexpected repository from target %s", p.TargetName))
 		}
 
 		path := filepath.Join(p.WorkspaceRoot, l.Package, l.Target)

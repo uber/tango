@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 )
 
@@ -36,7 +37,7 @@ var _ storage.Storage = (*diskStorage)(nil)
 // The rootDir is the base directory where all blobs will be stored.
 func New(rootDir string) (storage.Storage, error) {
 	if rootDir == "" {
-		return nil, errors.New("root directory cannot be empty")
+		return nil, tangoerrors.NewUser(tangoerrors.FailureSourceStorage, errors.New("root directory cannot be empty"))
 	}
 	if err := os.MkdirAll(rootDir, 0o755); err != nil {
 		return nil, err
@@ -66,8 +67,7 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 		return ctx.Err()
 	}
 	if req.Reader == nil {
-		return errors.New("nil reader")
-	}
+		return tangoerrors.NewInternal(tangoerrors.FailureSourceStorage, errors.New("nil reader"))	}
 
 	path := filepath.Join(d.rootDir, req.Key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

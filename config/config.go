@@ -20,7 +20,12 @@ import (
 	"path/filepath"
 
 	yaml "github.com/goccy/go-yaml"
+	tangoerrors "github.com/uber/tango/core/errors"
 )
+
+func newConfigError(err error) error {
+	return tangoerrors.NewUser(tangoerrors.FailureSourceConfig, err)
+}
 
 var _ RepositoryConfigProvider = (*Config)(nil)
 
@@ -59,7 +64,7 @@ func Parse(configFilePath string) (*Config, error) {
 		config.Storage.Type = StorageTypeMemory
 	}
 	if config.Service.WorkerRootPath != "" && config.Service.RepoManagerClonePath == "" {
-		return nil, fmt.Errorf("service.repo_manager_clone_path must be set when worker_root_path is specified")
+		return nil, newConfigError(fmt.Errorf("service.repo_manager_clone_path must be set when worker_root_path is specified"))
 	}
 	if config.Service.RepoManagerClonePath == "" {
 		config.Service.RepoManagerClonePath = filepath.Join(os.TempDir(), "tango-repo-manager")
@@ -68,16 +73,16 @@ func Parse(configFilePath string) (*Config, error) {
 		config.Service.WorkerRootPath = filepath.Join(config.Service.RepoManagerClonePath, ".workers")
 	}
 	if config.Service.WorkerPoolSize <= 0 {
-		return nil, fmt.Errorf("service.worker_pool_size must be > 0, got %d", config.Service.WorkerPoolSize)
+		return nil, newConfigError(fmt.Errorf("service.worker_pool_size must be > 0, got %d", config.Service.WorkerPoolSize))
 	}
 	config.repositoryByRemote = make(map[string]*RepositoryConfig, len(config.Repository))
 	for i := range config.Repository {
 		remote := config.Repository[i].Remote
 		if remote == "" {
-			return nil, fmt.Errorf("repository[%d].remote must not be empty", i)
+			return nil, newConfigError(fmt.Errorf("repository[%d].remote must not be empty", i))
 		}
 		if _, exists := config.repositoryByRemote[remote]; exists {
-			return nil, fmt.Errorf("duplicate repository remote %q", remote)
+			return nil, newConfigError(fmt.Errorf("duplicate repository remote %q", remote))
 		}
 		config.repositoryByRemote[remote] = &config.Repository[i]
 	}

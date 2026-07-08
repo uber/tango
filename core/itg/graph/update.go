@@ -23,6 +23,7 @@ import (
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	set "github.com/deckarep/golang-set/v2"
+	"github.com/uber/tango/core/itg/utils"
 	"github.com/uber/tango/core/targethasher"
 )
 
@@ -195,7 +196,7 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 
 	target, ok := g.OptimizedTargets[id]
 	if !ok {
-		return nil, fmt.Errorf("target %d not found in graph", id)
+		return nil, utils.NewITGInternalError(fmt.Errorf("target %d not found in graph", id))
 	}
 	if target.Hash != nil {
 		return target.Hash, nil
@@ -206,7 +207,7 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 	var hash []byte
 	switch g.RuleTypeIDToString[target.RuleType] {
 	case targethasher.SourceFileType, targethasher.PackageGroup:
-		return nil, fmt.Errorf("source file or package group target %s should already have hash", g.TargetIDToString[id])
+		return nil, utils.NewITGInternalError(fmt.Errorf("source file or package group target %s should already have hash", g.TargetIDToString[id]))
 	case targethasher.GeneratedFileType:
 		var singleDep int
 		for dep := range target.Deps {
@@ -220,7 +221,7 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 		hash = dephash
 	default:
 		if target.HashWithoutDeps == nil {
-			return nil, fmt.Errorf("rule target %s should already have rule hash", g.TargetIDToString[id])
+			return nil, utils.NewITGInternalError(fmt.Errorf("rule target %s should already have rule hash", g.TargetIDToString[id]))
 		}
 		h := sha1.New()
 		h.Write(target.HashWithoutDeps)

@@ -10,6 +10,7 @@ go_library(
     importpath = "github.com/uber/tango/core/itg/graph",
     visibility = ["//visibility:public"],
     deps = [
+        "//core/itg/utils",
         "//core/targethasher",
         "@com_github_bazelbuild_buildtools//build_proto",
         "@com_github_deckarep_golang_set_v2//:golang-set",

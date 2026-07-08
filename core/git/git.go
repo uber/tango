@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/execcmd"
 )
 
@@ -132,7 +133,7 @@ func (c *impl) IsAncestor(ctx context.Context, ancestorRef, descendantRef string
 		}
 		// an exit code other than 1, or a non-ExitError failure (context canceled,
 		// git binary missing, I/O error), indicates the check itself failed.
-		return false, fmt.Errorf("check if ref %s is ancestor of %s: %w", ancestorRef, descendantRef, err)
+		return false, tangoerrors.NewInternal(tangoerrors.FailureSourceGit, fmt.Errorf("check if ref %s is ancestor of %s: %w", ancestorRef, descendantRef, err))
 	}
 	return true, nil
 }

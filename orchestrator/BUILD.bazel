@@ -13,6 +13,7 @@ go_library(
         "//config",
         "//core/bazel",
         "//core/common",
+        "//core/errors",
         "//core/git",
         "//core/repomanager",
         "//core/storage",

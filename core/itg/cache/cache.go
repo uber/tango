@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/uber/tango/core/itg/graph"
+	"github.com/uber/tango/core/itg/utils"
 	"github.com/uber/tango/core/storage"
 )
 
@@ -100,13 +101,13 @@ func (c *storageCache) Put(ctx context.Context, optimizedGraph *graph.OptimizedG
 func (c *storageCache) Get(ctx context.Context, key Key) (*graph.OptimizedGraph, error) {
 	resp, err := c.storage.Get(ctx, storage.DownloadRequest{Key: key.toStorageKey()})
 	if err != nil {
-		return nil, fmt.Errorf("download graph %s: %w", key.toStorageKey(), err)
+		return nil, utils.NewITGInternalError(fmt.Errorf("download graph %s: %w", key.toStorageKey(), err))
 	}
 	defer resp.ReadCloser.Close()
 
 	var optimizedGraph graph.OptimizedGraph
 	if err := gob.NewDecoder(resp.ReadCloser).Decode(&optimizedGraph); err != nil {
-		return nil, fmt.Errorf("decode graph %s: %w", key.toStorageKey(), err)
+		return nil, utils.NewITGInternalError(fmt.Errorf("decode graph %s: %w", key.toStorageKey(), err))
 	}
 	for _, t := range optimizedGraph.OptimizedTargets {
 		if t.Hash == nil {
@@ -172,18 +173,18 @@ func parseCacheFileName(name string) (Key, error) {
 	// name has the form "date/timestamp_sha" after the keyPrefix+remote are stripped.
 	parts := strings.SplitN(name, "/", 2)
 	if len(parts) != 2 {
-		return Key{}, fmt.Errorf("cache path should have form date/TIMESTAMP_SHA: %s", name)
+		return Key{}, utils.NewITGInternalError(fmt.Errorf("cache path should have form date/TIMESTAMP_SHA: %s", name))
 	}
 	filename := parts[1]
 
 	split := strings.SplitN(filename, "_", 2)
 	if len(split) != 2 {
-		return Key{}, fmt.Errorf("cache file name should have form TIMESTAMP_SHA: %s", filename)
+		return Key{}, utils.NewITGInternalError(fmt.Errorf("cache file name should have form TIMESTAMP_SHA: %s", filename))
 	}
 
 	ts, err := strconv.ParseInt(split[0], 10, 64)
 	if err != nil {
-		return Key{}, fmt.Errorf("parse timestamp: %w", err)
+		return Key{}, utils.NewITGInternalError(fmt.Errorf("parse timestamp: %w", err))
 	}
 
 	return Key{

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/uber/tango/core/itg/utils"
 	"github.com/uber/tango/core/targethasher"
 )
 
@@ -69,14 +70,14 @@ func (g *OptimizedGraph) removeTarget(target *OptimizedTarget, invalidated IntSe
 	for reverseDepID := range target.ReverseDeps {
 		reverseDepTarget, ok := g.OptimizedTargets[reverseDepID]
 		if !ok {
-			return fmt.Errorf("target %d not found", reverseDepID)
+			return utils.NewITGInternalError(fmt.Errorf("target %d not found", reverseDepID))
 		}
 		reverseDepTarget.Deps.Delete(id)
 	}
 	for depID := range target.Deps {
 		depTarget, ok := g.OptimizedTargets[depID]
 		if !ok {
-			return fmt.Errorf("target %d not found", depID)
+			return utils.NewITGInternalError(fmt.Errorf("target %d not found", depID))
 		}
 		depTarget.ReverseDeps.Delete(id)
 		if len(depTarget.ReverseDeps) == 0 && targethasher.CanBeRoot(g.RuleTypeIDToString[depTarget.RuleType]) {
@@ -142,13 +143,13 @@ func (g *OptimizedGraph) upsertTarget(target *targethasher.Target, invalidated I
 	for _, dep := range target.Deps {
 		depID, ok := g.TargetNameToID[dep]
 		if !ok {
-			return fmt.Errorf("dependency %s of target %s not found", dep, target.Name)
+			return utils.NewITGInternalError(fmt.Errorf("dependency %s of target %s not found", dep, target.Name))
 		}
 		depIDs.Insert(depID)
 
 		depTarget := g.getTargetByID(depID)
 		if depTarget == nil {
-			return fmt.Errorf("dependency target %s (id=%d) not found in graph", dep, depID)
+			return utils.NewITGInternalError(fmt.Errorf("dependency target %s (id=%d) not found in graph", dep, depID))
 		}
 		if depTarget.ReverseDeps == nil {
 			depTarget.ReverseDeps = NewIntSet()

@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/core/workspace"
 )
@@ -43,5 +44,5 @@ func NewShellGraphRunner(p ShellGraphRunnerParams) GraphRunner {
 }
 
 func (s *shellGraphRunner) Compute(ctx context.Context, ws workspace.Workspace) (targethasher.Result, error) {
-	return targethasher.EmptyResult(), errors.New("shellGraphRunner.Compute: not yet implemented")
+	return targethasher.EmptyResult(), tangoerrors.NewInternal(tangoerrors.FailureSourceBazel, errors.New("shellGraphRunner.Compute: not yet implemented"))
 }

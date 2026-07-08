@@ -5,7 +5,10 @@ go_library(
     srcs = ["changeanalyzer.go"],
     importpath = "github.com/uber/tango/core/itg/changeanalyzer",
     visibility = ["//visibility:public"],
-    deps = ["//core/git"],
+    deps = [
+        "//core/git",
+        "//core/itg/utils",
+    ],
 )
 
 go_test(

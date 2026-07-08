@@ -12,6 +12,7 @@ go_library(
     deps = [
         "//config",
         "//core/bazel",
+        "//core/errors",
         "//core/git",
         "//core/targethasher",
         "//core/workspace",

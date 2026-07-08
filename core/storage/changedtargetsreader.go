@@ -20,8 +20,13 @@ import (
 	"fmt"
 
 	gogio "github.com/gogo/protobuf/io"
+	tangoerrors "github.com/uber/tango/core/errors"
 	pb "github.com/uber/tango/tangopb"
 )
+
+func newStorageError(err error) error {
+	return tangoerrors.NewInternal(tangoerrors.FailureSourceStorage, err)
+}
 
 // ChangedTargetsReader reads GetChangedTargetsResponse messages from storage.
 type ChangedTargetsReader interface {
@@ -47,7 +52,7 @@ func WriteChangedTargetsStream(ctx context.Context, st Storage, key string, resp
 	w := gogio.NewDelimitedWriter(buf)
 	for _, r := range responses {
 		if err := w.WriteMsg(r); err != nil {
-			return fmt.Errorf("write delimited: %w", err)
+			return newStorageError(fmt.Errorf("write delimited: %w", err))
 		}
 	}
 	return st.Put(ctx, UploadRequest{Key: key, Reader: bytes.NewReader(buf.Bytes())})

@@ -6,6 +6,7 @@ go_library(
     importpath = "github.com/uber/tango/core/repomanager",
     visibility = ["//visibility:public"],
     deps = [
+        "//core/errors",
         "//core/git",
         "//core/workspace",
         "//tangopb",

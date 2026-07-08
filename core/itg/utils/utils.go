@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package workspaceutils
+package utils
 
 import (
 	"errors"
@@ -20,10 +20,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	tangoerrors "github.com/uber/tango/core/errors"
 )
 
-// ErrParentPackageNotExist is returned when parent package does not exist, i.e. there is no BUILD file in the parent directory path.
-var ErrParentPackageNotExist = errors.New("parent package does not exist")
+func NewITGInternalError(err error) error {
+	return tangoerrors.NewInternal(tangoerrors.FailureSourceITG, err)
+}
+
+func NewITGUserError(err error) error {
+	return tangoerrors.NewUser(tangoerrors.FailureSourceITG, err)
+}
+
+var ErrParentPackageNotExist = NewITGInternalError(errors.New("parent package does not exist"))
 
 var _buildFileNames = [...]string{"BUILD.bazel", "BUILD"}
 
@@ -63,12 +72,12 @@ func GetContainingPackage(workspaceRoot string, relPath string) (string, error) 
 			buildFile := filepath.Join(absDir, buildFileName)
 			s, err := os.Stat(buildFile)
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return "", fmt.Errorf("stat file for GetContainingPackage: %w", err)
+				return "", NewITGInternalError(fmt.Errorf("stat file for GetContainingPackage: %w", err))
 			}
 			if err == nil && !s.IsDir() {
 				rel, err := filepath.Rel(workspaceRoot, absDir)
 				if err != nil {
-					return "", fmt.Errorf("computing relative path for GetContainingPackage: %w", err)
+					return "", NewITGInternalError(fmt.Errorf("computing relative path for GetContainingPackage: %w", err))
 				}
 				if rel == "." {
 					rel = ""
@@ -83,7 +92,7 @@ func GetContainingPackage(workspaceRoot string, relPath string) (string, error) 
 
 		parentDir := filepath.Dir(absDir)
 		if parentDir == absDir {
-			return "", fmt.Errorf("unable to reach workspace root %q", workspaceRoot)
+			return "", NewITGInternalError(fmt.Errorf("unable to reach workspace root %q", workspaceRoot))
 		}
 		absDir = parentDir
 	}
