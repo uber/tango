@@ -174,7 +174,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			} else {
 				revision = request.GetSecondRevision()
 			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
+			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetRequestOptions(), request.GetBypassCache())
 			if err != nil || graphReader == nil {
 				results <- graphResult{order: idx, err: err}
 				return
