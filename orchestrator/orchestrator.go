@@ -28,11 +28,6 @@ type GetTargetGraphParam struct {
 	BypassCache bool
 }
 
-// ChangedTargetsParam is the input of ComputeChangedTargets
-type ChangedTargetsParam struct {
-	Req *tangopb.GetChangedTargetsRequest
-}
-
 // Orchestrator defines high-level execution interface that "does everything"
 type Orchestrator interface {
 	GetTargetGraph(ctx context.Context, param GetTargetGraphParam) (storage.GraphReader, error)

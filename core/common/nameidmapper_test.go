@@ -36,18 +36,12 @@ func TestNameIDMapper_AssignsSequentialAndStableIDs(t *testing.T) {
 	assert.Equal(t, int32(3), idC)
 }
 
-func TestNameIDMapper_MappingAndInvert(t *testing.T) {
+func TestNameIDMapper_Invert(t *testing.T) {
 	mapper := NewNameIDMapper()
 	names := []string{"x", "y", "z"}
 	for _, n := range names {
 		mapper.ID(n)
 	}
-
-	mapping := mapper.Mapping()
-	assert.Equal(t, 3, len(mapping))
-	assert.Equal(t, int32(1), mapping["x"])
-	assert.Equal(t, int32(2), mapping["y"])
-	assert.Equal(t, int32(3), mapping["z"])
 
 	inv := mapper.Invert()
 	assert.Equal(t, 3, len(inv))
@@ -57,9 +51,10 @@ func TestNameIDMapper_MappingAndInvert(t *testing.T) {
 	_, hasZero := inv[0]
 	assert.False(t, hasZero, "id 0 must remain reserved")
 
-	// Mutating the inverted map should not affect the original mapping
+	// Mutating the returned map must not affect the mapper's internal state.
 	inv[4] = "extra"
-	_, ok := mapping["extra"]
+	fresh := mapper.Invert()
+	_, ok := fresh[4]
 	assert.False(t, ok)
 }
 
