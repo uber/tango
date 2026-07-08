@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/targethasher"
 	pb "github.com/uber/tango/tangopb"
 )
@@ -198,7 +199,7 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 		result.Targets[name] = &targethasher.Target{Name: name, Hash: []byte{0}, RuleType: "go_library"}
 	}
 
-	responses, err := ResultToGetTargetGraphResponse(context.Background(), result)
+	responses, err := ResultToGetTargetGraphResponse(context.Background(), result, config.DefaultTargetChunkSize, config.DefaultMetadataMapChunkSize)
 	require.NoError(t, err)
 
 	// 2 target chunks + 1 metadata chunk (500 targets well under DefaultMetadataMapChunkSize)

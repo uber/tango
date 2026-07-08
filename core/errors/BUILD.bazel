@@ -2,7 +2,7 @@ load("@rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "errors",
-    srcs = ["errors.go"],
+    srcs = ["constants.go"],
     importpath = "github.com/uber/tango/core/errors",
     visibility = ["//visibility:public"],
 )

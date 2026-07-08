@@ -117,7 +117,7 @@ func HashRequestOptions(opts *tangopb.RequestOptions) string {
 }
 
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse
-func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result) ([]*tangopb.GetTargetGraphResponse, error) {
+func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result, targetChunkSize, metadataMapChunkSize int) ([]*tangopb.GetTargetGraphResponse, error) {
 	// Map target names to ids. This list is topologically sorted, so the ids are stable.
 	// IDs start at 1 — 0 is reserved as the proto3 "unset" sentinel so consumers using
 	// encoding/json (which honors `omitempty` on int32 fields) never silently lose a target.
@@ -203,14 +203,14 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 	attrStrValIDToVal := attrStrValMapper.Invert()
 
 	// chunk targets into multiple messages for streaming
-	responses := chunkTargets(optimizedTargets, config.DefaultTargetChunkSize)
+	responses := chunkTargets(optimizedTargets, targetChunkSize)
 	for _, meta := range ChunkMetadata(
 		targetIDToName,
 		ruleTypeIDToName,
 		tagIDToName,
 		attrNameIDToName,
 		attrStrValIDToVal,
-		config.DefaultMetadataMapChunkSize,
+		metadataMapChunkSize,
 	) {
 		responses = append(responses, &tangopb.GetTargetGraphResponse{
 			Item: &tangopb.GetTargetGraphResponse_Metadata{Metadata: meta},
