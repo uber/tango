@@ -48,7 +48,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 		zap.Any("build_description", request.GetBuildDescription()),
 	)
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetBuildDescription().GetRemote())})
-	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetOutputConfig(), request.GetRequestOptions(), request.GetBypassCache())
+	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetRequestOptions(), request.GetBypassCache())
 	if err != nil {
 		return err
 	}
@@ -83,10 +83,13 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	}
 }
 
-// getGraph retrieves the target graph for a given build description and output config.
+// getGraph retrieves the target graph for a given build description.
 // Returns nil response for cache miss or empty response cases (to indicate no send should happen).
-// TODO: remove output config from input parameters if not used in future.
-func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDescription, outputConfig *pb.OutputConfig, requestOptions *pb.RequestOptions, bypassCache bool) (storage.GraphReader, error) {
+// OutputConfig is deliberately not part of the orchestrator request: cache
+// entries store the full payload and stripping happens at send time, so
+// letting an orchestrator see it could poison the shared cache with
+// stripped graphs.
+func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDescription, requestOptions *pb.RequestOptions, bypassCache bool) (storage.GraphReader, error) {
 	start := time.Now()
 	if buildDescription == nil {
 		return nil, errors.New("build description is empty or invalid")
@@ -147,7 +150,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 		logger.Info("getGraph: bypass_cache=true, skipping cache lookup")
 	}
 	computeStart := time.Now()
-	graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: &pb.GetTargetGraphRequest{BuildDescription: buildDescription, OutputConfig: outputConfig, RequestOptions: requestOptions}, BypassCache: bypassCache})
+	graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: &pb.GetTargetGraphRequest{BuildDescription: buildDescription, RequestOptions: requestOptions}, BypassCache: bypassCache})
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
