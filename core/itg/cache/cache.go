@@ -19,7 +19,7 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
-	"path/filepath"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,10 +64,16 @@ var CompareKeyFunc = func(a Key, b Key) int {
 // EmptyKey means no cache found.
 var EmptyKey = Key{}
 
-// toStorageKey converts a cache key to its storage key: itg/{remote}/{date}/{committime}_{sha}
-func (k *Key) toStorageKey() string {
+// toStorageKey converts a cache key to its storage key: itg/{remote}/{date}/{committime}_{sha}.
+func (k *Key) toStorageKey() (string, error) {
+	if err := storage.ValidateKey(k.Remote); err != nil {
+		return "", fmt.Errorf("validate remote %q: %w", k.Remote, err)
+	}
+	if err := storage.ValidateKeySegment(k.BaseSha); err != nil {
+		return "", fmt.Errorf("validate base SHA %q: %w", k.BaseSha, err)
+	}
 	date := time.Unix(k.BaseCommitTimeSecond, 0).UTC().Format("2006-01-02")
-	return filepath.Join(keyPrefix, k.Remote, date, fmt.Sprintf("%d_%s", k.BaseCommitTimeSecond, k.BaseSha))
+	return path.Join(keyPrefix, k.Remote, date, fmt.Sprintf("%d_%s", k.BaseCommitTimeSecond, k.BaseSha)), nil
 }
 
 // NewStorageCache creates a new cache backed by a storage.Storage implementation.
@@ -82,7 +88,11 @@ type storageCache struct {
 }
 
 func (c *storageCache) Put(ctx context.Context, optimizedGraph *graph.OptimizedGraph, key Key) error {
-	exists, err := c.storage.Exists(ctx, key.toStorageKey())
+	storageKey, err := key.toStorageKey()
+	if err != nil {
+		return err
+	}
+	exists, err := c.storage.Exists(ctx, storageKey)
 	if err != nil {
 		return err
 	}
@@ -94,19 +104,23 @@ func (c *storageCache) Put(ctx context.Context, optimizedGraph *graph.OptimizedG
 	if err := gob.NewEncoder(&buf).Encode(optimizedGraph); err != nil {
 		return err
 	}
-	return c.storage.Put(ctx, storage.UploadRequest{Key: key.toStorageKey(), Reader: &buf})
+	return c.storage.Put(ctx, storage.UploadRequest{Key: storageKey, Reader: &buf})
 }
 
 func (c *storageCache) Get(ctx context.Context, key Key) (*graph.OptimizedGraph, error) {
-	resp, err := c.storage.Get(ctx, storage.DownloadRequest{Key: key.toStorageKey()})
+	storageKey, err := key.toStorageKey()
 	if err != nil {
-		return nil, fmt.Errorf("download graph %s: %w", key.toStorageKey(), err)
+		return nil, err
+	}
+	resp, err := c.storage.Get(ctx, storage.DownloadRequest{Key: storageKey})
+	if err != nil {
+		return nil, fmt.Errorf("download graph %s: %w", storageKey, err)
 	}
 	defer resp.ReadCloser.Close()
 
 	var optimizedGraph graph.OptimizedGraph
 	if err := gob.NewDecoder(resp.ReadCloser).Decode(&optimizedGraph); err != nil {
-		return nil, fmt.Errorf("decode graph %s: %w", key.toStorageKey(), err)
+		return nil, fmt.Errorf("decode graph %s: %w", storageKey, err)
 	}
 	for _, t := range optimizedGraph.OptimizedTargets {
 		if t.Hash == nil {
@@ -117,7 +131,10 @@ func (c *storageCache) Get(ctx context.Context, key Key) (*graph.OptimizedGraph,
 }
 
 func (c *storageCache) FloorKey(ctx context.Context, remote string, targetTimeSecond int64) (Key, error) {
-	remotePrefix := keyPrefix + remote + "/"
+	if err := storage.ValidateKey(remote); err != nil {
+		return EmptyKey, fmt.Errorf("validate remote %q: %w", remote, err)
+	}
+	remotePrefix := path.Join(keyPrefix, remote) + "/"
 	allKeys, err := c.storage.List(ctx, remotePrefix)
 	if err != nil {
 		return EmptyKey, err

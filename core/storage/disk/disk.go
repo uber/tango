@@ -17,10 +17,13 @@ package disk
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/uber/tango/core/storage"
@@ -49,8 +52,16 @@ func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (sto
 	if ctx.Err() != nil {
 		return storage.DownloadResponse{}, ctx.Err()
 	}
-	path := filepath.Join(d.rootDir, req.Key)
-	file, err := os.Open(path)
+	if err := storage.ValidateKey(req.Key); err != nil {
+		return storage.DownloadResponse{}, err
+	}
+	root, err := os.OpenRoot(d.rootDir)
+	if err != nil {
+		return storage.DownloadResponse{}, err
+	}
+	defer root.Close()
+
+	file, err := root.Open(req.Key)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
@@ -68,19 +79,27 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 	if req.Reader == nil {
 		return errors.New("nil reader")
 	}
-
-	path := filepath.Join(d.rootDir, req.Key)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := storage.ValidateKey(req.Key); err != nil {
 		return err
 	}
-
-	// Write atomically via temp file
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	root, err := os.OpenRoot(d.rootDir)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	defer root.Close()
+
+	dir := path.Dir(req.Key)
+	if dir != "." {
+		if err := root.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+
+	tmp, tmpPath, err := createTemp(root, dir)
+	if err != nil {
+		return err
+	}
+	defer root.Remove(tmpPath)
 
 	if _, err := io.Copy(tmp, &storage.CtxReader{Ctx: ctx, R: req.Reader}); err != nil {
 		tmp.Close()
@@ -89,7 +108,28 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, path)
+	return root.Rename(tmpPath, req.Key)
+}
+
+func createTemp(root *os.Root, dir string) (*os.File, string, error) {
+	for range 10 {
+		var random [16]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return nil, "", err
+		}
+		name := ".tmp-" + hex.EncodeToString(random[:])
+		if dir != "." {
+			name = path.Join(dir, name)
+		}
+		file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			return file, name, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, "", err
+		}
+	}
+	return nil, "", errors.New("create unique temporary file")
 }
 
 // Exists checks whether a blob exists in the storage.
@@ -97,7 +137,16 @@ func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
 	if ctx.Err() != nil {
 		return false, ctx.Err()
 	}
-	_, err := os.Stat(filepath.Join(d.rootDir, key))
+	if err := storage.ValidateKey(key); err != nil {
+		return false, err
+	}
+	root, err := os.OpenRoot(d.rootDir)
+	if err != nil {
+		return false, err
+	}
+	defer root.Close()
+
+	_, err = root.Stat(key)
 	if err == nil {
 		return true, nil
 	}
@@ -116,30 +165,37 @@ func (d *diskStorage) List(ctx context.Context, prefix string) ([]string, error)
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	walkSubdir := ""
-	if idx := strings.LastIndex(prefix, "/"); idx >= 0 {
-		walkSubdir = prefix[:idx+1]
+	if err := storage.ValidatePrefix(prefix); err != nil {
+		return nil, err
 	}
-	walkRoot := filepath.Join(d.rootDir, walkSubdir)
+	root, err := os.OpenRoot(d.rootDir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+
+	walkSubdir := "."
+	if idx := strings.LastIndex(prefix, "/"); idx >= 0 {
+		walkSubdir = prefix[:idx]
+	}
 	var keys []string
-	err := filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
+	err = fs.WalkDir(root.FS(), walkSubdir, func(key string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, fs.ErrNotExist) {
 				return nil
 			}
 			return err
 		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(d.rootDir, path)
-		if err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !strings.HasPrefix(rel, prefix) {
+		if entry.IsDir() {
 			return nil
 		}
-		keys = append(keys, rel)
+		if !strings.HasPrefix(key, prefix) {
+			return nil
+		}
+		keys = append(keys, key)
 		return nil
 	})
 	return keys, err

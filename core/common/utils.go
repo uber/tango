@@ -19,7 +19,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
-	"path/filepath"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -46,11 +46,17 @@ const (
 	DefaultMetadataMapChunkSize = 50_000
 )
 
-// ToShortRemote returns the short remote name given a git ssh remote string.
-// For example, "git@github:uber/tango" will return "uber/tango".
+// ToShortRemote returns the repository path from an SSH or URL remote.
+// For example, "git@github:uber/tango" and
+// "https://github.com/uber/tango" both return "uber/tango".
 func ToShortRemote(remote string) string {
-	strs := strings.Split(remote, ":")
-	return strs[len(strs)-1]
+	if parsed, err := url.Parse(remote); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		return strings.TrimLeft(parsed.Path, "/")
+	}
+	if idx := strings.LastIndex(remote, ":"); idx >= 0 {
+		remote = remote[idx+1:]
+	}
+	return strings.TrimLeft(remote, "/")
 }
 
 // GetGraphByTreeHash returns the cache path for the target graph by treehash.
@@ -59,11 +65,11 @@ func ToShortRemote(remote string) string {
 // requestOptions is folded into the key when any of its fields affect computation
 // (today: extra_exclude_files_regex). Empty/nil ⇒ legacy path unchanged.
 func GetGraphByTreeHash(remote, treehash string, strategy tangopb.ComputationStrategy, requestOptions *tangopb.RequestOptions) string {
-	path := filepath.Join(ToShortRemote(remote), "graphs", treehash, strategy.String())
+	key := strings.Join([]string{ToShortRemote(remote), "graphs", treehash, strategy.String()}, "/")
 	if hash := HashRequestOptions(requestOptions); hash != "" {
-		path += "_requests-options-" + hash
+		key += "_requests-options-" + hash
 	}
-	return path
+	return key
 }
 
 // GetTreehashCachePath returns the cache path for the treehash mapping.
@@ -71,11 +77,15 @@ func GetGraphByTreeHash(remote, treehash string, strategy tangopb.ComputationStr
 // requests), so neither requestOptions nor the computation strategy is part
 // of this key.
 func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
-	path := filepath.Join(ToShortRemote(buildDescription.Remote), "treehashes", fmt.Sprintf("base-sha-%s", buildDescription.BaseSha))
+	key := strings.Join([]string{
+		ToShortRemote(buildDescription.Remote),
+		"treehashes",
+		fmt.Sprintf("base-sha-%s", buildDescription.BaseSha),
+	}, "/")
 	if len(buildDescription.Requests) > 0 {
-		path += "_request-urls-" + GetReqURLsHash(buildDescription.Requests)
+		key += "_request-urls-" + GetReqURLsHash(buildDescription.Requests)
 	}
-	return path
+	return key
 }
 
 // GetComparedTargetsCachePath returns the cache path for a compared target graph result.
@@ -84,11 +94,11 @@ func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
 // requestOptions is folded into the key when any of its fields affect computation.
 // Empty/nil ⇒ legacy path unchanged.
 func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, requestOptions *tangopb.RequestOptions) string {
-	path := filepath.Join(ToShortRemote(remote), "compared-targets", treehash1+"_"+treehash2)
+	key := strings.Join([]string{ToShortRemote(remote), "compared-targets", treehash1 + "_" + treehash2}, "/")
 	if hash := HashRequestOptions(requestOptions); hash != "" {
-		path += "_requests-options-" + hash
+		key += "_requests-options-" + hash
 	}
-	return path
+	return key
 }
 
 // GetReqURLsHash returns a fixed-length MD5 hash of the sorted request URLs.

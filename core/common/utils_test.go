@@ -18,7 +18,7 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
-	"path/filepath"
+	"path"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,6 +49,16 @@ func TestToShortRemote(t *testing.T) {
 			remote: "git@github:org/project/sub",
 			want:   "org/project/sub",
 		},
+		{
+			name:   "HTTPS remote",
+			remote: "https://github.com/uber/tango.git",
+			want:   "uber/tango.git",
+		},
+		{
+			name:   "SSH URL remote",
+			remote: "ssh://git@github.com/uber/tango.git",
+			want:   "uber/tango.git",
+		},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -66,7 +76,7 @@ func TestGetGraphByTreeHash(t *testing.T) {
 
 	// Nil/empty options ⇒ no request-options suffix.
 	got := GetGraphByTreeHash(remote, treehash, strategy, nil)
-	assert.Equal(t, filepath.Join("uber/tango", "graphs", treehash, strategy.String()), got)
+	assert.Equal(t, path.Join("uber/tango", "graphs", treehash, strategy.String()), got)
 	assert.Equal(t, got, GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{}))
 
 	// Different strategies ⇒ different keys.
@@ -99,7 +109,7 @@ func TestGetTreehashCachePath(t *testing.T) {
 	h := md5.New()
 	h.Write([]byte("custom://foo/bar"))
 	h.Write([]byte("github://org/repo/pull/1"))
-	want := filepath.Join("uber/tango", "treehashes", "base-sha-deadbeef") + "_request-urls-" + fmt.Sprintf("%x", h.Sum(nil))
+	want := path.Join("uber/tango", "treehashes", "base-sha-deadbeef") + "_request-urls-" + fmt.Sprintf("%x", h.Sum(nil))
 	assert.Equal(t, want, got)
 }
 
@@ -149,7 +159,7 @@ func TestGetReqURLsHash(t *testing.T) {
 func TestGetComparedTargetsCachePath(t *testing.T) {
 	t.Parallel()
 	got := GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil)
-	assert.Equal(t, filepath.Join("uber/tango", "compared-targets", "abc_def"), got)
+	assert.Equal(t, path.Join("uber/tango", "compared-targets", "abc_def"), got)
 
 	// Nil/empty options ⇒ legacy path.
 	assert.Equal(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{}))

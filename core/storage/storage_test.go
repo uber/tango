@@ -115,6 +115,30 @@ func TestMemoryStorage_Exists(t *testing.T) {
 	assert.True(t, exists)
 }
 
+func TestMemoryStorage_RejectsInvalidKeys(t *testing.T) {
+	ctx := t.Context()
+	s := NewMemoryStorage()
+
+	resp, err := s.Get(ctx, DownloadRequest{Key: "../key"})
+	require.Error(t, err)
+	assert.True(t, IsInvalidKey(err))
+	assert.Nil(t, resp.ReadCloser)
+
+	err = s.Put(ctx, UploadRequest{Key: "../key", Reader: bytes.NewReader(nil)})
+	require.Error(t, err)
+	assert.True(t, IsInvalidKey(err))
+
+	exists, err := s.Exists(ctx, "../key")
+	require.Error(t, err)
+	assert.True(t, IsInvalidKey(err))
+	assert.False(t, exists)
+
+	keys, err := s.List(ctx, "../")
+	require.Error(t, err)
+	assert.True(t, IsInvalidKey(err))
+	assert.Nil(t, keys)
+}
+
 func TestNotFoundError_Error(t *testing.T) {
 	err := &NotFoundError{Path: "test/path"}
 	assert.NotEmpty(t, err.Error())
@@ -149,4 +173,79 @@ func TestIsNotFound(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestValidateKey(t *testing.T) {
+	tests := []struct {
+		name    string
+		key     string
+		wantErr bool
+	}{
+		{name: "Simple", key: "graph"},
+		{name: "Nested", key: "graphs/repo/treehash"},
+		{name: "Empty", key: "", wantErr: true},
+		{name: "CurrentDirectoryOnly", key: ".", wantErr: true},
+		{name: "Absolute", key: "/graph", wantErr: true},
+		{name: "ParentTraversal", key: "../graph", wantErr: true},
+		{name: "NestedTraversal", key: "graphs/repo/../../graph", wantErr: true},
+		{name: "CurrentDirectory", key: "graphs/./graph", wantErr: true},
+		{name: "EmptySegment", key: "graphs//graph", wantErr: true},
+		{name: "TrailingSlash", key: "graphs/", wantErr: true},
+		{name: "Backslash", key: `graphs\graph`, wantErr: true},
+		{name: "NUL", key: "graphs/\x00graph", wantErr: true},
+		{name: "DrivePrefix", key: "C:/graph", wantErr: true},
+		{name: "Colon", key: "graphs:graph", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateKey(tt.key)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.True(t, IsInvalidKey(err))
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidatePrefix(t *testing.T) {
+	tests := []struct {
+		name    string
+		prefix  string
+		wantErr bool
+	}{
+		{name: "Empty"},
+		{name: "PartialSegment", prefix: "graphs/repo"},
+		{name: "TrailingSlash", prefix: "graphs/repo/"},
+		{name: "DotPrefix", prefix: "."},
+		{name: "DotDotPrefix", prefix: ".."},
+		{name: "HiddenSegmentPrefix", prefix: "graphs/."},
+		{name: "ParentTraversal", prefix: "../", wantErr: true},
+		{name: "NestedParentTraversal", prefix: "graphs/../key", wantErr: true},
+		{name: "Root", prefix: "/", wantErr: true},
+		{name: "Colon", prefix: "graphs:key", wantErr: true},
+		{name: "RepeatedTrailingSlash", prefix: "graphs//", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePrefix(tt.prefix)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.True(t, IsInvalidKey(err))
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateKeySegment(t *testing.T) {
+	require.NoError(t, ValidateKeySegment("abc123"))
+
+	err := ValidateKeySegment("abc/123")
+	require.Error(t, err)
+	assert.True(t, IsInvalidKey(err))
 }

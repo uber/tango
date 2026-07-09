@@ -214,3 +214,72 @@ func TestStorage_Get_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.True(t, storage.IsNotFound(err))
 }
+
+func TestStorage_RejectsTraversal(t *testing.T) {
+	ctx := t.Context()
+	parentDir := t.TempDir()
+	rootDir := filepath.Join(parentDir, "storage")
+	s, err := New(rootDir)
+	require.NoError(t, err)
+
+	outsidePath := filepath.Join(parentDir, "outside")
+
+	t.Run("Put", func(t *testing.T) {
+		err := s.Put(ctx, storage.UploadRequest{
+			Key:    "../outside",
+			Reader: bytes.NewReader([]byte("secret")),
+		})
+		require.Error(t, err)
+		assert.True(t, storage.IsInvalidKey(err))
+		_, statErr := os.Stat(outsidePath)
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
+	})
+
+	require.NoError(t, os.WriteFile(outsidePath, []byte("secret"), 0o600))
+
+	t.Run("Get", func(t *testing.T) {
+		resp, err := s.Get(ctx, storage.DownloadRequest{Key: "../outside"})
+		require.Error(t, err)
+		assert.True(t, storage.IsInvalidKey(err))
+		assert.Nil(t, resp.ReadCloser)
+	})
+
+	t.Run("Exists", func(t *testing.T) {
+		exists, err := s.Exists(ctx, "../outside")
+		require.Error(t, err)
+		assert.True(t, storage.IsInvalidKey(err))
+		assert.False(t, exists)
+	})
+
+	t.Run("List", func(t *testing.T) {
+		keys, err := s.List(ctx, "../")
+		require.Error(t, err)
+		assert.True(t, storage.IsInvalidKey(err))
+		assert.Nil(t, keys)
+	})
+}
+
+func TestStorage_RejectsEscapingSymlink(t *testing.T) {
+	ctx := t.Context()
+	parentDir := t.TempDir()
+	rootDir := filepath.Join(parentDir, "storage")
+	s, err := New(rootDir)
+	require.NoError(t, err)
+
+	outsideDir := filepath.Join(parentDir, "outside")
+	require.NoError(t, os.Mkdir(outsideDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outsideDir, "secret"), []byte("secret"), 0o600))
+	require.NoError(t, os.Symlink(outsideDir, filepath.Join(rootDir, "link")))
+
+	resp, err := s.Get(ctx, storage.DownloadRequest{Key: "link/secret"})
+	require.Error(t, err)
+	assert.Nil(t, resp.ReadCloser)
+
+	err = s.Put(ctx, storage.UploadRequest{
+		Key:    "link/new",
+		Reader: bytes.NewReader([]byte("new")),
+	})
+	require.Error(t, err)
+	_, statErr := os.Stat(filepath.Join(outsideDir, "new"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
