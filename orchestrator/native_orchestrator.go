@@ -206,7 +206,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	responses, err := common.ResultToGetTargetGraphResponse(ctx, result)
+	responses, err := common.ResultToGetTargetGraphResponse(ctx, result, b.config.Service.Chunking.TargetChunkSize, b.config.Service.Chunking.MetadataMapChunkSize)
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph to response: %w", err)
 	}

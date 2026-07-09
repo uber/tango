@@ -20,10 +20,24 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
+
+var _testChunkConfig = config.ChunkConfig{
+	TargetChunkSize:        250,
+	ChangedTargetChunkSize: 125,
+	MetadataMapChunkSize:   50_000,
+}
+
+func newTestController(t *testing.T, appCtx context.Context, p Params) *controller {
+	t.Helper()
+	ctrl, err := NewController(appCtx, p)
+	require.NoError(t, err)
+	return ctrl.(*controller)
+}
 
 // TestNewController_StoresAppContext verifies the caller-supplied context is
 // retained and is the one observed by background goroutines.
@@ -32,13 +46,11 @@ func TestNewController_StoresAppContext(t *testing.T) {
 	appCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	server, err := NewController(appCtx, Params{
+	c := newTestController(t, appCtx, Params{
 		Logger:       zap.NewNop(),
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 		ChunkConfig:  _testChunkConfig,
 	})
-	require.NoError(t, err)
-	c := server.(*controller)
 
 	assert.Same(t, appCtx, c.appCtx)
 	assert.NoError(t, c.appCtx.Err())

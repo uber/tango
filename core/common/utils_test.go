@@ -186,7 +186,7 @@ func TestChunkTargets(t *testing.T) {
 func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 	t.Parallel()
 
-	// 500 targets with DefaultTargetChunkSize=250 → 2 target chunks + 1 metadata = 3 responses
+	// 500 targets with targetChunkSize=250 → 2 target chunks + 1 metadata = 3 responses
 	numTargets := 500
 	result := targethasher.Result{
 		TargetNames: make([]string, numTargets),
@@ -198,10 +198,10 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 		result.Targets[name] = &targethasher.Target{Name: name, Hash: []byte{0}, RuleType: "go_library"}
 	}
 
-	responses, err := ResultToGetTargetGraphResponse(context.Background(), result)
+	responses, err := ResultToGetTargetGraphResponse(context.Background(), result, 250, 50_000)
 	require.NoError(t, err)
 
-	// 2 target chunks + 1 metadata chunk (500 targets well under DefaultMetadataMapChunkSize)
+	// 2 target chunks + 1 metadata chunk (500 targets well under metadataMapChunkSize)
 	require.Len(t, responses, 3)
 
 	for _, resp := range responses[:2] {

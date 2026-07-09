@@ -33,7 +33,6 @@ go_test(
         "getchangedtargets_test.go",
         "gettargetgraph_test.go",
         "output_filter_test.go",
-        "testhelper_test.go",
     ],
     embed = [":controller"],
     deps = [
@@ -47,7 +46,6 @@ go_test(
         "@com_github_gogo_protobuf//io",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
-        "@com_github_uber_go_tally//:tally",
         "@org_uber_go_mock//gomock",
         "@org_uber_go_zap//:zap",
         "@org_uber_go_zap//zaptest",
