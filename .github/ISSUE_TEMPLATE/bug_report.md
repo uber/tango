@@ -23,7 +23,7 @@ A clear and concise description of what you expected to happen.
 
 ## Environment
 <!--
-- Go version: [e.g. 1.24.5]
+- Go version: [e.g. 1.25.0]
 - Bazel version: [e.g. 8.4.1]
 - Tango version/commit: [e.g. v0.1.0 or commit SHA]
 -->
