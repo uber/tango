@@ -144,7 +144,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	requests := make([]workspace.Request, 0, len(param.Req.BuildDescription.Requests))
 	factory := b.gitFactory
 	if factory == nil {
-		factory = git.New
+		factory = func(dir string) git.Interface { return git.New(dir, b.logger) }
 	}
 
 	gitModule := factory(ws.Path())

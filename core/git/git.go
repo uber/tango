@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -29,6 +28,7 @@ import (
 	"time"
 
 	"github.com/uber/tango/core/execcmd"
+	"go.uber.org/zap"
 )
 
 const (
@@ -63,13 +63,19 @@ type Interface interface {
 type impl struct {
 	directory string
 	runner    commandRunner
+	logger    *zap.SugaredLogger
 }
 
-// New creates new Git interface implementation
-func New(directory string) Interface {
+// New creates new Git interface implementation. A nil logger is tolerated and
+// discards log output.
+func New(directory string, logger *zap.SugaredLogger) Interface {
+	if logger == nil {
+		logger = zap.NewNop().Sugar()
+	}
 	return &impl{
 		directory: directory,
 		runner:    &osExecRunner{},
+		logger:    logger,
 	}
 }
 
@@ -205,12 +211,12 @@ func (c *impl) FileHashes(ctx context.Context, ref string) (map[string][]byte, e
 		x := strings.Split(line, "\t")
 		parts := strings.Fields(x[0]) // strings.Split is guaranteed to return an array of length 1
 		if len(parts) < 3 || len(x) < 2 {
-			log.Printf("skipping %q due to unexpected format\n", line)
+			c.logger.Warnw("skipping ls-tree line due to unexpected format", "line", line)
 			continue
 		}
 		hash, err := hex.DecodeString(parts[2])
 		if err != nil {
-			log.Printf("skipping %q due to parsing error %v\n", line, err)
+			c.logger.Warnw("skipping ls-tree line due to parsing error", "line", line, zap.Error(err))
 			continue
 		}
 		fileHashes[x[1]] = hash

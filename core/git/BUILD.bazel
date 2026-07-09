@@ -5,7 +5,10 @@ go_library(
     srcs = ["git.go"],
     importpath = "github.com/uber/tango/core/git",
     visibility = ["//visibility:public"],
-    deps = ["//core/execcmd"],
+    deps = [
+        "//core/execcmd",
+        "@org_uber_go_zap//:zap",
+    ],
 )
 
 go_test(
@@ -15,5 +18,6 @@ go_test(
     deps = [
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
+        "@org_uber_go_zap//:zap",
     ],
 )

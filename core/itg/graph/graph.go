@@ -15,7 +15,6 @@
 package graph
 
 import (
-	"log"
 	"maps"
 	"slices"
 
@@ -245,7 +244,6 @@ func (g *OptimizedGraph) GetReverseDepsAsTargets(targetNames []string) []targeth
 	for _, targetName := range targetNames {
 		targetID, ok := g.TargetNameToID[targetName]
 		if !ok {
-			log.Printf("starting target %s is not in the graph", targetName)
 			continue
 		}
 		reverseDepIDs = g.getNewReverseDeps(targetID, reverseDepIDs, visited)

@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 type runnerCall struct {
@@ -253,6 +254,7 @@ func TestDefaultGit_FileHashes(t *testing.T) {
 			g := &impl{
 				directory: "/repo",
 				runner:    m,
+				logger:    zap.NewNop().Sugar(),
 			}
 			m.out = tt.giveOutput
 			m.err = tt.wantError

@@ -83,7 +83,7 @@ func run() error {
 	defer os.RemoveAll(workerRootPath)
 
 	rm, err := repomanager.NewRepoManager(appCtx, repomanager.Params{
-		Git:                  git.New(repoManagerClonePath),
+		Git:                  git.New(repoManagerClonePath, logger),
 		Logger:               logger,
 		RepoManagerClonePath: repoManagerClonePath,
 		WorkerRootPath:       workerRootPath,
@@ -96,7 +96,7 @@ func run() error {
 		Storage:     store,
 		RepoManager: rm,
 		Logger:      logger,
-		GitFactory:  git.New,
+		GitFactory:  func(dir string) git.Interface { return git.New(dir, logger) },
 		Config:      cfg,
 	})
 	if err != nil {

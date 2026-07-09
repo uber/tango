@@ -157,7 +157,7 @@ func (r *repoManager) Lease(ctx context.Context, desc tangopb.BuildDescription) 
 		slot.created = true
 	}
 
-	repoGit := git.New(slot.dir)
+	repoGit := git.New(slot.dir, r.logger)
 	return workspace.NewWorkspace(workspace.WorkspaceParams{
 		Path:   slot.dir,
 		Git:    repoGit,
