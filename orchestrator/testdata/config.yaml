@@ -11,3 +11,7 @@ repository:
 
 service:
   worker_pool_size: 3
+  chunking:
+    target_chunk_size: 250
+    changed_target_chunk_size: 125
+    metadata_map_chunk_size: 50000

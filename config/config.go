@@ -70,11 +70,23 @@ func Parse(configFilePath string) (*Config, error) {
 	if config.Service.WorkerPoolSize <= 0 {
 		return nil, fmt.Errorf("service.worker_pool_size must be > 0, got %d", config.Service.WorkerPoolSize)
 	}
+	if config.Service.Chunking.TargetChunkSize <= 0 {
+		return nil, fmt.Errorf("service.chunking.target_chunk_size must be > 0, got %d", config.Service.Chunking.TargetChunkSize)
+	}
+	if config.Service.Chunking.ChangedTargetChunkSize <= 0 {
+		return nil, fmt.Errorf("service.chunking.changed_target_chunk_size must be > 0, got %d", config.Service.Chunking.ChangedTargetChunkSize)
+	}
+	if config.Service.Chunking.MetadataMapChunkSize <= 0 {
+		return nil, fmt.Errorf("service.chunking.metadata_map_chunk_size must be > 0, got %d", config.Service.Chunking.MetadataMapChunkSize)
+	}
 	config.repositoryByRemote = make(map[string]*RepositoryConfig, len(config.Repository))
 	for i := range config.Repository {
 		remote := config.Repository[i].Remote
 		if remote == "" {
 			return nil, fmt.Errorf("repository[%d].remote must not be empty", i)
+		}
+		if config.Repository[i].QueryTimeout <= 0 {
+			return nil, fmt.Errorf("repository[%d].query_timeout must be > 0", i)
 		}
 		if _, exists := config.repositoryByRemote[remote]; exists {
 			return nil, fmt.Errorf("duplicate repository remote %q", remote)

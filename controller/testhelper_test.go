@@ -16,11 +16,19 @@ package controller
 
 import (
 	"context"
+	"testing"
 
 	"github.com/uber-go/tally"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/common"
 	"go.uber.org/zap"
 )
+
+var _testChunkConfig = config.ChunkConfig{
+	TargetChunkSize:        common.DefaultTargetChunkSize,
+	ChangedTargetChunkSize: common.DefaultChangedTargetChunkSize,
+	MetadataMapChunkSize:   common.DefaultMetadataMapChunkSize,
+}
 
 func newTestController(logger *zap.Logger) *controller {
 	return &controller{
@@ -32,4 +40,16 @@ func newTestController(logger *zap.Logger) *controller {
 		totalDurationBuckets:   _totalDurationBuckets,
 		appCtx:                 context.Background(),
 	}
+}
+
+func mustNewController(t *testing.T, appCtx context.Context, p Params) *controller {
+	t.Helper()
+	if p.ChunkConfig == (config.ChunkConfig{}) {
+		p.ChunkConfig = _testChunkConfig
+	}
+	c, err := NewController(appCtx, p)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	return c.(*controller)
 }

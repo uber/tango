@@ -31,10 +31,10 @@ func TestNewController_StoresAppContext(t *testing.T) {
 	appCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := NewController(appCtx, Params{
+	c := mustNewController(t, appCtx, Params{
 		Logger:       zap.NewNop(),
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
-	}).(*controller)
+	})
 
 	assert.Same(t, appCtx, c.appCtx)
 	assert.NoError(t, c.appCtx.Err())

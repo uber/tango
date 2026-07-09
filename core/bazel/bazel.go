@@ -30,11 +30,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// default query timeout if not provided in config
-	_queryTimeout = 15 * time.Minute
-)
-
 type QueryRequest struct {
 	Query          string
 	StartupOptions []string
@@ -84,8 +79,8 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 		}
 	}
 	timeout := p.QueryTimeout
-	if timeout == 0 {
-		timeout = _queryTimeout
+	if timeout <= 0 {
+		return nil, fmt.Errorf("query timeout must be > 0, got %s", timeout)
 	}
 	bazelCommand, err := detectBazelExecutable(ctx, p.BazelCommand)
 	if err != nil {

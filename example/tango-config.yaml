@@ -24,3 +24,7 @@ service:
   repo_manager_clone_path: "/tmp/tango-repo-manager"
   # root for worker checkouts; defaults to repo_manager_clone_path/.workers
   worker_root_path: "/tmp/tango/workers"
+  chunking:
+    target_chunk_size: 250
+    changed_target_chunk_size: 125
+    metadata_map_chunk_size: 50000

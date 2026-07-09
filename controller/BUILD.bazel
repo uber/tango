@@ -37,6 +37,7 @@ go_test(
     ],
     embed = [":controller"],
     deps = [
+        "//config",
         "//core/common",
         "//core/storage",
         "//core/storage/storagemock",

@@ -16,11 +16,11 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
-	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
@@ -59,34 +59,31 @@ type controller struct {
 
 // NewController creates a new controller. appCtx is cancelled on process
 // shutdown to abort background work.
-func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
+func NewController(appCtx context.Context, p Params) (pb.TangoYARPCServer, error) {
 	scope := p.Scope
 	if scope == nil {
 		scope = tally.NoopScope
 	}
-	targetChunkSize := p.ChunkConfig.TargetChunkSize
-	if targetChunkSize <= 0 {
-		targetChunkSize = common.DefaultTargetChunkSize
+	if p.ChunkConfig.TargetChunkSize <= 0 {
+		return nil, fmt.Errorf("target_chunk_size must be > 0, got %d", p.ChunkConfig.TargetChunkSize)
 	}
-	changedTargetChunkSize := p.ChunkConfig.ChangedTargetChunkSize
-	if changedTargetChunkSize <= 0 {
-		changedTargetChunkSize = common.DefaultChangedTargetChunkSize
+	if p.ChunkConfig.ChangedTargetChunkSize <= 0 {
+		return nil, fmt.Errorf("changed_target_chunk_size must be > 0, got %d", p.ChunkConfig.ChangedTargetChunkSize)
 	}
-	metadataMapChunkSize := p.ChunkConfig.MetadataMapChunkSize
-	if metadataMapChunkSize <= 0 {
-		metadataMapChunkSize = common.DefaultMetadataMapChunkSize
+	if p.ChunkConfig.MetadataMapChunkSize <= 0 {
+		return nil, fmt.Errorf("metadata_map_chunk_size must be > 0, got %d", p.ChunkConfig.MetadataMapChunkSize)
 	}
 	return &controller{
 		logger:                 p.Logger,
 		storage:                p.Storage,
 		orchestrator:           p.Orchestrator,
 		scope:                  scope.SubScope("controller"),
-		targetChunkSize:        targetChunkSize,
-		changedTargetChunkSize: changedTargetChunkSize,
-		metadataMapChunkSize:   metadataMapChunkSize,
+		targetChunkSize:        p.ChunkConfig.TargetChunkSize,
+		changedTargetChunkSize: p.ChunkConfig.ChangedTargetChunkSize,
+		metadataMapChunkSize:   p.ChunkConfig.MetadataMapChunkSize,
 		totalDurationBuckets:   _totalDurationBuckets,
 		appCtx:                 appCtx,
-	}
+	}, nil
 }
 
 // linkRequestCtx returns a context derived from reqCtx that is also cancelled

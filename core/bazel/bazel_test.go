@@ -18,6 +18,7 @@ import (
 	"context"
 	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,6 +37,7 @@ func TestNewBazelClient(t *testing.T) {
 				WorkspacePath: "/tmp/test",
 				EnvVarsMap:    map[string]string{"FOO": "bar"},
 				Logger:        zap.NewNop().Sugar(),
+				QueryTimeout:  5 * time.Minute,
 				ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
 					return nil
 				},
@@ -48,6 +50,7 @@ func TestNewBazelClient(t *testing.T) {
 				WorkspacePath: "/tmp/test",
 				EnvVarsMap:    map[string]string{"FOO": "bar"},
 				Logger:        zap.NewNop().Sugar(),
+				QueryTimeout:  5 * time.Minute,
 			},
 		},
 	}
@@ -72,6 +75,7 @@ func TestNewBazelClient_WithNilExecCommand(t *testing.T) {
 		WorkspacePath: "/workspace",
 		EnvVarsMap:    map[string]string{"KEY": "value"},
 		Logger:        zap.NewNop().Sugar(),
+		QueryTimeout:  5 * time.Minute,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, client)
