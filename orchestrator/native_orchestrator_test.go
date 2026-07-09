@@ -24,6 +24,7 @@ import (
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
 	repomanagermock "github.com/uber/tango/core/repomanager/mock"
@@ -64,11 +65,11 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 
 	o, err := NewNativeOrchestrator(context.Background(), Params{
-		Storage:        st,
-		RepoManager:    rm,
-		Logger:         zaptest.NewLogger(t).Sugar(),
-		GitFactory:     func(dir string) git.Interface { return g },
-		ConfigFilePath: "testdata/config.yaml",
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t).Sugar(),
+		GitFactory:  func(dir string) git.Interface { return g },
+		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
 	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
@@ -124,12 +125,12 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		},
 	}}, nil)
 	o, err := NewNativeOrchestrator(context.Background(), Params{
-		Storage:        st,
-		RepoManager:    rm,
-		Logger:         zaptest.NewLogger(t).Sugar(),
-		GitFactory:     func(dir string) git.Interface { return g },
-		GraphRunner:    graphRunner,
-		ConfigFilePath: "testdata/config.yaml",
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t).Sugar(),
+		GitFactory:  func(dir string) git.Interface { return g },
+		GraphRunner: graphRunner,
+		Config:      testConfig(t),
 	})
 	require.Nil(t, err)
 	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
@@ -157,11 +158,11 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 	o, err := NewNativeOrchestrator(context.Background(), Params{
-		Storage:        st,
-		RepoManager:    rm,
-		Logger:         zaptest.NewLogger(t).Sugar(),
-		GitFactory:     func(dir string) git.Interface { return g },
-		ConfigFilePath: "testdata/config.yaml",
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t).Sugar(),
+		GitFactory:  func(dir string) git.Interface { return g },
+		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
 	resp, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
@@ -197,11 +198,11 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 	o, err := NewNativeOrchestrator(context.Background(), Params{
-		Storage:        st,
-		RepoManager:    rm,
-		Logger:         zaptest.NewLogger(t).Sugar(),
-		GitFactory:     func(dir string) git.Interface { return g },
-		ConfigFilePath: "testdata/config.yaml",
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t).Sugar(),
+		GitFactory:  func(dir string) git.Interface { return g },
+		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
 	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
@@ -219,4 +220,28 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	graph, rerr := reader.Read()
 	require.NoError(t, rerr)
 	require.NotNil(t, graph)
+}
+
+func TestNewNativeOrchestrator_usesProvidedConfig(t *testing.T) {
+	cfg := testConfig(t)
+
+	o, err := NewNativeOrchestrator(t.Context(), Params{Config: cfg})
+	require.NoError(t, err)
+
+	native, ok := o.(*nativeOrchestrator)
+	require.True(t, ok)
+	assert.Same(t, cfg, native.config)
+}
+
+func TestNewNativeOrchestrator_requiresConfig(t *testing.T) {
+	_, err := NewNativeOrchestrator(t.Context(), Params{})
+	require.EqualError(t, err, "config is required")
+}
+
+func testConfig(t *testing.T) *config.Config {
+	t.Helper()
+
+	cfg, err := config.Parse("testdata/config.yaml")
+	require.NoError(t, err)
+	return cfg
 }
