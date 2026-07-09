@@ -58,13 +58,13 @@ type nativeOrchestrator struct {
 }
 
 type Params struct {
-	Storage        storage.Storage
-	RepoManager    repomanager.RepoManager
-	Logger         *zap.SugaredLogger
-	Scope          tally.Scope
-	GitFactory     func(directory string) git.Interface
-	GraphRunner    graphrunner.GraphRunner
-	ConfigFilePath string
+	Storage     storage.Storage
+	RepoManager repomanager.RepoManager
+	Logger      *zap.SugaredLogger
+	Scope       tally.Scope
+	GitFactory  func(directory string) git.Interface
+	GraphRunner graphrunner.GraphRunner
+	Config      *config.Config // required
 }
 
 // NewNativeOrchestrator creates a new native orchestrator with the given parameters.
@@ -73,15 +73,13 @@ type Params struct {
 // shutting down (e.g. wire it to SIGTERM/SIGINT in main) to abort any
 // background goroutines the orchestrator spawns.
 func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, error) {
+	if p.Config == nil {
+		return nil, errors.New("config is required")
+	}
+
 	scope := p.Scope
 	if scope == nil {
 		scope = tally.NoopScope
-	}
-
-	// parse the config file
-	cfg, err := config.Parse(p.ConfigFilePath)
-	if err != nil {
-		return nil, fmt.Errorf("parse config %q: %w", p.ConfigFilePath, err)
 	}
 
 	return &nativeOrchestrator{
@@ -92,7 +90,7 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 		gitFactory:  p.GitFactory,
 		graphRunner: p.GraphRunner,
 		appCtx:      appCtx,
-		config:      cfg,
+		config:      p.Config,
 	}, nil
 }
 

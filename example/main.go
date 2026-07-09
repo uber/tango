@@ -90,11 +90,11 @@ func run() error {
 		PoolSize:             cfg.Service.WorkerPoolSize,
 	})
 	orch, err := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
-		Storage:        store,
-		RepoManager:    rm,
-		Logger:         logger,
-		GitFactory:     git.New,
-		ConfigFilePath: configFilePath,
+		Storage:     store,
+		RepoManager: rm,
+		Logger:      logger,
+		GitFactory:  git.New,
+		Config:      cfg,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to setup orchestrator: %w", err)

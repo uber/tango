@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "targetdiff",
+    srcs = ["compare.go"],
+    importpath = "github.com/uber/tango/internal/targetdiff",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "targetdiff_test",
+    srcs = ["compare_test.go"],
+    embed = [":targetdiff"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

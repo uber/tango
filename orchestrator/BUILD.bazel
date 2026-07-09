@@ -30,6 +30,7 @@ go_test(
     data = glob(["testdata/**"]),
     embed = [":orchestrator"],
     deps = [
+        "//config",
         "//core/git",
         "//core/git/gitmock",
         "//core/repomanager/mock",
