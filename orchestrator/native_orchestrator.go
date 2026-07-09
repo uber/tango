@@ -142,12 +142,12 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	logger.Infow("GetTargetGraph: Checked out base revision")
 
 	requests := make([]workspace.Request, 0, len(param.Req.BuildDescription.Requests))
-	factory := b.gitFactory
-	if factory == nil {
-		factory = func(dir string) git.Interface { return git.New(dir, b.logger) }
+	gitFactory := b.gitFactory
+	if gitFactory == nil {
+		gitFactory = func(dir string) git.Interface { return git.New(dir, b.logger) }
 	}
 
-	gitModule := factory(ws.Path())
+	gitModule := gitFactory(ws.Path())
 	for _, req := range param.Req.BuildDescription.Requests {
 		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.BaseSha, req.GetCommit(), logger)
 		if err != nil {
