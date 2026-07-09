@@ -734,19 +734,6 @@ func isExternalTarget(targetName string) bool {
 	return strings.HasPrefix(targetName, externalWorkspaceFilePrefix)
 }
 
-func isExternalWorkspaceType(t *buildpb.Target) bool {
-	switch *t.Type {
-	case buildpb.Target_SOURCE_FILE:
-		return strings.HasPrefix(t.SourceFile.GetName(), externalWorkspaceRulePrefix)
-	case buildpb.Target_RULE:
-		return strings.HasPrefix(t.Rule.GetName(), externalWorkspaceRulePrefix)
-	case buildpb.Target_GENERATED_FILE:
-		return strings.HasPrefix(t.GeneratedFile.GetName(), externalWorkspaceRulePrefix)
-	default:
-		return false
-	}
-}
-
 func isExcluded(targetName string, excludedRegex []*regexp.Regexp) bool {
 	for _, re := range excludedRegex {
 		if re.MatchString(targetName) {
