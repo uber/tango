@@ -30,6 +30,7 @@ import (
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
+	"github.com/uber/tango/internal/targetdiff"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
@@ -146,7 +147,7 @@ func TestCompareTargetGraphs(t *testing.T) {
 		},
 	}
 
-	response, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
+	response, err := compareTargetGraphsForTest(t.Context(), c, []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 }
@@ -613,7 +614,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := compareTargetGraphsForTest(t.Context(), c, first, second, -1)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 	cs := res[0].GetChangedTargets()
@@ -685,7 +686,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := compareTargetGraphsForTest(t.Context(), c, first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -758,7 +759,7 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	// Hash-only change on a rule with no own-config change and no reachable
 	// seed: under "trust the hasher" semantics, an orphan CHANGED rule with
 	// no upstream explanation becomes a distance-0 seed itself.
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := compareTargetGraphsForTest(t.Context(), c, first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -825,7 +826,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := compareTargetGraphsForTest(t.Context(), c, first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -907,7 +908,7 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := compareTargetGraphsForTest(t.Context(), c, first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -989,7 +990,7 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := compareTargetGraphsForTest(t.Context(), c, first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -997,72 +998,6 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 	got := cs.GetChangedTargets()[0]
 	require.Equal(t, pb.CHANGE_TYPE_CHANGED, got.GetChangeType(), "Target with new attribute added should be marked as CHANGED")
 	assert.Equal(t, int32(0), got.GetDistance(), "Target with own-config (attrs) change is a seed (distance 0)")
-}
-
-func TestComputeDistances(t *testing.T) {
-	// Graph:
-	//   A (seed)    <-  B (CHANGED)  <-  C (CHANGED)
-	//   D (seed)    <---------------------┘
-	//
-	// Expected distances:
-	//   A=0  B=1  C=1  D=0
-
-	meta := &pb.Metadata{
-		TargetIdMapping: map[int32]string{
-			1: "A", 2: "B", 3: "C", 4: "D",
-		},
-	}
-
-	targetsByName := map[string]*pb.OptimizedTarget{
-		"A": {Id: 1},
-		"B": {Id: 2, DirectDependencies: []int32{1}},    // [A]
-		"C": {Id: 3, DirectDependencies: []int32{2, 4}}, // [B, D]
-		"D": {Id: 4},
-	}
-
-	changedByName := map[string]*pb.ChangedTarget{
-		"A": {ChangeType: pb.CHANGE_TYPE_CHANGED},
-		"B": {ChangeType: pb.CHANGE_TYPE_CHANGED},
-		"C": {ChangeType: pb.CHANGE_TYPE_CHANGED},
-		"D": {ChangeType: pb.CHANGE_TYPE_CHANGED},
-	}
-
-	seeds := map[string]struct{}{
-		"A": {},
-		"D": {},
-	}
-
-	require.NoError(t, computeDistances(context.Background(), changedByName, targetsByName, meta, seeds, -1))
-
-	assert.Equal(t, int32(0), changedByName["A"].GetDistance(), "seed target A should have distance 0")
-	assert.Equal(t, int32(1), changedByName["B"].GetDistance(), "B depends on seed A, distance should be 1")
-	assert.Equal(t, int32(1), changedByName["C"].GetDistance(), "C depends on seed D (shorter than 2 via A→B), distance should be 1")
-	assert.Equal(t, int32(0), changedByName["D"].GetDistance(), "seed target D should have distance 0")
-}
-
-func TestComputeDistances_OrphanCHANGEDStaysAtMinusOne(t *testing.T) {
-	// computeDistances is pure BFS — it only assigns distances to seeds it's
-	// handed and reverse-dep paths. Seeding orphan CHANGED targets is the
-	// caller's job (pass 2 in compareTargetGraphs implements "trust the
-	// hasher"). When called in isolation with an unseeded CHANGED target
-	// that has no reverse-dep path, that target keeps distance=-1.
-	meta := &pb.Metadata{
-		TargetIdMapping: map[int32]string{1: "A", 2: "E"},
-	}
-	targetsByName := map[string]*pb.OptimizedTarget{
-		"A": {Id: 1},
-		"E": {Id: 2},
-	}
-	changedByName := map[string]*pb.ChangedTarget{
-		"A": {ChangeType: pb.CHANGE_TYPE_CHANGED},
-		"E": {ChangeType: pb.CHANGE_TYPE_CHANGED},
-	}
-	seeds := map[string]struct{}{"A": {}}
-
-	err := computeDistances(context.Background(), changedByName, targetsByName, meta, seeds, -1)
-	require.NoError(t, err)
-	assert.Equal(t, int32(0), changedByName["A"].GetDistance(), "seed A at distance 0")
-	assert.Equal(t, int32(-1), changedByName["E"].GetDistance(), "orphan E stays at -1 in pure BFS")
 }
 
 func TestSendTrimmedChangedTargets_MetadataAlwaysForwarded(t *testing.T) {
@@ -1182,79 +1117,6 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	assert.NotNil(t, sent[1].GetMetadata())
 }
 
-func TestComputeDistances_NewTargetsGetDistanceZero(t *testing.T) {
-	// Graph:
-	//   A (seed)  <-  B (CHANGED)
-	//   N (NEW, no deps — seeded)
-	//
-	// NEW targets must be seeded (distance 0).
-
-	meta := &pb.Metadata{
-		TargetIdMapping: map[int32]string{
-			1: "A", 2: "B", 3: "N",
-		},
-	}
-
-	targetsByName := map[string]*pb.OptimizedTarget{
-		"A": {Id: 1},
-		"B": {Id: 2, DirectDependencies: []int32{1}},
-		"N": {Id: 3},
-	}
-
-	changedByName := map[string]*pb.ChangedTarget{
-		"A": {ChangeType: pb.CHANGE_TYPE_CHANGED},
-		"B": {ChangeType: pb.CHANGE_TYPE_CHANGED},
-		"N": {ChangeType: pb.CHANGE_TYPE_NEW},
-	}
-
-	seeds := map[string]struct{}{
-		"A": {},
-		"N": {},
-	}
-
-	require.NoError(t, computeDistances(context.Background(), changedByName, targetsByName, meta, seeds, -1))
-
-	assert.Equal(t, int32(0), changedByName["A"].GetDistance(), "seed target A should have distance 0")
-	assert.Equal(t, int32(1), changedByName["B"].GetDistance(), "B depends on seed A, distance should be 1")
-	assert.Equal(t, int32(0), changedByName["N"].GetDistance(), "NEW target N should have distance 0")
-}
-
-func TestComputeDistances_NewTargetsWithMaxDistance(t *testing.T) {
-	// When maxDistance is set, NEW targets should still get distance 0
-	// and not be filtered out.
-
-	meta := &pb.Metadata{
-		TargetIdMapping: map[int32]string{1: "N"},
-	}
-
-	targetsByName := map[string]*pb.OptimizedTarget{
-		"N": {Id: 1},
-	}
-
-	changedByName := map[string]*pb.ChangedTarget{
-		"N": {ChangeType: pb.CHANGE_TYPE_NEW},
-	}
-
-	seeds := map[string]struct{}{
-		"N": {},
-	}
-
-	require.NoError(t, computeDistances(context.Background(), changedByName, targetsByName, meta, seeds, 1))
-
-	assert.Equal(t, int32(0), changedByName["N"].GetDistance(), "NEW target should have distance 0 even with maxDistance set")
-}
-
-func TestComputeDistances_NilMetadata(t *testing.T) {
-	changedByName := map[string]*pb.ChangedTarget{
-		"A": {ChangeType: pb.CHANGE_TYPE_CHANGED},
-	}
-	seeds := map[string]struct{}{"A": {}}
-	require.NoError(t, computeDistances(context.Background(), changedByName, nil, nil, seeds, -1))
-	// With nil metadata, function returns early before setting any distance — the
-	// proto-default value (0) is what the caller observes.
-	assert.Equal(t, int32(0), changedByName["A"].GetDistance())
-}
-
 func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 	c := newTestController(zaptest.NewLogger(t))
 
@@ -1329,7 +1191,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := compareTargetGraphsForTest(t.Context(), c, first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1411,7 +1273,7 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := compareTargetGraphsForTest(t.Context(), c, first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1465,7 +1327,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), zap.NewNop(), first, second, -1)
+	res, err := compareTargetGraphsForTest(t.Context(), c, first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1516,4 +1378,16 @@ func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) 
 		}
 	}
 	assert.True(t, gotDeleted, "DELETED entry at distance 0 must survive max_distance=1")
+}
+
+func compareTargetGraphsForTest(ctx context.Context, c *controller, first, second []*pb.GetTargetGraphResponse, maxDistance int32) ([]*pb.GetChangedTargetsResponse, error) {
+	result, err := targetdiff.Compare(ctx, targetdiff.Request{
+		Before:      decodeTargetGraph(first),
+		After:       decodeTargetGraph(second),
+		MaxDistance: maxDistance,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return c.encodeChangedTargets(result), nil
 }
