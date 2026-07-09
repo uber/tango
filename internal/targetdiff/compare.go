@@ -23,14 +23,22 @@ const _sourceFileRuleType = "source file"
 
 // Target describes a build target using semantic names.
 type Target struct {
-	Name         string
-	Hash         string
-	RuleType     string
+	// Name is the target's canonical build label.
+	Name string
+	// Hash identifies the target's state, including relevant dependencies.
+	Hash string
+	// RuleType identifies the kind of build rule or source file.
+	RuleType string
+	// Dependencies contains the names of the target's direct dependencies.
 	Dependencies []string
-	Tags         []string
-	Attributes   map[string]string
-	Root         bool
-	External     bool
+	// Tags contains the target's build tags.
+	Tags []string
+	// Attributes maps build attribute names to their values.
+	Attributes map[string]string
+	// Root reports whether the target is a root of the target graph.
+	Root bool
+	// External reports whether the target belongs to an external repository.
+	External bool
 }
 
 // Graph contains targets keyed by target name.
@@ -48,16 +56,23 @@ const (
 
 // ChangedTarget describes one target that differs between revisions.
 type ChangedTarget struct {
+	// ChangeType classifies the difference between revisions.
 	ChangeType ChangeType
-	Before     *Target
-	After      *Target
-	Distance   int32
+	// Before is the target in the earlier revision, or nil for a new target.
+	Before *Target
+	// After is the target in the later revision, or nil for a deleted target.
+	After *Target
+	// Distance is the reverse-dependency distance from the nearest direct change,
+	// or -1 when no direct change is reachable within the requested limit.
+	Distance int32
 }
 
 // Request describes two target graphs to compare.
 type Request struct {
+	// Before is the target graph from the earlier revision.
 	Before Graph
-	After  Graph
+	// After is the target graph from the later revision.
+	After Graph
 
 	// MaxDistance limits reverse-dependency traversal when non-negative.
 	MaxDistance int32
@@ -65,6 +80,7 @@ type Request struct {
 
 // Result contains targets that differ between revisions.
 type Result struct {
+	// ChangedTargets contains the classified differences between the graphs.
 	ChangedTargets []*ChangedTarget
 }
 
