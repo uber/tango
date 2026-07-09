@@ -52,9 +52,9 @@ type UploadRequest struct {
 
 // Storage is an abstract interface for remote data storage.
 //
-// Keys are opaque strings; the interface assigns no meaning to paths,
-// directories, or segments. Any structure (for example, slash-delimited names)
-// is a caller convention. A backend may reject keys it cannot represent.
+// Keys are opaque strings; the interface has no concept of paths, directories,
+// or segments. Any structure (e.g. "/"-delimited paths) is a convention of the
+// caller, and implementations MUST NOT impose path semantics of their own.
 type Storage interface {
 	// Get downloads a blob from the storage. On success the returned DownloadResponse.ReadCloser
 	// is non-nil and the caller owns closing it. Returns NotFoundError when the blob is not found.

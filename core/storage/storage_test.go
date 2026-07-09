@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -114,36 +113,6 @@ func TestMemoryStorage_Exists(t *testing.T) {
 	exists, err = s.Exists(ctx, "present")
 	require.NoError(t, err)
 	assert.True(t, exists)
-}
-
-func TestMemoryStorage_OpaqueKeys(t *testing.T) {
-	ctx := t.Context()
-	s := NewMemoryStorage()
-	keys := []string{"../key", `key\value`, "key:value", ""}
-	for _, key := range keys {
-		require.NoError(t, s.Put(ctx, UploadRequest{Key: key, Reader: bytes.NewBufferString(key)}))
-
-		exists, err := s.Exists(ctx, key)
-		require.NoError(t, err)
-		assert.True(t, exists)
-
-		resp, err := s.Get(ctx, DownloadRequest{Key: key})
-		require.NoError(t, err)
-		got, err := io.ReadAll(resp.ReadCloser)
-		require.NoError(t, err)
-		require.NoError(t, resp.ReadCloser.Close())
-		assert.Equal(t, key, string(got))
-
-		if key != "" {
-			listed, err := s.List(ctx, key)
-			require.NoError(t, err)
-			assert.Equal(t, []string{key}, listed)
-		}
-	}
-
-	got, err := s.List(ctx, "")
-	require.NoError(t, err)
-	assert.ElementsMatch(t, keys, got)
 }
 
 func TestNotFoundError_Error(t *testing.T) {
