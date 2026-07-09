@@ -19,7 +19,7 @@ import "context"
 
 const _cancelCheckInteral = 4096
 
-const _sourceFileRuleType  = "source file"
+const _sourceFileRuleType = "source file"
 
 // Target describes a build target using semantic names.
 type Target struct {
