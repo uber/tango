@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -31,10 +32,13 @@ func TestNewController_StoresAppContext(t *testing.T) {
 	appCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := mustNewController(t, appCtx, Params{
+	server, err := NewController(appCtx, Params{
 		Logger:       zap.NewNop(),
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		ChunkConfig:  _testChunkConfig,
 	})
+	require.NoError(t, err)
+	c := server.(*controller)
 
 	assert.Same(t, appCtx, c.appCtx)
 	assert.NoError(t, c.appCtx.Err())
