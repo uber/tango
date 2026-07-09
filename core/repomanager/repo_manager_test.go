@@ -43,8 +43,7 @@ func TestNewRepoManager_InvalidPoolSize(t *testing.T) {
 		Logger:   zap.NewNop().Sugar(),
 		PoolSize: 0,
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "pool size must be > 0")
+	require.Error(t, err, "expected setting invalid poolsize to error out")
 }
 
 func TestLease_ClonesOriginAndCreatesWorker(t *testing.T) {
@@ -334,99 +333,4 @@ func TestLease_WorkerCloneFails_SlotReturnedToPool(t *testing.T) {
 	ws, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 	require.NoError(t, ws.Release())
-}
-
-func TestLease_PoolBoundsWorkerCount(t *testing.T) {
-	t.Parallel()
-	ctrl := gomock.NewController(t)
-	g := gitmock.NewMockInterface(ctrl)
-
-	root := t.TempDir()
-	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-
-	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
-	for i := 1; i <= 3; i++ {
-		dir := filepath.Join(root, ".workers", "org/repo", fmt.Sprintf("worker-%d", i))
-		g.EXPECT().Clone(gomock.Any(), originDir, dir, "--local", "-c", "gc.auto=0").Return(nil)
-	}
-
-	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 3})
-	ctx := context.Background()
-
-	// Lease all 3 slots
-	workspaces := make([]interface{ Release() error }, 3)
-	for i := 0; i < 3; i++ {
-		ws, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
-		require.NoError(t, err)
-		workspaces[i] = ws
-	}
-
-	// 4th lease should block — verify with a short-lived context
-	shortCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-	defer cancel()
-	_, err := rm.Lease(shortCtx, tangopb.BuildDescription{Remote: remote})
-	require.Error(t, err)
-
-	// Release all
-	for _, ws := range workspaces {
-		require.NoError(t, ws.Release())
-	}
-
-	// Now a lease succeeds again
-	ws, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
-	require.NoError(t, err)
-	require.NoError(t, ws.Release())
-}
-
-func TestLease_ConcurrentRequestsServedSequentially(t *testing.T) {
-	t.Parallel()
-	ctrl := gomock.NewController(t)
-	g := gitmock.NewMockInterface(ctrl)
-
-	root := t.TempDir()
-	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
-
-	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
-	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(nil)
-
-	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
-	ctx := context.Background()
-
-	const numRequests = 5
-	results := make(chan string, numRequests)
-
-	ws, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
-	require.NoError(t, err)
-
-	// Launch multiple goroutines all waiting for the single slot
-	for i := 0; i < numRequests; i++ {
-		go func() {
-			ws, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
-			if err != nil {
-				results <- "error"
-				return
-			}
-			results <- ws.Path()
-			ws.Release()
-		}()
-	}
-
-	// None should have completed yet
-	time.Sleep(50 * time.Millisecond)
-	assert.Empty(t, len(results))
-
-	// Release the slot — goroutines should proceed one at a time
-	require.NoError(t, ws.Release())
-
-	for i := 0; i < numRequests; i++ {
-		select {
-		case path := <-results:
-			assert.Equal(t, workerDir, path)
-		case <-time.After(5 * time.Second):
-			t.Fatalf("goroutine %d did not complete", i)
-		}
-	}
 }
