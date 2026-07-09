@@ -29,6 +29,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protodelim"
 )
@@ -78,6 +79,7 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 }
 
 func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
 	mockCmd := NewMockCommander(ctrl)
 	var cmdCtx context.Context
@@ -112,6 +114,7 @@ func TestExecuteQueryInternal_PreCanceledContext(t *testing.T) {
 }
 
 func TestExecuteQueryInternal_CancelDuringParsing(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
 	mockCmd := NewMockCommander(ctrl)
 	ctx, cancel := context.WithCancel(context.Background())

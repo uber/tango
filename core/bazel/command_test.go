@@ -28,9 +28,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/execcmd"
+	"go.uber.org/goleak"
 )
 
 func TestExecCommander_OutputFilesDoNotWaitForDescendant(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	stdout, err := os.CreateTemp(t.TempDir(), "stdout-*")
 	require.NoError(t, err)
 	defer stdout.Close()
@@ -54,6 +56,7 @@ func TestExecCommander_OutputFilesDoNotWaitForDescendant(t *testing.T) {
 }
 
 func TestExecCommander_ContextCancellation(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	readyReader, readyWriter, err := os.Pipe()
