@@ -98,7 +98,7 @@ func NewRepoManager(appCtx context.Context, p Params) (RepoManager, error) {
 		poolSize:             p.PoolSize,
 		pools:                make(map[string]*workerPool),
 		appCtx:               appCtx,
-	}
+	}, nil
 }
 
 func (r *repoManager) poolFor(repo string) *workerPool {
