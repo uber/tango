@@ -1,4 +1,4 @@
-.PHONY: build test proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
+.PHONY: build clean clean-proto gazelle help lint proto run-client-changed-targets run-client-get-graph run-server test
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -14,6 +14,12 @@ test:
 	@echo "Running all tests..."
 	@$(BAZEL) test //...
 	@echo "All tests passed!"
+
+# Run golangci-lint
+lint: ## Run golangci-lint
+	@echo "Running golangci-lint..."
+	@golangci-lint run ./...
+	@echo "Lint passed!"
 
 # Generate protobuf files using protoc
 proto:
@@ -82,6 +88,7 @@ help:
 	@echo ""
 	@echo "Build & Test:"
 	@echo "  make build         - Build all targets"
+	@echo "  make lint          - Run golangci-lint"
 	@echo "  make test          - Run all tests"
 	@echo "  make gazelle       - Update BUILD.bazel files"
 	@echo "  make clean         - Clean generated files and binaries"

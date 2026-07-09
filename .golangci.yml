@@ -1,0 +1,48 @@
+version: "2"
+
+run:
+  go: "1.24"
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - goconst
+    - gocyclo
+    - misspell
+    - revive
+  settings:
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    gocyclo:
+      min-complexity: 30
+    revive:
+      rules:
+        - name: blank-imports
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+  exclusions:
+    generated: strict
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - goconst
+    paths:
+      - tangopb
+      - tangopbmock
+      - ".*/mock/"
+      - ".*mock/"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
