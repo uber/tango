@@ -17,7 +17,6 @@ package config
 // RepositoryConfig holds configuration for a single repository.
 type RepositoryConfig struct {
 	Remote                 string   `yaml:"remote"`
-	DefaultBranch          string   `yaml:"default_branch"`
 	FullHashRepos          []string `yaml:"full_hash_repos"`
 	ExcludedFiles          []string `yaml:"excluded_files"`
 	ExcludeExternalTargets bool     `yaml:"exclude_external_targets"`
