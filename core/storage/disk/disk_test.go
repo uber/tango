@@ -215,7 +215,7 @@ func TestStorage_Get_NotFound(t *testing.T) {
 	assert.True(t, storage.IsNotFound(err))
 }
 
-func TestStorage_RejectsTraversal(t *testing.T) {
+func TestStorage_RejectsUnsafeKeys(t *testing.T) {
 	ctx := t.Context()
 	parentDir := t.TempDir()
 	rootDir := filepath.Join(parentDir, "storage")
@@ -223,40 +223,50 @@ func TestStorage_RejectsTraversal(t *testing.T) {
 	require.NoError(t, err)
 
 	outsidePath := filepath.Join(parentDir, "outside")
+	unsafeKeys := []string{
+		"../outside",
+		"dir/../outside",
+		"/absolute",
+		"dir/./key",
+		"dir//key",
+		"dir/",
+		".",
+		"..",
+		"",
+		`dir\key`,
+		"C:/key",
+		"dir/\x00key",
+	}
+	for _, key := range unsafeKeys {
+		t.Run(key, func(t *testing.T) {
+			err := s.Put(ctx, storage.UploadRequest{Key: key, Reader: bytes.NewReader([]byte("secret"))})
+			require.Error(t, err)
 
-	t.Run("Put", func(t *testing.T) {
-		err := s.Put(ctx, storage.UploadRequest{
-			Key:    "../outside",
-			Reader: bytes.NewReader([]byte("secret")),
+			resp, err := s.Get(ctx, storage.DownloadRequest{Key: key})
+			require.Error(t, err)
+			assert.Nil(t, resp.ReadCloser)
+
+			exists, err := s.Exists(ctx, key)
+			require.Error(t, err)
+			assert.False(t, exists)
 		})
-		require.Error(t, err)
-		assert.True(t, storage.IsInvalidKey(err))
-		_, statErr := os.Stat(outsidePath)
-		assert.ErrorIs(t, statErr, os.ErrNotExist)
-	})
+	}
 
-	require.NoError(t, os.WriteFile(outsidePath, []byte("secret"), 0o600))
-
-	t.Run("Get", func(t *testing.T) {
-		resp, err := s.Get(ctx, storage.DownloadRequest{Key: "../outside"})
-		require.Error(t, err)
-		assert.True(t, storage.IsInvalidKey(err))
-		assert.Nil(t, resp.ReadCloser)
-	})
-
-	t.Run("Exists", func(t *testing.T) {
-		exists, err := s.Exists(ctx, "../outside")
-		require.Error(t, err)
-		assert.True(t, storage.IsInvalidKey(err))
-		assert.False(t, exists)
-	})
-
-	t.Run("List", func(t *testing.T) {
-		keys, err := s.List(ctx, "../")
-		require.Error(t, err)
-		assert.True(t, storage.IsInvalidKey(err))
+	unsafePrefixes := []string{"../", "dir/../", "/", "dir/./", "dir//", `dir\`, "C:/", "dir/\x00"}
+	for _, prefix := range unsafePrefixes {
+		keys, err := s.List(ctx, prefix)
+		require.Error(t, err, prefix)
 		assert.Nil(t, keys)
-	})
+	}
+
+	_, statErr := os.Stat(outsidePath)
+	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestValidatePrefix_AllowsLiteralDotPrefixes(t *testing.T) {
+	require.NoError(t, validatePrefix("."))
+	require.NoError(t, validatePrefix(".."))
+	require.NoError(t, validatePrefix("dir/."))
 }
 
 func TestStorage_RejectsEscapingSymlink(t *testing.T) {

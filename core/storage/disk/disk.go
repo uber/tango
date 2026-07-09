@@ -20,11 +20,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/uber/tango/core/storage"
 )
@@ -52,7 +54,7 @@ func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (sto
 	if ctx.Err() != nil {
 		return storage.DownloadResponse{}, ctx.Err()
 	}
-	if err := storage.ValidateKey(req.Key); err != nil {
+	if err := validateKey(req.Key); err != nil {
 		return storage.DownloadResponse{}, err
 	}
 	root, err := os.OpenRoot(d.rootDir)
@@ -79,7 +81,7 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 	if req.Reader == nil {
 		return errors.New("nil reader")
 	}
-	if err := storage.ValidateKey(req.Key); err != nil {
+	if err := validateKey(req.Key); err != nil {
 		return err
 	}
 	root, err := os.OpenRoot(d.rootDir)
@@ -132,12 +134,19 @@ func createTemp(root *os.Root, dir string) (*os.File, string, error) {
 	return nil, "", errors.New("create unique temporary file")
 }
 
+func validateKey(key string) error {
+	if key == "" || key == "." || !fs.ValidPath(key) || strings.ContainsAny(key, "\\:\x00") {
+		return fmt.Errorf("invalid disk storage key %q", key)
+	}
+	return nil
+}
+
 // Exists checks whether a blob exists in the storage.
 func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
 	if ctx.Err() != nil {
 		return false, ctx.Err()
 	}
-	if err := storage.ValidateKey(key); err != nil {
+	if err := validateKey(key); err != nil {
 		return false, err
 	}
 	root, err := os.OpenRoot(d.rootDir)
@@ -165,7 +174,7 @@ func (d *diskStorage) List(ctx context.Context, prefix string) ([]string, error)
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	if err := storage.ValidatePrefix(prefix); err != nil {
+	if err := validatePrefix(prefix); err != nil {
 		return nil, err
 	}
 	root, err := os.OpenRoot(d.rootDir)
@@ -199,4 +208,21 @@ func (d *diskStorage) List(ctx context.Context, prefix string) ([]string, error)
 		return nil
 	})
 	return keys, err
+}
+
+func validatePrefix(prefix string) error {
+	if prefix == "" {
+		return nil
+	}
+	if !utf8.ValidString(prefix) || strings.HasPrefix(prefix, "/") || strings.ContainsAny(prefix, "\\:\x00") {
+		return fmt.Errorf("invalid disk storage prefix %q", prefix)
+	}
+	idx := strings.LastIndex(prefix, "/")
+	if idx < 0 {
+		return nil
+	}
+	if err := validateKey(prefix[:idx]); err != nil {
+		return fmt.Errorf("invalid disk storage prefix %q: %w", prefix, err)
+	}
+	return nil
 }

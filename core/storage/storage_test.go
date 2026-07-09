@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -115,28 +116,34 @@ func TestMemoryStorage_Exists(t *testing.T) {
 	assert.True(t, exists)
 }
 
-func TestMemoryStorage_RejectsInvalidKeys(t *testing.T) {
+func TestMemoryStorage_OpaqueKeys(t *testing.T) {
 	ctx := t.Context()
 	s := NewMemoryStorage()
+	keys := []string{"../key", `key\value`, "key:value", ""}
+	for _, key := range keys {
+		require.NoError(t, s.Put(ctx, UploadRequest{Key: key, Reader: bytes.NewBufferString(key)}))
 
-	resp, err := s.Get(ctx, DownloadRequest{Key: "../key"})
-	require.Error(t, err)
-	assert.True(t, IsInvalidKey(err))
-	assert.Nil(t, resp.ReadCloser)
+		exists, err := s.Exists(ctx, key)
+		require.NoError(t, err)
+		assert.True(t, exists)
 
-	err = s.Put(ctx, UploadRequest{Key: "../key", Reader: bytes.NewReader(nil)})
-	require.Error(t, err)
-	assert.True(t, IsInvalidKey(err))
+		resp, err := s.Get(ctx, DownloadRequest{Key: key})
+		require.NoError(t, err)
+		got, err := io.ReadAll(resp.ReadCloser)
+		require.NoError(t, err)
+		require.NoError(t, resp.ReadCloser.Close())
+		assert.Equal(t, key, string(got))
 
-	exists, err := s.Exists(ctx, "../key")
-	require.Error(t, err)
-	assert.True(t, IsInvalidKey(err))
-	assert.False(t, exists)
+		if key != "" {
+			listed, err := s.List(ctx, key)
+			require.NoError(t, err)
+			assert.Equal(t, []string{key}, listed)
+		}
+	}
 
-	keys, err := s.List(ctx, "../")
-	require.Error(t, err)
-	assert.True(t, IsInvalidKey(err))
-	assert.Nil(t, keys)
+	got, err := s.List(ctx, "")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, keys, got)
 }
 
 func TestNotFoundError_Error(t *testing.T) {
@@ -173,79 +180,4 @@ func TestIsNotFound(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-func TestValidateKey(t *testing.T) {
-	tests := []struct {
-		name    string
-		key     string
-		wantErr bool
-	}{
-		{name: "Simple", key: "graph"},
-		{name: "Nested", key: "graphs/repo/treehash"},
-		{name: "Empty", key: "", wantErr: true},
-		{name: "CurrentDirectoryOnly", key: ".", wantErr: true},
-		{name: "Absolute", key: "/graph", wantErr: true},
-		{name: "ParentTraversal", key: "../graph", wantErr: true},
-		{name: "NestedTraversal", key: "graphs/repo/../../graph", wantErr: true},
-		{name: "CurrentDirectory", key: "graphs/./graph", wantErr: true},
-		{name: "EmptySegment", key: "graphs//graph", wantErr: true},
-		{name: "TrailingSlash", key: "graphs/", wantErr: true},
-		{name: "Backslash", key: `graphs\graph`, wantErr: true},
-		{name: "NUL", key: "graphs/\x00graph", wantErr: true},
-		{name: "DrivePrefix", key: "C:/graph", wantErr: true},
-		{name: "Colon", key: "graphs:graph", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateKey(tt.key)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.True(t, IsInvalidKey(err))
-				return
-			}
-			require.NoError(t, err)
-		})
-	}
-}
-
-func TestValidatePrefix(t *testing.T) {
-	tests := []struct {
-		name    string
-		prefix  string
-		wantErr bool
-	}{
-		{name: "Empty"},
-		{name: "PartialSegment", prefix: "graphs/repo"},
-		{name: "TrailingSlash", prefix: "graphs/repo/"},
-		{name: "DotPrefix", prefix: "."},
-		{name: "DotDotPrefix", prefix: ".."},
-		{name: "HiddenSegmentPrefix", prefix: "graphs/."},
-		{name: "ParentTraversal", prefix: "../", wantErr: true},
-		{name: "NestedParentTraversal", prefix: "graphs/../key", wantErr: true},
-		{name: "Root", prefix: "/", wantErr: true},
-		{name: "Colon", prefix: "graphs:key", wantErr: true},
-		{name: "RepeatedTrailingSlash", prefix: "graphs//", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidatePrefix(tt.prefix)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.True(t, IsInvalidKey(err))
-				return
-			}
-			require.NoError(t, err)
-		})
-	}
-}
-
-func TestValidateKeySegment(t *testing.T) {
-	require.NoError(t, ValidateKeySegment("abc123"))
-
-	err := ValidateKeySegment("abc/123")
-	require.Error(t, err)
-	assert.True(t, IsInvalidKey(err))
 }

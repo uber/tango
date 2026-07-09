@@ -17,8 +17,10 @@ package common
 import (
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"sort"
 	"strings"
@@ -65,7 +67,12 @@ func ToShortRemote(remote string) string {
 // requestOptions is folded into the key when any of its fields affect computation
 // (today: extra_exclude_files_regex). Empty/nil ⇒ legacy path unchanged.
 func GetGraphByTreeHash(remote, treehash string, strategy tangopb.ComputationStrategy, requestOptions *tangopb.RequestOptions) string {
-	key := strings.Join([]string{ToShortRemote(remote), "graphs", treehash, strategy.String()}, "/")
+	key := strings.Join([]string{
+		safeCachePath(ToShortRemote(remote)),
+		"graphs",
+		safeCacheSegment(treehash),
+		strategy.String(),
+	}, "/")
 	if hash := HashRequestOptions(requestOptions); hash != "" {
 		key += "_requests-options-" + hash
 	}
@@ -78,9 +85,9 @@ func GetGraphByTreeHash(remote, treehash string, strategy tangopb.ComputationStr
 // of this key.
 func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
 	key := strings.Join([]string{
-		ToShortRemote(buildDescription.Remote),
+		safeCachePath(ToShortRemote(buildDescription.Remote)),
 		"treehashes",
-		fmt.Sprintf("base-sha-%s", buildDescription.BaseSha),
+		"base-sha-" + safeCacheSegment(buildDescription.BaseSha),
 	}, "/")
 	if len(buildDescription.Requests) > 0 {
 		key += "_request-urls-" + GetReqURLsHash(buildDescription.Requests)
@@ -94,11 +101,36 @@ func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
 // requestOptions is folded into the key when any of its fields affect computation.
 // Empty/nil ⇒ legacy path unchanged.
 func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, requestOptions *tangopb.RequestOptions) string {
-	key := strings.Join([]string{ToShortRemote(remote), "compared-targets", treehash1 + "_" + treehash2}, "/")
+	key := strings.Join([]string{
+		safeCachePath(ToShortRemote(remote)),
+		"compared-targets",
+		safeCacheSegment(treehash1) + "_" + safeCacheSegment(treehash2),
+	}, "/")
 	if hash := HashRequestOptions(requestOptions); hash != "" {
 		key += "_requests-options-" + hash
 	}
 	return key
+}
+
+func safeCachePath(value string) string {
+	if value != "" && value != "." && fs.ValidPath(value) && !strings.ContainsAny(value, "\\:\x00") {
+		return value
+	}
+	return unsafeCacheComponent(value)
+}
+
+func safeCacheSegment(value string) string {
+	if !strings.Contains(value, "/") {
+		if safe := safeCachePath(value); safe == value {
+			return value
+		}
+	}
+	return unsafeCacheComponent(value)
+}
+
+func unsafeCacheComponent(value string) string {
+	hash := sha256.Sum256([]byte(value))
+	return "unsafe-" + hex.EncodeToString(hash[:])
 }
 
 // GetReqURLsHash returns a fixed-length MD5 hash of the sorted request URLs.

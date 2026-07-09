@@ -37,9 +37,6 @@ func NewMemoryStorage() Storage {
 
 // Get downloads a blob from the storage. Return NotFoundError when the blob is not found.
 func (m *memoryStorage) Get(ctx context.Context, req DownloadRequest) (DownloadResponse, error) {
-	if err := ValidateKey(req.Key); err != nil {
-		return DownloadResponse{}, err
-	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	b, ok := m.data[req.Key]
@@ -53,9 +50,6 @@ func (m *memoryStorage) Put(ctx context.Context, req UploadRequest) error {
 	if req.Reader == nil {
 		return errors.New("nil reader")
 	}
-	if err := ValidateKey(req.Key); err != nil {
-		return err
-	}
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, &CtxReader{Ctx: ctx, R: req.Reader}); err != nil {
 		return err
@@ -67,9 +61,6 @@ func (m *memoryStorage) Put(ctx context.Context, req UploadRequest) error {
 }
 
 func (m *memoryStorage) Exists(ctx context.Context, key string) (bool, error) {
-	if err := ValidateKey(key); err != nil {
-		return false, err
-	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	_, ok := m.data[key]
@@ -77,9 +68,6 @@ func (m *memoryStorage) Exists(ctx context.Context, key string) (bool, error) {
 }
 
 func (m *memoryStorage) List(ctx context.Context, prefix string) ([]string, error) {
-	if err := ValidatePrefix(prefix); err != nil {
-		return nil, err
-	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var keys []string

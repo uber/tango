@@ -18,7 +18,9 @@ import (
 	"context"
 	"crypto/md5"
 	"fmt"
+	"io/fs"
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -166,6 +168,32 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 
 	// Different exclude lists ⇒ different keys.
 	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}}))
+}
+
+func TestCachePathsEncodeUnsafeComponents(t *testing.T) {
+	t.Parallel()
+
+	graphKey := GetGraphByTreeHash("../../outside", "../tree", pb.COMPUTATION_STRATEGY_NATIVE, nil)
+	assertSafeCacheKey(t, graphKey)
+	assert.Equal(t, graphKey, GetGraphByTreeHash("../../outside", "../tree", pb.COMPUTATION_STRATEGY_NATIVE, nil))
+
+	treehashKey := GetTreehashCachePath(&pb.BuildDescription{
+		Remote:  `..\..\outside`,
+		BaseSha: "../../base",
+	})
+	assertSafeCacheKey(t, treehashKey)
+
+	comparedKey := GetComparedTargetsCachePath("/outside", "../one", "two/../../three", nil)
+	assertSafeCacheKey(t, comparedKey)
+}
+
+func assertSafeCacheKey(t *testing.T, key string) {
+	t.Helper()
+	assert.True(t, fs.ValidPath(key), key)
+	assert.NotEqual(t, ".", key)
+	assert.NotContains(t, key, "\\")
+	assert.NotContains(t, key, ":")
+	assert.False(t, strings.HasPrefix(key, "/"), key)
 }
 
 func TestChunkTargets(t *testing.T) {

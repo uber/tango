@@ -47,15 +47,15 @@ func TestStorageCache_RejectsInvalidRemote(t *testing.T) {
 
 	err := cache.Put(t.Context(), &graph.OptimizedGraph{}, key)
 	require.Error(t, err)
-	assert.True(t, storage.IsInvalidKey(err))
+	assert.Contains(t, err.Error(), "invalid remote")
 
 	_, err = cache.Get(t.Context(), key)
 	require.Error(t, err)
-	assert.True(t, storage.IsInvalidKey(err))
+	assert.Contains(t, err.Error(), "invalid remote")
 
 	_, err = cache.FloorKey(t.Context(), key.Remote, key.BaseCommitTimeSecond)
 	require.Error(t, err)
-	assert.True(t, storage.IsInvalidKey(err))
+	assert.Contains(t, err.Error(), "invalid remote")
 }
 
 func TestStorageCache_RejectsInvalidBaseSha(t *testing.T) {
@@ -68,9 +68,17 @@ func TestStorageCache_RejectsInvalidBaseSha(t *testing.T) {
 
 	err := cache.Put(t.Context(), &graph.OptimizedGraph{}, key)
 	require.Error(t, err)
-	assert.True(t, storage.IsInvalidKey(err))
+	assert.Contains(t, err.Error(), "invalid base SHA")
 
 	_, err = cache.Get(t.Context(), key)
 	require.Error(t, err)
-	assert.True(t, storage.IsInvalidKey(err))
+	assert.Contains(t, err.Error(), "invalid base SHA")
+}
+
+func TestKey_toStorageKey_preservesValidValue(t *testing.T) {
+	key := Key{Remote: "uber/tango", BaseCommitTimeSecond: 1_700_000_000, BaseSha: "abc123"}
+
+	got, err := key.toStorageKey()
+	require.NoError(t, err)
+	assert.Equal(t, "itg/uber/tango/2023-11-14/1700000000_abc123", got)
 }

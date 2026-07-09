@@ -16,12 +16,7 @@ package storage
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
-	"io/fs"
-	"strings"
-	"unicode/utf8"
 )
 
 // NotFoundError represents an error when a blob is not found in the storage.
@@ -37,57 +32,6 @@ func (e *NotFoundError) Error() string {
 func IsNotFound(err error) bool {
 	_, ok := err.(*NotFoundError)
 	return ok
-}
-
-// InvalidKeyError reports a storage key that does not satisfy the portable key
-// contract.
-type InvalidKeyError struct {
-	Key string
-}
-
-func (e *InvalidKeyError) Error() string {
-	return fmt.Sprintf("invalid storage key %q", e.Key)
-}
-
-// IsInvalidKey reports whether err identifies an invalid storage key.
-func IsInvalidKey(err error) bool {
-	var target *InvalidKeyError
-	return errors.As(err, &target)
-}
-
-// ValidateKey validates a storage key.
-func ValidateKey(key string) error {
-	if key == "" || key == "." || !fs.ValidPath(key) || strings.ContainsAny(key, "\\:\x00") {
-		return &InvalidKeyError{Key: key}
-	}
-	return nil
-}
-
-// ValidateKeySegment validates one segment of a storage key.
-func ValidateKeySegment(segment string) error {
-	if strings.Contains(segment, "/") {
-		return &InvalidKeyError{Key: segment}
-	}
-	return ValidateKey(segment)
-}
-
-// ValidatePrefix validates a storage list prefix. An empty prefix lists all
-// keys, and a trailing slash is permitted to express a segment boundary.
-func ValidatePrefix(prefix string) error {
-	if prefix == "" {
-		return nil
-	}
-	if !utf8.ValidString(prefix) || strings.HasPrefix(prefix, "/") || strings.ContainsAny(prefix, "\\:\x00") {
-		return &InvalidKeyError{Key: prefix}
-	}
-	idx := strings.LastIndex(prefix, "/")
-	if idx < 0 {
-		return nil
-	}
-	if err := ValidateKey(prefix[:idx]); err != nil {
-		return &InvalidKeyError{Key: prefix}
-	}
-	return nil
 }
 
 // DownloadRequest represents a request to download a blob.
@@ -108,10 +52,9 @@ type UploadRequest struct {
 
 // Storage is an abstract interface for remote data storage.
 //
-// Keys use portable slash-separated segments. Keys must be relative, non-empty,
-// valid UTF-8, and contain no empty, ".", or ".." segments. Backslashes,
-// colons, and NUL bytes are invalid. Implementations otherwise treat keys as
-// opaque values.
+// Keys are opaque strings; the interface assigns no meaning to paths,
+// directories, or segments. Any structure (for example, slash-delimited names)
+// is a caller convention. A backend may reject keys it cannot represent.
 type Storage interface {
 	// Get downloads a blob from the storage. On success the returned DownloadResponse.ReadCloser
 	// is non-nil and the caller owns closing it. Returns NotFoundError when the blob is not found.

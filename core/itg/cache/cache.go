@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
+	"io/fs"
 	"path"
 	"slices"
 	"strconv"
@@ -66,11 +67,11 @@ var EmptyKey = Key{}
 
 // toStorageKey converts a cache key to its storage key: itg/{remote}/{date}/{committime}_{sha}.
 func (k *Key) toStorageKey() (string, error) {
-	if err := storage.ValidateKey(k.Remote); err != nil {
-		return "", fmt.Errorf("validate remote %q: %w", k.Remote, err)
+	if err := validateRemote(k.Remote); err != nil {
+		return "", err
 	}
-	if err := storage.ValidateKeySegment(k.BaseSha); err != nil {
-		return "", fmt.Errorf("validate base SHA %q: %w", k.BaseSha, err)
+	if err := validateBaseSHA(k.BaseSha); err != nil {
+		return "", err
 	}
 	date := time.Unix(k.BaseCommitTimeSecond, 0).UTC().Format("2006-01-02")
 	return path.Join(keyPrefix, k.Remote, date, fmt.Sprintf("%d_%s", k.BaseCommitTimeSecond, k.BaseSha)), nil
@@ -131,8 +132,8 @@ func (c *storageCache) Get(ctx context.Context, key Key) (*graph.OptimizedGraph,
 }
 
 func (c *storageCache) FloorKey(ctx context.Context, remote string, targetTimeSecond int64) (Key, error) {
-	if err := storage.ValidateKey(remote); err != nil {
-		return EmptyKey, fmt.Errorf("validate remote %q: %w", remote, err)
+	if err := validateRemote(remote); err != nil {
+		return EmptyKey, err
 	}
 	remotePrefix := path.Join(keyPrefix, remote) + "/"
 	allKeys, err := c.storage.List(ctx, remotePrefix)
@@ -170,6 +171,20 @@ func (c *storageCache) FloorKey(ctx context.Context, remote string, targetTimeSe
 		idx--
 	}
 	return cacheKeys[idx], nil
+}
+
+func validateRemote(remote string) error {
+	if remote == "" || remote == "." || !fs.ValidPath(remote) || strings.ContainsAny(remote, "\\:\x00") {
+		return fmt.Errorf("invalid remote %q for cache key", remote)
+	}
+	return nil
+}
+
+func validateBaseSHA(baseSHA string) error {
+	if baseSHA == "" || strings.Contains(baseSHA, "/") || !fs.ValidPath(baseSHA) || strings.ContainsAny(baseSHA, "\\:\x00") {
+		return fmt.Errorf("invalid base SHA %q for cache key", baseSHA)
+	}
+	return nil
 }
 
 func binarySearch(cacheKeys []Key, targetTimeSecond int64) (int, bool) {
