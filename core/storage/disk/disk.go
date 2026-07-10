@@ -113,25 +113,25 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 	return root.Rename(tmpPath, req.Key)
 }
 
+// os.CreateTemp accepts a filesystem path rather than an os.Root. Using it here
+// would require reconstructing an unrestricted path from the storage root and
+// key directory, allowing a symlink in that path to resolve outside the storage
+// root. Creating the file through os.Root preserves root-confined path resolution
+// for the temporary write as well as the final rename.
 func createTemp(root *os.Root, dir string) (*os.File, string, error) {
-	for range 10 {
-		var random [16]byte
-		if _, err := rand.Read(random[:]); err != nil {
-			return nil, "", err
-		}
-		name := ".tmp-" + hex.EncodeToString(random[:])
-		if dir != "." {
-			name = path.Join(dir, name)
-		}
-		file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
-		if err == nil {
-			return file, name, nil
-		}
-		if !errors.Is(err, fs.ErrExist) {
-			return nil, "", err
-		}
+	var random [32]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return nil, "", err
 	}
-	return nil, "", errors.New("create unique temporary file")
+	name := ".tmp-" + hex.EncodeToString(random[:])
+	if dir != "." {
+		name = path.Join(dir, name)
+	}
+	file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, "", err
+	}
+	return file, name, nil
 }
 
 func validateKey(key string) error {
