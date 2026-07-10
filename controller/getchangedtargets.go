@@ -507,7 +507,6 @@ func toDiffGraph(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarget,
 		i++
 		name := targetIDMap[id]
 		if name == "" {
-			// Target ID missing from metadata — skip it.
 			continue
 		}
 		target := &targetdiff.Target{
