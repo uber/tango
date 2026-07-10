@@ -244,6 +244,10 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 }
 
 func chunkTargets(targets []*tangopb.OptimizedTarget, chunkSize int) []*tangopb.GetTargetGraphResponse {
+	if chunkSize <= 0 {
+		chunkSize = DefaultTargetChunkSize
+	}
+
 	// at least one chunk
 	numChunks := max(1, (len(targets)+chunkSize-1)/chunkSize)
 
@@ -291,6 +295,10 @@ func ChunkMetadata(
 	attrStrValIDToVal map[int32]string,
 	chunkSize int,
 ) []*tangopb.Metadata {
+	if chunkSize <= 0 {
+		chunkSize = DefaultMetadataMapChunkSize
+	}
+
 	targetChunks := splitMap(targetIDToName, chunkSize)
 	attrValChunks := splitMap(attrStrValIDToVal, chunkSize)
 
