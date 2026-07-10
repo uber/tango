@@ -82,13 +82,16 @@ func run() error {
 	}
 	defer os.RemoveAll(workerRootPath)
 
-	rm := repomanager.NewRepoManager(appCtx, repomanager.Params{
+	rm, err := repomanager.NewRepoManager(appCtx, repomanager.Params{
 		Git:                  git.New(repoManagerClonePath),
 		Logger:               logger,
 		RepoManagerClonePath: repoManagerClonePath,
 		WorkerRootPath:       workerRootPath,
 		PoolSize:             cfg.Service.WorkerPoolSize,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to create repo manager: %w", err)
+	}
 	orch, err := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
 		Storage:     store,
 		RepoManager: rm,

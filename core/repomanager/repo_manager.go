@@ -86,7 +86,10 @@ type Params struct {
 // appCtx is the application-lifetime context. Cancel it when the process is
 // shutting down (e.g. wire it to SIGTERM/SIGINT in main) to abort any
 // background goroutines the manager spawns.
-func NewRepoManager(appCtx context.Context, p Params) RepoManager {
+func NewRepoManager(appCtx context.Context, p Params) (RepoManager, error) {
+	if p.PoolSize <= 0 {
+		return nil, fmt.Errorf("pool size must be > 0, got %d", p.PoolSize)
+	}
 	return &repoManager{
 		git:                  p.Git,
 		repoManagerClonePath: p.RepoManagerClonePath,
@@ -95,7 +98,7 @@ func NewRepoManager(appCtx context.Context, p Params) RepoManager {
 		poolSize:             p.PoolSize,
 		pools:                make(map[string]*workerPool),
 		appCtx:               appCtx,
-	}
+	}, nil
 }
 
 func (r *repoManager) poolFor(repo string) *workerPool {
@@ -104,10 +107,6 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 
 	if pool, ok := r.pools[repo]; ok {
 		return pool
-	}
-	// default to 1 worker workspace per repo
-	if r.poolSize <= 0 {
-		r.poolSize = 1
 	}
 	pool := &workerPool{
 		originDir: filepath.Join(r.repoManagerClonePath, repo),
