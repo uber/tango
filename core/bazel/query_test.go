@@ -57,7 +57,7 @@ func TestExecuteQuery_Success(t *testing.T) {
 		mockCmd.EXPECT().Wait().Return(nil),
 	)
 	client, err := NewBazelClient(context.Background(), Params{
-		QueryTimeout: 5 * time.Minute,
+		QueryTimeout:  5 * time.Minute,
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
@@ -102,7 +102,7 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 		mockCmd.EXPECT().Wait().Return(nil),
 	)
 	client, err := NewBazelClient(context.Background(), Params{
-		QueryTimeout: 5 * time.Minute,
+		QueryTimeout:  5 * time.Minute,
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
@@ -232,7 +232,7 @@ func TestExecuteQueryInternal_Failures(t *testing.T) {
 			tt.setupMock(mockCmd)
 
 			client, err := NewBazelClient(context.Background(), Params{
-				QueryTimeout: 5 * time.Minute,
+				QueryTimeout:  5 * time.Minute,
 				BazelCommand:  "bazel",
 				WorkspacePath: "/tmp/test",
 				EnvVarsMap:    map[string]string{},
@@ -262,7 +262,7 @@ func TestExecuteQuery_ErrorCase(t *testing.T) {
 	mockCmd.EXPECT().StdoutPipe().Return(nil, errors.New("stdout pipe failed"))
 
 	client, err := NewBazelClient(context.Background(), Params{
-		QueryTimeout: 5 * time.Minute,
+		QueryTimeout:  5 * time.Minute,
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
