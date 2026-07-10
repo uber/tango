@@ -247,66 +247,6 @@ func TestOptimizedGraphCopy(t *testing.T) {
 	assert.NotEqual(t, []byte{0xFF}, g.OptimizedTargets[bID].Hash)
 }
 
-// --- GetReverseDepsAsTargets ---
-
-func TestGetReverseDepsAsTargets(t *testing.T) {
-	t.Parallel()
-
-	t.Run("starting target included in results", func(t *testing.T) {
-		t.Parallel()
-		g := OptimizeGraph(map[string]*targethasher.Target{
-			"//pkg:a": {Name: "//pkg:a", RuleType: "go_library"},
-		})
-		result := g.GetReverseDepsAsTargets([]string{"//pkg:a"})
-		require.Len(t, result, 1)
-		assert.Equal(t, "//pkg:a", result[0].Name)
-	})
-
-	t.Run("transitive reverse deps all returned", func(t *testing.T) {
-		t.Parallel()
-		// a ← b ← c; starting from a should yield a, b, c
-		targets := map[string]*targethasher.Target{
-			"//pkg:a": {Name: "//pkg:a", RuleType: "go_library"},
-			"//pkg:b": {Name: "//pkg:b", RuleType: "go_library", Deps: []string{"//pkg:a"}},
-			"//pkg:c": {Name: "//pkg:c", RuleType: "go_library", Deps: []string{"//pkg:b"}},
-		}
-		g := OptimizeGraph(targets)
-		result := g.GetReverseDepsAsTargets([]string{"//pkg:a"})
-
-		names := make(map[string]struct{}, len(result))
-		for _, t := range result {
-			names[t.Name] = struct{}{}
-		}
-		assert.Contains(t, names, "//pkg:a")
-		assert.Contains(t, names, "//pkg:b")
-		assert.Contains(t, names, "//pkg:c")
-	})
-
-	t.Run("unrelated targets not returned", func(t *testing.T) {
-		t.Parallel()
-		targets := map[string]*targethasher.Target{
-			"//pkg:a":         {Name: "//pkg:a", RuleType: "go_library"},
-			"//pkg:b":         {Name: "//pkg:b", RuleType: "go_library", Deps: []string{"//pkg:a"}},
-			"//pkg:unrelated": {Name: "//pkg:unrelated", RuleType: "go_library"},
-		}
-		g := OptimizeGraph(targets)
-		result := g.GetReverseDepsAsTargets([]string{"//pkg:a"})
-
-		names := make(map[string]struct{}, len(result))
-		for _, t := range result {
-			names[t.Name] = struct{}{}
-		}
-		assert.NotContains(t, names, "//pkg:unrelated")
-	})
-
-	t.Run("unknown target is skipped", func(t *testing.T) {
-		t.Parallel()
-		g := OptimizeGraph(nil)
-		result := g.GetReverseDepsAsTargets([]string{"//pkg:missing"})
-		assert.Empty(t, result)
-	})
-}
-
 // --- OptimizedTargetToTarget ---
 
 func TestOptimizedTargetToTarget(t *testing.T) {

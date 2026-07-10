@@ -236,24 +236,6 @@ func (g *OptimizedGraph) AddTarget(target *targethasher.Target) {
 	}
 }
 
-// GetReverseDepsAsTargets returns the reverse dependencies of the given targets.
-func (g *OptimizedGraph) GetReverseDepsAsTargets(targetNames []string) []targethasher.Target {
-	reverseDeps := make([]targethasher.Target, 0, 2*len(targetNames))
-	visited := NewIntSet()
-	reverseDepIDs := make([]int, 0, len(targetNames))
-	for _, targetName := range targetNames {
-		targetID, ok := g.TargetNameToID[targetName]
-		if !ok {
-			continue
-		}
-		reverseDepIDs = g.getNewReverseDeps(targetID, reverseDepIDs, visited)
-	}
-	for _, reverseDepID := range reverseDepIDs {
-		reverseDeps = append(reverseDeps, g.OptimizedTargetToTarget(reverseDepID))
-	}
-	return reverseDeps
-}
-
 // OptimizedTargetToTarget converts an OptimizedTarget back to a Target.
 func (g *OptimizedGraph) OptimizedTargetToTarget(targetID int) targethasher.Target {
 	name, ok := g.TargetIDToString[targetID]
@@ -296,19 +278,6 @@ func (g *OptimizedGraph) OptimizedTargetToTarget(targetID int) targethasher.Targ
 	}
 
 	return target
-}
-
-func (g *OptimizedGraph) getNewReverseDeps(targetID int, reverseDeps []int, visited IntSet) []int {
-	if visited.Contains(targetID) {
-		return reverseDeps
-	}
-
-	visited.Insert(targetID)
-	reverseDeps = append(reverseDeps, targetID)
-	for reverseDep := range g.OptimizedTargets[targetID].ReverseDeps {
-		reverseDeps = g.getNewReverseDeps(reverseDep, reverseDeps, visited)
-	}
-	return reverseDeps
 }
 
 func (g *OptimizedGraph) getOrGenerateTargetID(targetName string) int {
