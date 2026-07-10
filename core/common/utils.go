@@ -140,6 +140,7 @@ const cancelCheckInterval = 4096
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse.
 // targetChunkSize controls how many OptimizedTarget entries per stream message.
 // metadataMapChunkSize controls how many entries per metadata map chunk.
+// TODO: move this function to internal/mapper
 func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result, targetChunkSize, metadataMapChunkSize int) ([]*tangopb.GetTargetGraphResponse, error) {
 	// Map target names to ids. This list is topologically sorted, so the ids are stable.
 	// IDs start at 1 — 0 is reserved as the proto3 "unset" sentinel so consumers using
