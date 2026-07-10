@@ -1380,27 +1380,19 @@ func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) 
 	assert.True(t, gotDeleted, "DELETED entry at distance 0 must survive max_distance=1")
 }
 
-// fakeGraphReader is a minimal storage.GraphReader that replays a fixed set of
-// chunks then reports io.EOF. It ignores context, so it exercises the caller's
-// own cancellation/error handling rather than the reader's.
-type fakeGraphReader struct {
-	chunks []*pb.GetTargetGraphResponse
-	idx    int
-	closed bool
-}
-
-func (r *fakeGraphReader) Read() (*pb.GetTargetGraphResponse, error) {
-	if r.idx >= len(r.chunks) {
-		return nil, io.EOF
-	}
-	c := r.chunks[r.idx]
-	r.idx++
-	return c, nil
-}
-
-func (r *fakeGraphReader) Close() error {
-	r.closed = true
-	return nil
+func newMockGraphReader(ctrl *gomock.Controller, chunks ...*pb.GetTargetGraphResponse) *storagemock.MockGraphReader {
+	r := storagemock.NewMockGraphReader(ctrl)
+	idx := 0
+	r.EXPECT().Read().DoAndReturn(func() (*pb.GetTargetGraphResponse, error) {
+		if idx >= len(chunks) {
+			return nil, io.EOF
+		}
+		c := chunks[idx]
+		idx++
+		return c, nil
+	}).AnyTimes()
+	r.EXPECT().Close().Return(nil).AnyTimes()
+	return r
 }
 
 func changedTargetsRequest() *pb.GetChangedTargetsRequest {
@@ -1521,7 +1513,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, _ orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
-				return &fakeGraphReader{chunks: []*pb.GetTargetGraphResponse{chunk}}, nil
+				return newMockGraphReader(ctrl, chunk), nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
@@ -1542,7 +1534,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 				if p.Req.GetBuildDescription().GetBaseSha() == "sha1" {
 					return nil, injected
 				}
-				return &fakeGraphReader{chunks: []*pb.GetTargetGraphResponse{chunk}}, nil
+				return newMockGraphReader(ctrl, chunk), nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
@@ -1559,10 +1551,9 @@ func TestFetchTargetGraphs(t *testing.T) {
 	t.Run("empty reader yields no-chunks error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
-		// Both readers immediately EOF (no chunks).
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, _ orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
-				return &fakeGraphReader{}, nil
+				return newMockGraphReader(ctrl), nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
