@@ -1,0 +1,25 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "metrics",
+    srcs = [
+        "buckets.go",
+        "emitter.go",
+        "names.go",
+        "options.go",
+    ],
+    importpath = "github.com/uber/tango/observability/metrics",
+    visibility = ["//visibility:public"],
+    deps = ["@com_github_uber_go_tally//:tally"],
+)
+
+go_test(
+    name = "metrics_test",
+    srcs = ["emitter_test.go"],
+    embed = [":metrics"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@com_github_uber_go_tally//:tally",
+    ],
+)
