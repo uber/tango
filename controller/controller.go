@@ -21,17 +21,17 @@ import (
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/storage"
-	"github.com/uber/tango/internal/targetgraph"
+	"github.com/uber/tango/internal/idmap"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
 
-// defaultChangedTargetChunkSize is the default number of ChangedTarget entries per stream message.
+// _defaultChangedTargetChunkSize is the default number of ChangedTarget entries per stream message.
 // A ChangedTarget carries both old_target and new_target (2× an OptimizedTarget), so we use
 // half the regular chunk size to stay within the same byte budget.
-const defaultChangedTargetChunkSize = 125
+const _defaultChangedTargetChunkSize = 125
 
 // Params are the parameters for the controller.
 type Params struct {
@@ -71,15 +71,15 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	}
 	targetChunkSize := p.ChunkConfig.TargetChunkSize
 	if targetChunkSize <= 0 {
-		targetChunkSize = targetgraph.DefaultTargetChunkSize
+		targetChunkSize = idmap.DefaultTargetChunkSize
 	}
 	changedTargetChunkSize := p.ChunkConfig.ChangedTargetChunkSize
 	if changedTargetChunkSize <= 0 {
-		changedTargetChunkSize = defaultChangedTargetChunkSize
+		changedTargetChunkSize = _defaultChangedTargetChunkSize
 	}
 	metadataMapChunkSize := p.ChunkConfig.MetadataMapChunkSize
 	if metadataMapChunkSize <= 0 {
-		metadataMapChunkSize = targetgraph.DefaultMetadataMapChunkSize
+		metadataMapChunkSize = idmap.DefaultMetadataMapChunkSize
 	}
 	return &controller{
 		logger:                 p.Logger,

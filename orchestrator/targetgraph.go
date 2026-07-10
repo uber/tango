@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package targetgraph
+package orchestrator
 
 import (
 	"context"
@@ -20,26 +20,14 @@ import (
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/uber/tango/core/targethasher"
+	"github.com/uber/tango/internal/idmap"
 	"github.com/uber/tango/tangopb"
 )
 
-const (
-	// DefaultTargetChunkSize is the default number of OptimizedTarget entries per stream message.
-	// Sized conservatively: at ~40KB/target worst-case (target with ~10K direct deps × 4 bytes),
-	// 250 targets ≈ 10MB — well under the 64MB default gRPC per-message limit.
-	DefaultTargetChunkSize = 250
-
-	// DefaultMetadataMapChunkSize is the max entries per metadata message chunk.
-	// target_id_mapping and attribute_string_value_mapping scale with repo size and can exceed
-	// the 64MB gRPC message limit for large monorepos, so they are split across multiple messages.
-	// At ~85 bytes/entry (60-char avg target name + proto overhead), 50 000 entries ≈ 4.25MB per chunk.
-	DefaultMetadataMapChunkSize = 50_000
-)
-
-// cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
+// _cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
 // Picked to keep overhead negligible while still surfacing cancellation in <100ms
 // for typical target rates.
-const cancelCheckInterval = 4096
+const _cancelCheckInterval = 4096
 
 // ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse
 func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result) ([]*tangopb.GetTargetGraphResponse, error) {
@@ -51,17 +39,17 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 		targetNamesMapping[name] = int32(i + 1)
 	}
 
-	ruleTypeMapper := NewNameIDMapper()
-	tagMapper := NewNameIDMapper()
-	attrNameMapper := NewNameIDMapper()
-	attrStrValMapper := NewNameIDMapper()
+	ruleTypeMapper := idmap.NewNameIDMapper()
+	tagMapper := idmap.NewNameIDMapper()
+	attrNameMapper := idmap.NewNameIDMapper()
+	attrStrValMapper := idmap.NewNameIDMapper()
 
 	// Build the optimized targets slice
 	optimizedTargets := make([]*tangopb.OptimizedTarget, 0, len(result.Targets))
 
 	n := 0
 	for _, t := range result.Targets {
-		if n%cancelCheckInterval == 0 {
+		if n%_cancelCheckInterval == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
@@ -128,14 +116,14 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 	attrStrValIDToVal := attrStrValMapper.Invert()
 
 	// chunk targets into multiple messages for streaming
-	responses := chunkTargets(optimizedTargets, DefaultTargetChunkSize)
-	for _, meta := range ChunkMetadata(
+	responses := chunkTargets(optimizedTargets, idmap.DefaultTargetChunkSize)
+	for _, meta := range idmap.ChunkMetadata(
 		targetIDToName,
 		ruleTypeIDToName,
 		tagIDToName,
 		attrNameIDToName,
 		attrStrValIDToVal,
-		DefaultMetadataMapChunkSize,
+		idmap.DefaultMetadataMapChunkSize,
 	) {
 		responses = append(responses, &tangopb.GetTargetGraphResponse{
 			Item: &tangopb.GetTargetGraphResponse_Metadata{Metadata: meta},
@@ -147,7 +135,7 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 
 func chunkTargets(targets []*tangopb.OptimizedTarget, chunkSize int) []*tangopb.GetTargetGraphResponse {
 	if chunkSize <= 0 {
-		chunkSize = DefaultTargetChunkSize
+		chunkSize = idmap.DefaultTargetChunkSize
 	}
 
 	// at least one chunk
@@ -183,66 +171,4 @@ func chunkTargets(targets []*tangopb.OptimizedTarget, chunkSize int) []*tangopb.
 	}
 
 	return responses
-}
-
-// ChunkMetadata splits the metadata maps into multiple Metadata messages.
-// target_id_mapping and attribute_string_value_mapping scale with repo size and can exceed the
-// 64MB gRPC per-message limit for large monorepos; they are split across chunks of chunkSize entries.
-// The small maps (rule_type, tag, attribute_name) always fit in one message and are sent in the first chunk.
-func ChunkMetadata(
-	targetIDToName map[int32]string,
-	ruleTypeIDToName map[int32]string,
-	tagIDToName map[int32]string,
-	attrNameIDToName map[int32]string,
-	attrStrValIDToVal map[int32]string,
-	chunkSize int,
-) []*tangopb.Metadata {
-	if chunkSize <= 0 {
-		chunkSize = DefaultMetadataMapChunkSize
-	}
-
-	targetChunks := splitMap(targetIDToName, chunkSize)
-	attrValChunks := splitMap(attrStrValIDToVal, chunkSize)
-
-	numChunks := max(1, max(len(targetChunks), len(attrValChunks)))
-	chunks := make([]*tangopb.Metadata, 0, numChunks)
-
-	for i := range numChunks {
-		meta := &tangopb.Metadata{}
-		// Small maps are always small enough to fit in one message; include them in the first chunk.
-		if i == 0 {
-			meta.RuleTypeMapping = ruleTypeIDToName
-			meta.TagMapping = tagIDToName
-			meta.AttributeNameMapping = attrNameIDToName
-		}
-		if i < len(targetChunks) {
-			meta.TargetIdMapping = targetChunks[i]
-		}
-		if i < len(attrValChunks) {
-			meta.AttributeStringValueMapping = attrValChunks[i]
-		}
-		chunks = append(chunks, meta)
-	}
-
-	return chunks
-}
-
-// splitMap splits a map[int32]string into slices of at most size entries each.
-func splitMap(m map[int32]string, size int) []map[int32]string {
-	if len(m) == 0 {
-		return nil
-	}
-	chunks := make([]map[int32]string, 0, (len(m)+size-1)/size)
-	current := make(map[int32]string, size)
-	for k, v := range m {
-		current[k] = v
-		if len(current) >= size {
-			chunks = append(chunks, current)
-			current = make(map[int32]string, size)
-		}
-	}
-	if len(current) > 0 {
-		chunks = append(chunks, current)
-	}
-	return chunks
 }

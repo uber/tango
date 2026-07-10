@@ -39,7 +39,7 @@ tango/                              # repo root (Go module github.com/uber/tango
 │   └── ...                         # bazel, common, execcmd, itg, targethasher, ...
 ├── internal/                       # Implementation-detail helpers shared across controller/orchestrator/example
 │   ├── cachekey/                   # Cache path/key construction (treehash, graph, compared-targets)
-│   ├── targetgraph/                # Result -> wire-format conversion: ID mapping + chunking
+│   ├── idmap/                      # ID-mapping and metadata-chunking primitives for the tangopb wire format
 │   └── targetdiff/                 # Target graph comparison helpers
 ├── example/                        # Runnable server + client and benchmark CLI
 │   ├── client/

@@ -8,7 +8,7 @@ go_library(
     deps = [
         "//core/bazel",
         "//core/targethasher",
-        "//internal/targetgraph",
+        "//orchestrator",
         "@com_github_gogo_protobuf//jsonpb",
         "@org_uber_go_zap//:zap",
     ],

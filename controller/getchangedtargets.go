@@ -24,7 +24,7 @@ import (
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/internal/cachekey"
-	"github.com/uber/tango/internal/targetgraph"
+	"github.com/uber/tango/internal/idmap"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
@@ -540,7 +540,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 			},
 		})
 	}
-	for _, meta := range targetgraph.ChunkMetadata(
+	for _, meta := range idmap.ChunkMetadata(
 		mappers.target.Invert(),
 		mappers.ruleType.Invert(),
 		mappers.tag.Invert(),
@@ -821,21 +821,21 @@ func validateTargetNames(oldTarget, newTarget *pb.OptimizedTarget, oldMeta, newM
 // revisions into a single canonical ID namespace. The same set is shared by the
 // transposers for each revision so identical names map to identical IDs.
 type canonicalMappers struct {
-	target   *targetgraph.NameIDMapper
-	ruleType *targetgraph.NameIDMapper
-	tag      *targetgraph.NameIDMapper
-	attrName *targetgraph.NameIDMapper
-	attrVal  *targetgraph.NameIDMapper
+	target   *idmap.NameIDMapper
+	ruleType *idmap.NameIDMapper
+	tag      *idmap.NameIDMapper
+	attrName *idmap.NameIDMapper
+	attrVal  *idmap.NameIDMapper
 }
 
 // newCanonicalMappers creates an empty set of canonical mappers.
 func newCanonicalMappers() *canonicalMappers {
 	return &canonicalMappers{
-		target:   targetgraph.NewNameIDMapper(),
-		ruleType: targetgraph.NewNameIDMapper(),
-		tag:      targetgraph.NewNameIDMapper(),
-		attrName: targetgraph.NewNameIDMapper(),
-		attrVal:  targetgraph.NewNameIDMapper(),
+		target:   idmap.NewNameIDMapper(),
+		ruleType: idmap.NewNameIDMapper(),
+		tag:      idmap.NewNameIDMapper(),
+		attrName: idmap.NewNameIDMapper(),
+		attrVal:  idmap.NewNameIDMapper(),
 	}
 }
 

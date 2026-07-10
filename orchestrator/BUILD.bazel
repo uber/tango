@@ -6,6 +6,7 @@ go_library(
         "errors.go",
         "native_orchestrator.go",
         "orchestrator.go",
+        "targetgraph.go",
     ],
     importpath = "github.com/uber/tango/orchestrator",
     visibility = ["//visibility:public"],
@@ -16,11 +17,13 @@ go_library(
         "//core/git",
         "//core/repomanager",
         "//core/storage",
+        "//core/targethasher",
         "//core/workspace",
         "//graphrunner",
         "//internal/cachekey",
-        "//internal/targetgraph",
+        "//internal/idmap",
         "//tangopb",
+        "@com_github_bazelbuild_buildtools//build_proto",
         "@com_github_uber_go_tally//:tally",
         "@org_uber_go_zap//:zap",
     ],
@@ -28,7 +31,10 @@ go_library(
 
 go_test(
     name = "orchestrator_test",
-    srcs = ["native_orchestrator_test.go"],
+    srcs = [
+        "native_orchestrator_test.go",
+        "targetgraph_test.go",
+    ],
     data = glob(["testdata/**"]),
     embed = [":orchestrator"],
     deps = [

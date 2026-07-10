@@ -33,7 +33,6 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/graphrunner"
 	"github.com/uber/tango/internal/cachekey"
-	"github.com/uber/tango/internal/targetgraph"
 	"go.uber.org/zap"
 )
 
@@ -208,7 +207,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	responses, err := targetgraph.ResultToGetTargetGraphResponse(ctx, result)
+	responses, err := ResultToGetTargetGraphResponse(ctx, result)
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph to response: %w", err)
 	}

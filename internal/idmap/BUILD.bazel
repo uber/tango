@@ -1,0 +1,16 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "idmap",
+    srcs = ["idmap.go"],
+    importpath = "github.com/uber/tango/internal/idmap",
+    visibility = ["//visibility:public"],
+    deps = ["//tangopb"],
+)
+
+go_test(
+    name = "idmap_test",
+    srcs = ["idmap_test.go"],
+    embed = [":idmap"],
+    deps = ["@com_github_stretchr_testify//assert"],
+)
