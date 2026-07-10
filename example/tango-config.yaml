@@ -15,7 +15,7 @@ repository:
       - "^@@?bazel_tools/"
     exclude_external_targets: true
     bzlmod_enabled: true
-    query_timeout: 300
+    query_timeout_seconds: 300
 
 # Service configuration
 service:

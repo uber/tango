@@ -85,8 +85,8 @@ func Parse(configFilePath string) (*Config, error) {
 		if remote == "" {
 			return nil, fmt.Errorf("repository[%d].remote must not be empty", i)
 		}
-		if config.Repository[i].QueryTimeout <= 0 {
-			return nil, fmt.Errorf("repository[%d].query_timeout must be > 0", i)
+		if config.Repository[i].QueryTimeoutSeconds <= 0 {
+			return nil, fmt.Errorf("repository[%d].query_timeout_seconds must be > 0", i)
 		}
 		if _, exists := config.repositoryByRemote[remote]; exists {
 			return nil, fmt.Errorf("duplicate repository remote %q", remote)

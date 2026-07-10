@@ -7,7 +7,7 @@ repository:
       - "*.gen.go"
     exclude_external_targets: true
     bzlmod_enabled: true
-    query_timeout: 15
+    query_timeout_seconds: 15
 
 service:
   worker_pool_size: 3

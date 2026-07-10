@@ -22,7 +22,7 @@ type RepositoryConfig struct {
 	ExcludeExternalTargets bool     `yaml:"exclude_external_targets"`
 	BzlmodEnabled          bool     `yaml:"bzlmod_enabled"`
 	BazelCommand           string   `yaml:"bazel_command"`
-	QueryTimeout           int64    `yaml:"query_timeout"` // in seconds
+	QueryTimeoutSeconds    int64    `yaml:"query_timeout_seconds"`
 	BazelExtraArgs         []string `yaml:"bazel_extra_args"`
 	StreamBazelLogs        bool     `yaml:"stream_bazel_logs"`
 }
