@@ -14,6 +14,17 @@
 
 package metrics
 
+// Operation names.
+const (
+	OpGetTargetGraph    = "get_target_graph"
+	OpGetChangedTargets = "get_changed_targets"
+)
+
+// Metric names.
+const (
+	InFlightRequests = "in_flight_requests"
+)
+
 // Tag keys.
 const (
 	TagRepo          = "repo"

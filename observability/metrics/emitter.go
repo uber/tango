@@ -26,6 +26,8 @@
 package metrics
 
 import (
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/uber-go/tally"
@@ -38,6 +40,7 @@ type Emitter struct {
 	baseTags        map[string]string
 	durationBuckets tally.DurationBuckets
 	valueBuckets    tally.ValueBuckets
+	inFlight        *sync.Map
 }
 
 // New returns a tally-backed Emitter. A nil scope falls back to
@@ -50,6 +53,7 @@ func New(scope tally.Scope) *Emitter {
 		scope:           scope,
 		durationBuckets: _defaultDurationBuckets,
 		valueBuckets:    _defaultCountBuckets,
+		inFlight:        &sync.Map{},
 	}
 }
 
@@ -64,6 +68,7 @@ func (e *Emitter) Tagged(tags map[string]string) *Emitter {
 		baseTags:        mergeTags(e.baseTags, tags),
 		durationBuckets: e.durationBuckets,
 		valueBuckets:    e.valueBuckets,
+		inFlight:        e.inFlight,
 	}
 }
 
@@ -116,4 +121,19 @@ func mergeTags(base, extra map[string]string) map[string]string {
 		merged[k] = v
 	}
 	return merged
+}
+
+// TrackInFlight increments the in-flight gauge for op and returns a release
+// function that decrements it. Safe to call concurrently.
+func (e *Emitter) TrackInFlight(op string) func() {
+	v, _ := e.inFlight.LoadOrStore(op, new(int64))
+	counter := v.(*int64)
+	e.emitInFlight(op, atomic.AddInt64(counter, 1))
+	return func() {
+		e.emitInFlight(op, atomic.AddInt64(counter, -1))
+	}
+}
+
+func (e *Emitter) emitInFlight(op string, n int64) {
+	e.scope.Tagged(map[string]string{TagOperation: op}).Gauge(InFlightRequests).Update(float64(n))
 }
