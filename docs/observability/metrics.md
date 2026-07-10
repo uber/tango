@@ -232,9 +232,17 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
     defer func() {
         metrics.RecordRequest(e, metrics.OpGetChangedTargets, time.Since(start), retErr)
     }()
-    // ... downstream helpers pull the tagged emitter via metrics.FromContext(ctx)
-    return nil
-}
+
+    // ... compute changed targets ...
+    changedTargets := ...
+
+    e.RecordCount(
+        metrics.OpGetChangedTargets,
+        metrics.ChangedTargetsCount,
+        int64(len(changedTargets)),
+        metrics.WithValueBuckets(tally.ValueBuckets{10, 50, 100, 500, 1000}
+    )
+
     return nil
 }
 ```
