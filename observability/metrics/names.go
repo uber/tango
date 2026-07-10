@@ -22,6 +22,8 @@ const (
 
 // Metric names.
 const (
+	Requests         = "requests"
+	TotalDuration    = "total_duration"
 	InFlightRequests = "in_flight_requests"
 )
 
