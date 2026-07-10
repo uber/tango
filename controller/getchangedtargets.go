@@ -78,8 +78,11 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// Fast path: stream a previously computed result straight from cache.
 	if !request.GetBypassCache() {
 		served, err := c.serveChangedTargetsFromCache(ctx, scope, logger, request, stream, maxDist, start)
-		if err != nil || served {
+		if err != nil {
 			return err
+		}
+		if served {
+			return nil
 		}
 	}
 
@@ -89,8 +92,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		return err
 	}
 
-	compareStart := time.Now()
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, logger, firstGraph, secondGraph, maxDist)
+	changedTargetsResponses, err := c.compareTargetGraphs(ctx, scope, logger, firstGraph, secondGraph, maxDist)
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -101,11 +103,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
 		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))
 	}
-	compareDuration := time.Since(compareStart)
-	logger.Info("GetChangedTargets: Target graphs compared",
-		zap.Duration("compare_duration", compareDuration),
-	)
-	scope.Timer("compare_duration").Record(compareDuration)
 
 	// Cache the computed result concurrently so it doesn't block the stream send.
 	c.cacheComparedTargets(logger, request, changedTargetsResponses)
@@ -370,9 +367,9 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 // are re-mapped into a canonical per-call ID namespace so the response metadata
 // only carries the names actually referenced. See internal/targetdiff for the
 // classification and distance rules.
-func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
 	start := time.Now()
-	scope := c.scope.SubScope("compare_target_graphs")
+	compareScope := c.scope.SubScope("compare_target_graphs")
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
 
 	// 1) Decode each stream into a semantic graph keyed by canonical target name.
@@ -402,7 +399,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 	secondTargetsByID = nil
 	secondMetadata = nil
 	indexDuration := time.Since(indexStart)
-	scope.Timer("index_duration").Record(indexDuration)
+	compareScope.Timer("index_duration").Record(indexDuration)
 
 	// 2) Compare the two semantic graphs.
 	computeStart := time.Now()
@@ -417,7 +414,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 	// Release the input graphs; only result is needed from here on.
 	before = nil
 	after = nil
-	scope.Timer("compute_duration").Record(time.Since(computeStart))
+	compareScope.Timer("compute_duration").Record(time.Since(computeStart))
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -474,10 +471,13 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 		})
 	}
 	totalDuration := time.Since(start)
-	logger.Info("compareTargetGraphs: Done",
-		zap.Duration("total_duration", totalDuration),
+	compareScope.Timer("total_duration").Record(totalDuration)
+	// This helper owns its own timing/log on the request scope (mirroring
+	// fetchTargetGraphs) rather than leaving it to the caller.
+	logger.Info("GetChangedTargets: Target graphs compared",
+		zap.Duration("compare_duration", totalDuration),
 	)
-	scope.Timer("total_duration").Record(totalDuration)
+	scope.Timer("compare_duration").Record(totalDuration)
 	return results, nil
 }
 
