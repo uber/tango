@@ -1,32 +1,8 @@
-load("@rules_go//go:def.bzl", "go_library", "go_test")
+load("@rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "common",
-    srcs = [
-        "errors.go",
-        "nameidmapper.go",
-        "utils.go",
-    ],
+    srcs = ["errors.go"],
     importpath = "github.com/uber/tango/core/common",
     visibility = ["//visibility:public"],
-    deps = [
-        "//core/targethasher",
-        "//tangopb",
-        "@com_github_bazelbuild_buildtools//build_proto",
-    ],
-)
-
-go_test(
-    name = "common_test",
-    srcs = [
-        "nameidmapper_test.go",
-        "utils_test.go",
-    ],
-    embed = [":common"],
-    deps = [
-        "//core/targethasher",
-        "//tangopb",
-        "@com_github_stretchr_testify//assert",
-        "@com_github_stretchr_testify//require",
-    ],
 )

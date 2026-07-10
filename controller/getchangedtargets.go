@@ -23,6 +23,8 @@ import (
 
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/internal/cachekey"
+	"github.com/uber/tango/internal/targetgraph"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
@@ -54,7 +56,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	if err := validateGetChangedTargetsRequest(request); err != nil {
 		return common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)
 	}
-	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
+	scope = scope.Tagged(map[string]string{"repo": cachekey.ToShortRemote(request.GetFirstRevision().GetRemote())})
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
 	start := time.Now()
@@ -86,7 +88,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			return common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
 		}
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
+			cacheKey := cachekey.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
 			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
 				logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
@@ -293,7 +295,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			return
 		}
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
+			cacheKey := cachekey.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
 			if writeErr := storage.WriteChangedTargetsStream(c.appCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
 				logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
 			}
@@ -538,7 +540,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, logger *zap.Logger
 			},
 		})
 	}
-	for _, meta := range common.ChunkMetadata(
+	for _, meta := range targetgraph.ChunkMetadata(
 		mappers.target.Invert(),
 		mappers.ruleType.Invert(),
 		mappers.tag.Invert(),
@@ -819,21 +821,21 @@ func validateTargetNames(oldTarget, newTarget *pb.OptimizedTarget, oldMeta, newM
 // revisions into a single canonical ID namespace. The same set is shared by the
 // transposers for each revision so identical names map to identical IDs.
 type canonicalMappers struct {
-	target   *common.NameIDMapper
-	ruleType *common.NameIDMapper
-	tag      *common.NameIDMapper
-	attrName *common.NameIDMapper
-	attrVal  *common.NameIDMapper
+	target   *targetgraph.NameIDMapper
+	ruleType *targetgraph.NameIDMapper
+	tag      *targetgraph.NameIDMapper
+	attrName *targetgraph.NameIDMapper
+	attrVal  *targetgraph.NameIDMapper
 }
 
 // newCanonicalMappers creates an empty set of canonical mappers.
 func newCanonicalMappers() *canonicalMappers {
 	return &canonicalMappers{
-		target:   common.NewNameIDMapper(),
-		ruleType: common.NewNameIDMapper(),
-		tag:      common.NewNameIDMapper(),
-		attrName: common.NewNameIDMapper(),
-		attrVal:  common.NewNameIDMapper(),
+		target:   targetgraph.NewNameIDMapper(),
+		ruleType: targetgraph.NewNameIDMapper(),
+		tag:      targetgraph.NewNameIDMapper(),
+		attrName: targetgraph.NewNameIDMapper(),
+		attrVal:  targetgraph.NewNameIDMapper(),
 	}
 }
 
@@ -1106,7 +1108,7 @@ func readTreehashParallel(ctx context.Context, st storage.Storage, first, second
 // Returns ("", err) on any other storage or read failure so callers can decide whether to
 // surface the error or fall back. Returns (treehash, nil) on a successful read.
 func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) (string, error) {
-	key := common.GetTreehashCachePath(buildDescription)
+	key := cachekey.GetTreehashCachePath(buildDescription)
 	resp, err := st.Get(ctx, storage.DownloadRequest{Key: key})
 	if err != nil {
 		if storage.IsNotFound(err) {

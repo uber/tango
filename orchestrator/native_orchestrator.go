@@ -32,6 +32,8 @@ import (
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/graphrunner"
+	"github.com/uber/tango/internal/cachekey"
+	"github.com/uber/tango/internal/targetgraph"
 	"go.uber.org/zap"
 )
 
@@ -166,7 +168,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("compute treehash: %w", err)
 	}
-	treehashPath := common.GetGraphByTreeHash(param.Req.BuildDescription.Remote, treehash, param.Req.BuildDescription.GetStrategy(), param.Req.GetRequestOptions())
+	treehashPath := cachekey.GetGraphByTreeHash(param.Req.BuildDescription.Remote, treehash, param.Req.BuildDescription.GetStrategy(), param.Req.GetRequestOptions())
 	if !param.BypassCache {
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 		if err == nil {
@@ -206,7 +208,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	responses, err := common.ResultToGetTargetGraphResponse(ctx, result)
+	responses, err := targetgraph.ResultToGetTargetGraphResponse(ctx, result)
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph to response: %w", err)
 	}
@@ -214,7 +216,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
 	}
-	treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription)
+	treehashCachePath := cachekey.GetTreehashCachePath(param.Req.BuildDescription)
 	treehashReader := bytes.NewReader([]byte(treehash))
 	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
 	if err != nil {

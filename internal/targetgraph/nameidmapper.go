@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package common
+package targetgraph
 
 // NameIDMapper assigns stable int32 IDs to string names on demand.
 // IDs are assigned sequentially starting from 1. Zero is reserved as the
@@ -24,7 +24,7 @@ type NameIDMapper struct {
 	nextID   int32
 }
 
-// NewNameIdMapper creates a new NameIdMapper.
+// NewNameIDMapper creates a new NameIdMapper.
 func NewNameIDMapper() *NameIDMapper {
 	return &NameIDMapper{
 		nameToID: make(map[string]int32),

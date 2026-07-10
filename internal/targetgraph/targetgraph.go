@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package common
+package targetgraph
 
 import (
 	"context"
-	"crypto/md5"
 	"encoding/hex"
-	"fmt"
-	"path/filepath"
-	"sort"
-	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/uber/tango/core/targethasher"
@@ -34,103 +29,12 @@ const (
 	// 250 targets ≈ 10MB — well under the 64MB default gRPC per-message limit.
 	DefaultTargetChunkSize = 250
 
-	// DefaultChangedTargetChunkSize is the default number of ChangedTarget entries per stream message.
-	// A ChangedTarget carries both old_target and new_target (2× an OptimizedTarget), so we use
-	// half the regular chunk size to stay within the same byte budget.
-	DefaultChangedTargetChunkSize = 125
-
 	// DefaultMetadataMapChunkSize is the max entries per metadata message chunk.
 	// target_id_mapping and attribute_string_value_mapping scale with repo size and can exceed
 	// the 64MB gRPC message limit for large monorepos, so they are split across multiple messages.
 	// At ~85 bytes/entry (60-char avg target name + proto overhead), 50 000 entries ≈ 4.25MB per chunk.
 	DefaultMetadataMapChunkSize = 50_000
 )
-
-// ToShortRemote returns the short remote name given a git ssh remote string.
-// For example, "git@github:uber/tango" will return "uber/tango".
-func ToShortRemote(remote string) string {
-	strs := strings.Split(remote, ":")
-	return strs[len(strs)-1]
-}
-
-// GetGraphByTreeHash returns the cache path for the target graph by treehash.
-// strategy is part of the key because different computation strategies (e.g.
-// SHELL vs NATIVE) can produce different graphs from the same tree state.
-// requestOptions is folded into the key when any of its fields affect computation
-// (today: extra_exclude_files_regex). Empty/nil ⇒ legacy path unchanged.
-func GetGraphByTreeHash(remote, treehash string, strategy tangopb.ComputationStrategy, requestOptions *tangopb.RequestOptions) string {
-	path := filepath.Join(ToShortRemote(remote), "graphs", treehash, strategy.String())
-	if hash := HashRequestOptions(requestOptions); hash != "" {
-		path += "_requests-options-" + hash
-	}
-	return path
-}
-
-// GetTreehashCachePath returns the cache path for the treehash mapping.
-// The git treehash is purely a function of git state (base SHA + applied
-// requests), so neither requestOptions nor the computation strategy is part
-// of this key.
-func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
-	path := filepath.Join(ToShortRemote(buildDescription.Remote), "treehashes", fmt.Sprintf("base-sha-%s", buildDescription.BaseSha))
-	if len(buildDescription.Requests) > 0 {
-		path += "_request-urls-" + GetReqURLsHash(buildDescription.Requests)
-	}
-	return path
-}
-
-// GetComparedTargetsCachePath returns the cache path for a compared target graph result.
-// treehash1 and treehash2 are the resolved treehashes of the first and second revisions.
-// remote is the shared git remote for both revisions.
-// requestOptions is folded into the key when any of its fields affect computation.
-// Empty/nil ⇒ legacy path unchanged.
-func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, requestOptions *tangopb.RequestOptions) string {
-	path := filepath.Join(ToShortRemote(remote), "compared-targets", treehash1+"_"+treehash2)
-	if hash := HashRequestOptions(requestOptions); hash != "" {
-		path += "_requests-options-" + hash
-	}
-	return path
-}
-
-// GetReqURLsHash returns a fixed-length MD5 hash of the sorted request URLs.
-// Each URL's bytes are fed into the digest individually (no separator), matching
-// the Java MessageDigest.update(str.getBytes()) per-string behavior.
-func GetReqURLsHash(requests []*tangopb.Request) string {
-	if len(requests) == 0 {
-		return ""
-	}
-	urls := make([]string, 0, len(requests))
-	for _, req := range requests {
-		urls = append(urls, req.GetUrl())
-	}
-	sort.Strings(urls)
-	h := md5.New()
-	for _, url := range urls {
-		h.Write([]byte(url))
-	}
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
-// HashRequestOptions returns "" when no field of RequestOptions contributes to
-// the cache (preserves legacy paths), otherwise the md5 hex digest of those
-// fields. As new fields are added to RequestOptions, fold them into the digest
-// here.
-func HashRequestOptions(opts *tangopb.RequestOptions) string {
-	if opts == nil {
-		return ""
-	}
-	excludes := opts.GetExtraExcludeFilesRegex()
-	if len(excludes) == 0 {
-		return ""
-	}
-	sorted := make([]string, len(excludes))
-	copy(sorted, excludes)
-	sort.Strings(sorted)
-	h := md5.New()
-	for _, r := range sorted {
-		h.Write([]byte(r))
-	}
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
 
 // cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
 // Picked to keep overhead negligible while still surfacing cancellation in <100ms

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/uber/tango/core/common"
+	"github.com/uber/tango/internal/cachekey"
 	"github.com/uber/tango/orchestrator"
 
 	"github.com/uber/tango/core/storage"
@@ -47,7 +48,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	logger := c.logger.With(
 		zap.Any("build_description", request.GetBuildDescription()),
 	)
-	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetBuildDescription().GetRemote())})
+	scope = scope.Tagged(map[string]string{"repo": cachekey.ToShortRemote(request.GetBuildDescription().GetRemote())})
 	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetRequestOptions(), request.GetBypassCache())
 	if err != nil {
 		return err
@@ -102,7 +103,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 	)
 	if !bypassCache {
 		// Look up the the git treehash based on cache path
-		treehashCachePath := common.GetTreehashCachePath(buildDescription)
+		treehashCachePath := cachekey.GetTreehashCachePath(buildDescription)
 		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
 		if err != nil {
 			if storage.IsNotFound(err) {
@@ -121,7 +122,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 				return nil, err
 			}
 			logger.Info("getGraph: treehash found")
-			treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes), buildDescription.GetStrategy(), requestOptions)
+			treehashPath := cachekey.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes), buildDescription.GetStrategy(), requestOptions)
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)

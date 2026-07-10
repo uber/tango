@@ -18,7 +18,7 @@ import (
 	"context"
 
 	"github.com/uber-go/tally"
-	"github.com/uber/tango/core/common"
+	"github.com/uber/tango/internal/targetgraph"
 	"go.uber.org/zap"
 )
 
@@ -26,9 +26,9 @@ func newTestController(logger *zap.Logger) *controller {
 	return &controller{
 		logger:                 logger,
 		scope:                  tally.NoopScope,
-		targetChunkSize:        common.DefaultTargetChunkSize,
-		changedTargetChunkSize: common.DefaultChangedTargetChunkSize,
-		metadataMapChunkSize:   common.DefaultMetadataMapChunkSize,
+		targetChunkSize:        targetgraph.DefaultTargetChunkSize,
+		changedTargetChunkSize: defaultChangedTargetChunkSize,
+		metadataMapChunkSize:   targetgraph.DefaultMetadataMapChunkSize,
 		totalDurationBuckets:   _totalDurationBuckets,
 		appCtx:                 context.Background(),
 	}

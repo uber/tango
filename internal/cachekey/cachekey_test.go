@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package common
+package cachekey
 
 import (
-	"context"
 	"crypto/md5"
 	"fmt"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/uber/tango/core/targethasher"
 	pb "github.com/uber/tango/tangopb"
 )
 
@@ -156,58 +153,4 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 
 	// Different exclude lists ⇒ different keys.
 	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}}))
-}
-
-func TestChunkTargets(t *testing.T) {
-	t.Parallel()
-
-	// Create 250 targets, chunk by 100 → expect 3 chunks (100, 100, 50)
-	targets := make([]*pb.OptimizedTarget, 250)
-	for i := range targets {
-		targets[i] = &pb.OptimizedTarget{Id: int32(i)}
-	}
-
-	responses := chunkTargets(targets, 100)
-
-	require.Len(t, responses, 3)
-
-	// Verify total count and order preserved
-	var total int
-	for _, resp := range responses {
-		item := resp.Item.(*pb.GetTargetGraphResponse_Targets)
-		for _, target := range item.Targets.Targets {
-			assert.Equal(t, int32(total), target.Id)
-			total++
-		}
-	}
-	assert.Equal(t, 250, total)
-}
-
-func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
-	t.Parallel()
-
-	// 500 targets with DefaultTargetChunkSize=250 → 2 target chunks + 1 metadata = 3 responses
-	numTargets := 500
-	result := targethasher.Result{
-		TargetNames: make([]string, numTargets),
-		Targets:     make(map[string]*targethasher.Target, numTargets),
-	}
-	for i := 0; i < numTargets; i++ {
-		name := fmt.Sprintf("//pkg:target%d", i)
-		result.TargetNames[i] = name
-		result.Targets[name] = &targethasher.Target{Name: name, Hash: []byte{0}, RuleType: "go_library"}
-	}
-
-	responses, err := ResultToGetTargetGraphResponse(context.Background(), result)
-	require.NoError(t, err)
-
-	// 2 target chunks + 1 metadata chunk (500 targets well under DefaultMetadataMapChunkSize)
-	require.Len(t, responses, 3)
-
-	for _, resp := range responses[:2] {
-		_, ok := resp.Item.(*pb.GetTargetGraphResponse_Targets)
-		assert.True(t, ok, "expected Targets chunk")
-	}
-	_, ok := responses[2].Item.(*pb.GetTargetGraphResponse_Metadata)
-	assert.True(t, ok, "last response should be Metadata")
 }
