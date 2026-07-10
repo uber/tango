@@ -186,7 +186,6 @@ func TestChunkTargets(t *testing.T) {
 func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 	t.Parallel()
 
-	// 500 targets with DefaultTargetChunkSize=250 → 2 target chunks + 1 metadata = 3 responses
 	numTargets := 500
 	result := targethasher.Result{
 		TargetNames: make([]string, numTargets),
@@ -198,16 +197,45 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 		result.Targets[name] = &targethasher.Target{Name: name, Hash: []byte{0}, RuleType: "go_library"}
 	}
 
-	responses, err := ResultToGetTargetGraphResponse(context.Background(), result, 250, 50_000)
-	require.NoError(t, err)
-
-	// 2 target chunks + 1 metadata chunk (500 targets well under DefaultMetadataMapChunkSize)
-	require.Len(t, responses, 3)
-
-	for _, resp := range responses[:2] {
-		_, ok := resp.Item.(*pb.GetTargetGraphResponse_Targets)
-		assert.True(t, ok, "expected Targets chunk")
+	tests := []struct {
+		name                 string
+		targetChunkSize      int
+		metadataMapChunkSize int
+		wantTargetChunks     int
+	}{
+		{
+			name:                 "250 per chunk",
+			targetChunkSize:      250,
+			metadataMapChunkSize: 50_000,
+			wantTargetChunks:     2,
+		},
+		{
+			name:                 "100 per chunk",
+			targetChunkSize:      100,
+			metadataMapChunkSize: 50_000,
+			wantTargetChunks:     5,
+		},
+		{
+			name:                 "all in one chunk",
+			targetChunkSize:      1000,
+			metadataMapChunkSize: 50_000,
+			wantTargetChunks:     1,
+		},
 	}
-	_, ok := responses[2].Item.(*pb.GetTargetGraphResponse_Metadata)
-	assert.True(t, ok, "last response should be Metadata")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			responses, err := ResultToGetTargetGraphResponse(context.Background(), result, tt.targetChunkSize, tt.metadataMapChunkSize)
+			require.NoError(t, err)
+
+			var targetChunks int
+			for _, resp := range responses {
+				if _, ok := resp.Item.(*pb.GetTargetGraphResponse_Targets); ok {
+					targetChunks++
+				}
+			}
+			assert.Equal(t, tt.wantTargetChunks, targetChunks)
+		})
+	}
 }
