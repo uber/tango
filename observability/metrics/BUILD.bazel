@@ -4,6 +4,7 @@ go_library(
     name = "metrics",
     srcs = [
         "buckets.go",
+        "context.go",
         "emitter.go",
         "names.go",
         "options.go",
@@ -19,6 +20,7 @@ go_library(
 go_test(
     name = "metrics_test",
     srcs = [
+        "context_test.go",
         "emitter_test.go",
         "recordrequest_test.go",
     ],
