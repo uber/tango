@@ -32,8 +32,8 @@ import (
 
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/uber/tango/core/bazel"
-	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/targethasher"
+	"github.com/uber/tango/orchestrator"
 	"go.uber.org/zap"
 )
 
@@ -112,7 +112,7 @@ func run() error {
 		totalDuration += elapsed
 		fmt.Printf("run %d: targethasher: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(targethasherResult.TargetNames))
 		start = time.Now()
-		response, err := common.ResultToGetTargetGraphResponse(ctx, targethasherResult) // also print the time to convert to GetTargetGraphResponse format
+		response, err := orchestrator.ResultToGetTargetGraphResponse(ctx, targethasherResult) // also print the time to convert to GetTargetGraphResponse format
 		if err != nil {
 			return fmt.Errorf("run %d: converting to GetTargetGraphResponse: %w", i+1, err)
 		}

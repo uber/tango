@@ -206,7 +206,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	responses, err := common.ResultToGetTargetGraphResponse(ctx, result)
+	responses, err := ResultToGetTargetGraphResponse(ctx, result)
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph to response: %w", err)
 	}
