@@ -15,6 +15,7 @@
 package metrics
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -119,6 +120,79 @@ func TestRecordCountBucketsOverride(t *testing.T) {
 	e := New(s)
 	e.RecordCount("op", "n", 2, WithValueBuckets(custom))
 	assert.Equal(t, 1, histogramValueSamples(t, s, "op.n", map[string]string{}))
+}
+
+func TestTrackInFlightBalances(t *testing.T) {
+	s := tally.NewTestScope("", nil)
+	e := New(s)
+	release1 := e.TrackInFlight(OpGetTargetGraph)
+	release2 := e.TrackInFlight(OpGetTargetGraph)
+
+	v, ok := gaugeValue(t, s, InFlightRequests, map[string]string{TagOperation: OpGetTargetGraph})
+	require.True(t, ok)
+	assert.Equal(t, float64(2), v)
+
+	release1()
+	release2()
+
+	v, _ = gaugeValue(t, s, InFlightRequests, map[string]string{TagOperation: OpGetTargetGraph})
+	assert.Equal(t, float64(0), v)
+}
+
+func TestTrackInFlightSeparateOps(t *testing.T) {
+	s := tally.NewTestScope("", nil)
+	e := New(s)
+	defer e.TrackInFlight(OpGetTargetGraph)()
+	defer e.TrackInFlight(OpGetChangedTargets)()
+	defer e.TrackInFlight(OpGetChangedTargets)()
+
+	v1, _ := gaugeValue(t, s, InFlightRequests, map[string]string{TagOperation: OpGetTargetGraph})
+	v2, _ := gaugeValue(t, s, InFlightRequests, map[string]string{TagOperation: OpGetChangedTargets})
+	assert.Equal(t, float64(1), v1)
+	assert.Equal(t, float64(2), v2)
+}
+
+// A Tagged child must share the parent's counter — otherwise gauges leak if a
+// handler tags between the increment and the deferred release.
+func TestTrackInFlightSharedAcrossTaggedChildren(t *testing.T) {
+	s := tally.NewTestScope("", nil)
+	parent := New(s)
+	child := parent.Tagged(map[string]string{TagRepo: "acme"})
+
+	release := parent.TrackInFlight(OpGetTargetGraph)
+	release2 := child.TrackInFlight(OpGetTargetGraph)
+
+	v, _ := gaugeValue(t, s, InFlightRequests, map[string]string{TagOperation: OpGetTargetGraph})
+	assert.Equal(t, float64(2), v)
+
+	release()
+	release2()
+
+	v, _ = gaugeValue(t, s, InFlightRequests, map[string]string{TagOperation: OpGetTargetGraph})
+	assert.Equal(t, float64(0), v)
+}
+
+func TestTrackInFlightConcurrent(t *testing.T) {
+	s := tally.NewTestScope("", nil)
+	e := New(s)
+
+	const workers = 32
+	const iterations = 500
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				e.TrackInFlight(OpGetTargetGraph)()
+			}
+		}()
+	}
+	wg.Wait()
+
+	v, _ := gaugeValue(t, s, InFlightRequests, map[string]string{TagOperation: OpGetTargetGraph})
+	assert.Equal(t, float64(0), v)
 }
 
 func counterValue(t *testing.T, s tally.TestScope, name string, tags map[string]string) int64 {
