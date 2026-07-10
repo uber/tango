@@ -21,6 +21,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/internal/targetdiff"
@@ -74,76 +75,147 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		maxDist = request.GetOutputConfig().GetMaxDistance()
 	}
 
-	// Try to serve from cache first using the stored treehashes for both revisions.
-	// readTreehash returns ("", nil) on a cache miss (skip cache, recompute) but any
-	// real storage error surfaces here so an infra failure that disables the cache
-	// (e.g. a missing-deadline "missing TTL" reject) becomes a visible request failure
-	// rather than silent degradation.
+	// Fast path: stream a previously computed result straight from cache.
 	if !request.GetBypassCache() {
-		cacheStart := time.Now()
-		treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
-		if err != nil {
-			logger.Error("GetChangedTargets: Failed to read revision treehash", zap.Error(err))
-			return common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
-		}
-		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
-			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
-			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
-				logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
-			} else if cachedReader != nil {
-				// Buffer all responses before sending any. A concurrent goroutine write may have
-				// left a partial blob in storage; buffering lets us detect corruption and fall
-				// through to recompute before we've sent anything to the client.
-				var cached []*pb.GetChangedTargetsResponse
-				var readErr error
-				for {
-					if err := ctx.Err(); err != nil {
-						cachedReader.Close()
-						// Client gave up while we were draining the cache. Surface as a user-cancelled error.
-						return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)
-					}
-					var resp *pb.GetChangedTargetsResponse
-					resp, readErr = cachedReader.Read()
-					if readErr == io.EOF {
-						readErr = nil
-						break
-					}
-					if readErr != nil {
-						break
-					}
-					cached = append(cached, resp)
-				}
-				cachedReader.Close()
-
-				if readErr != nil {
-					// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
-					logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
-				} else {
-					cacheReadDuration := time.Since(cacheStart)
-					logger.Info("GetChangedTargets: Cache hit, streaming from storage",
-						zap.Duration("cache_read_duration", cacheReadDuration),
-					)
-					scope.Counter("changed_targets_cache_hit").Inc(1)
-					scope.Timer("cache_read_duration").Record(cacheReadDuration)
-					if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
-						logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
-						return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send cached response: %w", sendErr))
-					}
-					totalDuration := time.Since(start)
-					logger.Info("GetChangedTargets: Successfully streamed from cache",
-						zap.Duration("total_duration", totalDuration),
-					)
-					scope.Timer("total_duration").Record(totalDuration)
-					scope.Histogram("total_duration.histogram", c.totalDurationBuckets).RecordDuration(totalDuration)
-					return nil
-				}
-			}
+		served, err := c.serveChangedTargetsFromCache(ctx, scope, logger, request, stream, maxDist, start)
+		if err != nil || served {
+			return err
 		}
 	}
 
-	jobs := make([]*job, 2)
+	// Fetch both revisions' target graphs concurrently.
+	firstGraph, secondGraph, err := c.fetchTargetGraphs(ctx, scope, logger, request)
+	if err != nil {
+		return err
+	}
 
+	compareStart := time.Now()
+	changedTargetsResponses, err := c.compareTargetGraphs(ctx, logger, firstGraph, secondGraph, maxDist)
+	// Allow GC of raw graph data while the caching goroutine runs.
+	firstGraph = nil
+	secondGraph = nil
+	if err != nil {
+		if ctx.Err() != nil {
+			return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+		}
+		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
+		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))
+	}
+	compareDuration := time.Since(compareStart)
+	logger.Info("GetChangedTargets: Target graphs compared",
+		zap.Duration("compare_duration", compareDuration),
+	)
+	scope.Timer("compare_duration").Record(compareDuration)
+
+	// Cache the computed result concurrently so it doesn't block the stream send.
+	c.cacheComparedTargets(logger, request, changedTargetsResponses)
+
+	sendStart := time.Now()
+	if err := sendTrimmedChangedTargets(stream, changedTargetsResponses, maxDist, request.GetOutputConfig()); err != nil {
+		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
+		return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send response: %w", err))
+	}
+	sendDuration := time.Since(sendStart)
+	scope.Timer("send_duration").Record(sendDuration)
+
+	totalDuration := time.Since(start)
+	logger.Info("GetChangedTargets: Successfully processed request",
+		zap.Duration("send_duration", sendDuration),
+		zap.Duration("total_duration", totalDuration),
+	)
+	scope.Timer("total_duration").Record(totalDuration)
+	scope.Histogram("total_duration.histogram", c.totalDurationBuckets).RecordDuration(totalDuration)
+	return nil
+}
+
+// serveChangedTargetsFromCache attempts to stream a previously computed
+// compared-targets result straight from storage. It returns:
+//   - (true, nil)  when a cached result was found and fully sent to the client;
+//   - (false, nil) on a cache miss or a corrupt blob — the caller should recompute;
+//   - (false, err) on an infra failure or a client disconnect that aborts the request.
+//
+// readTreehash returns ("", nil) on a cache miss (skip cache, recompute) but any
+// real storage error surfaces here so an infra failure that disables the cache
+// (e.g. a missing-deadline "missing TTL" reject) becomes a visible request failure
+// rather than silent degradation.
+func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tally.Scope, logger *zap.Logger, request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer, maxDist int32, start time.Time) (bool, error) {
+	cacheStart := time.Now()
+	treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
+	if err != nil {
+		logger.Error("GetChangedTargets: Failed to read revision treehash", zap.Error(err))
+		return false, common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
+	}
+	if treehash1 == "" || treehash2 == "" {
+		return false, nil
+	}
+
+	cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
+	cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
+	if cacheErr != nil && !storage.IsNotFound(cacheErr) {
+		logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
+		return false, nil
+	}
+	if cachedReader == nil {
+		return false, nil
+	}
+
+	// Buffer all responses before sending any. A concurrent goroutine write may have
+	// left a partial blob in storage; buffering lets us detect corruption and fall
+	// through to recompute before we've sent anything to the client.
+	var cached []*pb.GetChangedTargetsResponse
+	var readErr error
+	for {
+		if err := ctx.Err(); err != nil {
+			cachedReader.Close()
+			// Client gave up while we were draining the cache. Surface as a user-cancelled error.
+			return false, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)
+		}
+		var resp *pb.GetChangedTargetsResponse
+		resp, readErr = cachedReader.Read()
+		if readErr == io.EOF {
+			readErr = nil
+			break
+		}
+		if readErr != nil {
+			break
+		}
+		cached = append(cached, resp)
+	}
+	cachedReader.Close()
+
+	if readErr != nil {
+		// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
+		logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
+		return false, nil
+	}
+
+	cacheReadDuration := time.Since(cacheStart)
+	logger.Info("GetChangedTargets: Cache hit, streaming from storage",
+		zap.Duration("cache_read_duration", cacheReadDuration),
+	)
+	scope.Counter("changed_targets_cache_hit").Inc(1)
+	scope.Timer("cache_read_duration").Record(cacheReadDuration)
+	if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
+		logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
+		return false, common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send cached response: %w", sendErr))
+	}
+	totalDuration := time.Since(start)
+	logger.Info("GetChangedTargets: Successfully streamed from cache",
+		zap.Duration("total_duration", totalDuration),
+	)
+	scope.Timer("total_duration").Record(totalDuration)
+	scope.Histogram("total_duration.histogram", c.totalDurationBuckets).RecordDuration(totalDuration)
+	return true, nil
+}
+
+// fetchTargetGraphs computes both revisions' target graphs concurrently. Each
+// fetch runs under its own cancellable context so that, when one fails, the
+// sibling is cancelled to avoid wasting work on a result that will be discarded.
+// Errors caused solely by that induced cancellation are dropped; only the
+// original failure is returned. A client disconnect surfaces as a user-cancelled
+// error.
+func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, logger *zap.Logger, request *pb.GetChangedTargetsRequest) ([]*pb.GetTargetGraphResponse, []*pb.GetTargetGraphResponse, error) {
+	jobs := make([]*job, 2)
 	for i := 0; i < 2; i++ {
 		// create independent contexts for each job; if one of the jobs fails, the other one should be cancelled to save resources and improve latency
 		ctxNew, cancelNew := context.WithCancel(ctx)
@@ -231,7 +303,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	if ctx.Err() != nil {
 		// If the context was cancelled by the upstream, just return the original error without additional augmentation
-		return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+		return nil, nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
 	}
 
 	// Process errors, only aggregating the ones that are original ones and not a result of the other job being cancelled
@@ -245,38 +317,24 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			err = errors.Join(err, fmt.Errorf("failed to get target graph #%d: %w", i+1, job.err))
 		}
 	}
-
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
+
 	firstGraph := jobs[0].graphStreamChunks
 	secondGraph := jobs[1].graphStreamChunks
 	// Drop job references so the GC can reclaim them once the comparison is done.
 	jobs[0].graphStreamChunks = nil
 	jobs[1].graphStreamChunks = nil
+	return firstGraph, secondGraph, nil
+}
 
-	compareStart := time.Now()
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, logger, firstGraph, secondGraph, maxDist)
-	// Allow GC of raw graph data while the caching goroutine runs.
-	firstGraph = nil
-	secondGraph = nil
-	if err != nil {
-		if ctx.Err() != nil {
-			return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
-		}
-		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
-		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))
-	}
-	compareDuration := time.Since(compareStart)
-	logger.Info("GetChangedTargets: Target graphs compared",
-		zap.Duration("compare_duration", compareDuration),
-	)
-	scope.Timer("compare_duration").Record(compareDuration)
-
-	// Cache the computed result concurrently so it doesn't block the stream send.
-	// Re-read treehashes inside the goroutine — the orchestrator may have stored them
-	// during computation. Both the goroutine and the send loop below only read
-	// changedTargetsResponses, so concurrent access is safe.
+// cacheComparedTargets writes the computed compared-targets result to storage in
+// a fire-and-forget goroutine so it does not block the stream send. It re-reads
+// the treehashes inside the goroutine — the orchestrator may have stored them
+// during computation. responses is only read (never mutated) by the goroutine and
+// the foreground send, so concurrent access is safe; the caller must not mutate it.
+func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetChangedTargetsRequest, responses []*pb.GetChangedTargetsResponse) {
 	go func() {
 		// Use c.appCtx directly: the cache write is fire-and-forget and must
 		// outlive the request (so a client disconnect doesn't abort it) but
@@ -295,7 +353,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		}
 		if treehash1 != "" && treehash2 != "" {
 			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
-			if writeErr := storage.WriteChangedTargetsStream(c.appCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
+			if writeErr := storage.WriteChangedTargetsStream(c.appCtx, c.storage, cacheKey, responses); writeErr != nil {
 				logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
 			}
 		} else {
@@ -304,23 +362,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 				zap.Bool("treehash2_empty", treehash2 == ""))
 		}
 	}()
-
-	sendStart := time.Now()
-	if err := sendTrimmedChangedTargets(stream, changedTargetsResponses, maxDist, request.GetOutputConfig()); err != nil {
-		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
-		return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send response: %w", err))
-	}
-	sendDuration := time.Since(sendStart)
-	scope.Timer("send_duration").Record(sendDuration)
-
-	totalDuration := time.Since(start)
-	logger.Info("GetChangedTargets: Successfully processed request",
-		zap.Duration("send_duration", sendDuration),
-		zap.Duration("total_duration", totalDuration),
-	)
-	scope.Timer("total_duration").Record(totalDuration)
-	scope.Histogram("total_duration.histogram", c.totalDurationBuckets).RecordDuration(totalDuration)
-	return nil
 }
 
 // compareTargetGraphs diffs two target graph streams and produces a chunked
