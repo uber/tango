@@ -73,7 +73,7 @@ Every emit call takes an op name as its first argument. For example, `e.Inc("get
 
 ## RecordRequest
 
-Single helper for the RPC defer pattern — records duration and emits the appropriate success/failure counter:
+Single helper for the RPC defer pattern — records duration and emits the appropriate success/failure counter; if in error path, internally it also consults error classification for error type and include it in emission.
 
 ```go
 // RecordRequest records TotalDuration and emits a requests counter.
