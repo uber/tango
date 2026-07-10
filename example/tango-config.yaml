@@ -9,7 +9,6 @@ storage:
 # Repository configuration
 repository:
   - remote: "https://github.com/uber/tango.git"
-    default_branch: "main"
     full_hash_repos:
       - ""
     excluded_files:
