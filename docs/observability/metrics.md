@@ -27,32 +27,36 @@ observability/metrics/
 
 ## Emitter
 
-`Emitter` is an interface. `New(scope)` returns the default tally-backed implementation; `New(nil)` returns a no-op, useful for tests.
+`Emitter` is a concrete struct. `New(scope)` returns a tally-backed emitter; `New(nil)` falls back to a no-op scope, useful for tests.
 
 ```go
-type Emitter interface {
-  Inc(op, name string, opts ...Option)          // counter: +1 each call
-  Gauge(op, name string, v float64, opts ...Option)
-  RecordDur(op, name string, d time.Duration, opts ...Option)  // duration histogram
-  RecordCount(op, name string, v int64, opts ...Option)        // value histogram (e.g. "4200 targets")
-  Tagged(tags map[string]string) Emitter
-}
-
-type defaultEmitter struct {
+type Emitter struct {
   scope           tally.Scope
+  baseTags        map[string]string
   durationBuckets tally.DurationBuckets
   valueBuckets    tally.ValueBuckets
+  inFlight        *sync.Map
 }
+
+func (e *Emitter) Inc(op, name string, opts ...Option)                        // counter: +1 each call
+func (e *Emitter) Gauge(op, name string, v float64, opts ...Option)
+func (e *Emitter) RecordDur(op, name string, d time.Duration, opts ...Option) // duration histogram
+func (e *Emitter) RecordCount(op, name string, v int64, opts ...Option)       // value histogram (e.g. "4200 targets")
+func (e *Emitter) Tagged(tags map[string]string) *Emitter
+
+// Option customizes a single emission; WithTags / WithDurationBuckets /
+// WithValueBuckets each return one.
+type Option func(*emitOpts)
 ```
 
 ```go
 // New returns the default tally-backed Emitter. A nil scope falls back to
 // tally.NoopScope
-func New(scope tally.Scope) Emitter
+func New(scope tally.Scope) *Emitter
 
 // Tagged returns a child Emitter that adds tags to every subsequent emission.
 // The parent is unchanged.
-func (e *defaultEmitter) Tagged(tags map[string]string) Emitter
+func (e *Emitter) Tagged(tags map[string]string) *Emitter
 
 // WithTags attaches key/value tags to a single emission. Multiple WithTags
 // compose with later-wins semantics on key collision.
@@ -79,13 +83,13 @@ Single helper for the RPC defer pattern — records duration and emits the appro
 // RecordRequest records TotalDuration and emits a requests counter.
 // If err is nil, tags result=success. Otherwise, derives failure_type
 // and failure_source from the error via observability/errors.
-func RecordRequest(e Emitter, op string, dur time.Duration, err error)
+func RecordRequest(e *Emitter, op string, dur time.Duration, err error)
 ```
 
 Internally:
 
 ```go
-func RecordRequest(e Emitter, op string, dur time.Duration, err error) {
+func RecordRequest(e *Emitter, op string, dur time.Duration, err error) {
     e.RecordDur(op, TotalDuration, dur)
     if err != nil {
         recordFailure(e, op, err)
@@ -119,7 +123,7 @@ Gauges are update-only, so an in-flight counter needs an owning atomic somewhere
 // and returns a decrement closure the caller is expected to defer.
 // The counter is shared across Tagged children so increment/decrement
 // always refers to the same gauge series.
-func (e *defaultEmitter) TrackInFlight(op string) func()
+func (e *Emitter) TrackInFlight(op string) func()
 ```
 
 Call site:
@@ -232,9 +236,17 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
     defer func() {
         metrics.RecordRequest(e, metrics.OpGetChangedTargets, time.Since(start), retErr)
     }()
-    // ... downstream helpers pull the tagged emitter via metrics.FromContext(ctx)
-    return nil
-}
+
+    // ... compute changed targets ...
+    changedTargets := ...
+
+    e.RecordCount(
+        metrics.OpGetChangedTargets,
+        metrics.ChangedTargetsCount,
+        int64(len(changedTargets)),
+        metrics.WithValueBuckets(tally.ValueBuckets{10, 50, 100, 500, 1000}
+    )
+
     return nil
 }
 ```
