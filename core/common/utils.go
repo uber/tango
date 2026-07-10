@@ -137,8 +137,10 @@ func HashRequestOptions(opts *tangopb.RequestOptions) string {
 // for typical target rates.
 const cancelCheckInterval = 4096
 
-// ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse
-func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result) ([]*tangopb.GetTargetGraphResponse, error) {
+// ResultToGetTargetGraphResponse converts a Result to a GetTargetGraphResponse.
+// targetChunkSize controls how many OptimizedTarget entries per stream message.
+// metadataMapChunkSize controls how many entries per metadata map chunk.
+func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result, targetChunkSize, metadataMapChunkSize int) ([]*tangopb.GetTargetGraphResponse, error) {
 	// Map target names to ids. This list is topologically sorted, so the ids are stable.
 	// IDs start at 1 — 0 is reserved as the proto3 "unset" sentinel so consumers using
 	// encoding/json (which honors `omitempty` on int32 fields) never silently lose a target.
@@ -224,14 +226,14 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 	attrStrValIDToVal := attrStrValMapper.Invert()
 
 	// chunk targets into multiple messages for streaming
-	responses := chunkTargets(optimizedTargets, DefaultTargetChunkSize)
+	responses := chunkTargets(optimizedTargets, targetChunkSize)
 	for _, meta := range ChunkMetadata(
 		targetIDToName,
 		ruleTypeIDToName,
 		tagIDToName,
 		attrNameIDToName,
 		attrStrValIDToVal,
-		DefaultMetadataMapChunkSize,
+		metadataMapChunkSize,
 	) {
 		responses = append(responses, &tangopb.GetTargetGraphResponse{
 			Item: &tangopb.GetTargetGraphResponse_Metadata{Metadata: meta},
@@ -242,10 +244,6 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 }
 
 func chunkTargets(targets []*tangopb.OptimizedTarget, chunkSize int) []*tangopb.GetTargetGraphResponse {
-	if chunkSize <= 0 {
-		chunkSize = DefaultTargetChunkSize
-	}
-
 	// at least one chunk
 	numChunks := max(1, (len(targets)+chunkSize-1)/chunkSize)
 
@@ -293,10 +291,6 @@ func ChunkMetadata(
 	attrStrValIDToVal map[int32]string,
 	chunkSize int,
 ) []*tangopb.Metadata {
-	if chunkSize <= 0 {
-		chunkSize = DefaultMetadataMapChunkSize
-	}
-
 	targetChunks := splitMap(targetIDToName, chunkSize)
 	attrValChunks := splitMap(attrStrValIDToVal, chunkSize)
 
