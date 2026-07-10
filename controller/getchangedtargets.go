@@ -330,10 +330,9 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 }
 
 // cacheComparedTargets writes the computed compared-targets result to storage in
-// a fire-and-forget goroutine so it does not block the stream send. It re-reads
-// the treehashes inside the goroutine — the orchestrator may have stored them
-// during computation. responses is only read (never mutated) by the goroutine and
-// the foreground send, so concurrent access is safe; the caller must not mutate it.
+// a fire-and-forget goroutine so it does not block the stream send. The responses
+// is only read (never mutated) by the goroutine and the foreground send, so
+// concurrent access is safe; the caller must not mutate it. This is best effort.
 func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetChangedTargetsRequest, responses []*pb.GetChangedTargetsResponse) {
 	go func() {
 		// Use c.appCtx directly: the cache write is fire-and-forget and must

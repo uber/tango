@@ -30,6 +30,7 @@ import (
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
+	"github.com/uber/tango/orchestrator"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
@@ -1377,4 +1378,214 @@ func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) 
 		}
 	}
 	assert.True(t, gotDeleted, "DELETED entry at distance 0 must survive max_distance=1")
+}
+
+// fakeGraphReader is a minimal storage.GraphReader that replays a fixed set of
+// chunks then reports io.EOF. It ignores context, so it exercises the caller's
+// own cancellation/error handling rather than the reader's.
+type fakeGraphReader struct {
+	chunks []*pb.GetTargetGraphResponse
+	idx    int
+	closed bool
+}
+
+func (r *fakeGraphReader) Read() (*pb.GetTargetGraphResponse, error) {
+	if r.idx >= len(r.chunks) {
+		return nil, io.EOF
+	}
+	c := r.chunks[r.idx]
+	r.idx++
+	return c, nil
+}
+
+func (r *fakeGraphReader) Close() error {
+	r.closed = true
+	return nil
+}
+
+func changedTargetsRequest() *pb.GetChangedTargetsRequest {
+	return &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
+	}
+}
+
+func TestServeChangedTargetsFromCache(t *testing.T) {
+	t.Run("cache miss returns not-served, no error", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		st := storagemock.NewMockStorage(ctrl)
+		// Both treehash reads miss, so the cache path is skipped entirely.
+		st.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "missing"}).Times(2)
+
+		c := newTestController(zaptest.NewLogger(t))
+		c.storage = st
+		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+
+		served, err := c.serveChangedTargetsFromCache(context.Background(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		require.NoError(t, err)
+		assert.False(t, served, "a cache miss must not be served")
+	})
+
+	t.Run("corrupt cached blob falls through to recompute", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+
+		// A valid single-message blob truncated by one byte — mimics an
+		// incomplete concurrent write. The reader errors partway, and the
+		// caller must fall through (served=false) without sending anything.
+		var buf bytes.Buffer
+		require.NoError(t, gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetChangedTargetsResponse{
+			Item: &pb.GetChangedTargetsResponse_ChangedTargets{ChangedTargets: &pb.ChangedTargets{}},
+		}))
+		truncated := buf.Bytes()[:buf.Len()-1]
+
+		st := storagemock.NewMockStorage(ctrl)
+		st.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+			func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
+				switch {
+				case strings.Contains(req.Key, "compared-targets"):
+					return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(truncated))}, nil
+				case strings.Contains(req.Key, "sha1"):
+					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash1"))}, nil
+				case strings.Contains(req.Key, "sha2"):
+					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash2"))}, nil
+				default:
+					return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
+				}
+			}).AnyTimes()
+
+		c := newTestController(zaptest.NewLogger(t))
+		c.storage = st
+		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+		// No Send expectation: a corrupt blob must not send anything to the client.
+
+		served, err := c.serveChangedTargetsFromCache(context.Background(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		require.NoError(t, err)
+		assert.False(t, served, "a corrupt blob must trigger recompute, not a partial send")
+	})
+
+	t.Run("clean hit is served", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+
+		var buf bytes.Buffer
+		w := gogio.NewDelimitedWriter(&buf)
+		require.NoError(t, w.WriteMsg(&pb.GetChangedTargetsResponse{
+			Item: &pb.GetChangedTargetsResponse_ChangedTargets{ChangedTargets: &pb.ChangedTargets{}},
+		}))
+		require.NoError(t, w.WriteMsg(&pb.GetChangedTargetsResponse{
+			Item: &pb.GetChangedTargetsResponse_Metadata{Metadata: &pb.Metadata{}},
+		}))
+		cached := buf.Bytes()
+
+		st := storagemock.NewMockStorage(ctrl)
+		st.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+			func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
+				switch {
+				case strings.Contains(req.Key, "compared-targets"):
+					return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cached))}, nil
+				case strings.Contains(req.Key, "sha1"):
+					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash1"))}, nil
+				case strings.Contains(req.Key, "sha2"):
+					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash2"))}, nil
+				default:
+					return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
+				}
+			}).AnyTimes()
+
+		c := newTestController(zaptest.NewLogger(t))
+		c.storage = st
+		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+		stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
+
+		served, err := c.serveChangedTargetsFromCache(context.Background(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		require.NoError(t, err)
+		assert.True(t, served, "a clean cache hit must be served")
+	})
+}
+
+func TestFetchTargetGraphs(t *testing.T) {
+	// BypassCache=true keeps getGraph on the orchestrator path only, so these
+	// tests need no storage mock.
+	bypassRequest := func() *pb.GetChangedTargetsRequest {
+		r := changedTargetsRequest()
+		r.BypassCache = true
+		return r
+	}
+	chunk := &pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{Metadata: &pb.Metadata{}},
+	}
+
+	t.Run("returns both graphs on success", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		orch := orchestratormock.NewMockOrchestrator(ctrl)
+		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
+			func(_ context.Context, _ orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
+				return &fakeGraphReader{chunks: []*pb.GetTargetGraphResponse{chunk}}, nil
+			}).Times(2)
+
+		c := newTestController(zaptest.NewLogger(t))
+		c.orchestrator = orch
+
+		first, second, err := c.fetchTargetGraphs(context.Background(), c.scope, c.logger, bypassRequest())
+		require.NoError(t, err)
+		require.Len(t, first, 1)
+		require.Len(t, second, 1)
+	})
+
+	t.Run("first revision failure names graph #1", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		injected := errors.New("orchestrator boom")
+		orch := orchestratormock.NewMockOrchestrator(ctrl)
+		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
+			func(_ context.Context, p orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
+				if p.Req.GetBuildDescription().GetBaseSha() == "sha1" {
+					return nil, injected
+				}
+				return &fakeGraphReader{chunks: []*pb.GetTargetGraphResponse{chunk}}, nil
+			}).Times(2)
+
+		c := newTestController(zaptest.NewLogger(t))
+		c.orchestrator = orch
+
+		first, second, err := c.fetchTargetGraphs(context.Background(), c.scope, c.logger, bypassRequest())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, injected)
+		assert.Contains(t, err.Error(), "target graph #1")
+		assert.Nil(t, first)
+		assert.Nil(t, second)
+	})
+
+	t.Run("empty reader yields no-chunks error", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		orch := orchestratormock.NewMockOrchestrator(ctrl)
+		// Both readers immediately EOF (no chunks).
+		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
+			func(_ context.Context, _ orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
+				return &fakeGraphReader{}, nil
+			}).Times(2)
+
+		c := newTestController(zaptest.NewLogger(t))
+		c.orchestrator = orch
+
+		_, _, err := c.fetchTargetGraphs(context.Background(), c.scope, c.logger, bypassRequest())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no chunks returned")
+	})
+
+	t.Run("panic in fetch is recovered as an error", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		orch := orchestratormock.NewMockOrchestrator(ctrl)
+		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
+			func(_ context.Context, _ orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
+				panic("boom in orchestrator")
+			}).Times(2)
+
+		c := newTestController(zaptest.NewLogger(t))
+		c.orchestrator = orch
+
+		_, _, err := c.fetchTargetGraphs(context.Background(), c.scope, c.logger, bypassRequest())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "panic in graph fetch")
+	})
 }
