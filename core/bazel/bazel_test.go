@@ -88,3 +88,45 @@ func TestNewBazelClient_WithNilExecCommand(t *testing.T) {
 	assert.Equal(t, "/workspace", execCmd.Dir)
 	assert.Contains(t, execCmd.Env, "KEY=value")
 }
+
+func TestNewBazelClient_Validation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		timeout time.Duration
+		wantErr bool
+	}{
+		{
+			name:    "valid timeout",
+			timeout: 5 * time.Minute,
+		},
+		{
+			name:    "query timeout not set",
+			timeout: 0,
+			wantErr: true,
+		},
+		{
+			name:    "negative query timeout",
+			timeout: -1 * time.Second,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewBazelClient(context.Background(), Params{
+				BazelCommand:  "bazel",
+				WorkspacePath: "/tmp/test",
+				Logger:        zap.NewNop().Sugar(),
+				QueryTimeout:  tt.timeout,
+			})
+			if tt.wantErr {
+				require.Error(t, err, "expected error when %s", tt.name)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}

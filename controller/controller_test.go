@@ -117,3 +117,54 @@ func TestLinkRequestCtx_CancelReleasesAfterFunc(t *testing.T) {
 	cancelApp()
 	assert.Equal(t, firstErr, linked.Err(), "linked.Err() must not change after cancelLink")
 }
+
+func TestNewController_Validation(t *testing.T) {
+	t.Parallel()
+
+	valid := config.ChunkConfig{
+		TargetChunkSize:        250,
+		ChangedTargetChunkSize: 125,
+		MetadataMapChunkSize:   50_000,
+	}
+
+	tests := []struct {
+		name    string
+		chunk   config.ChunkConfig
+		wantErr bool
+	}{
+		{
+			name:  "valid",
+			chunk: valid,
+		},
+		{
+			name:    "target_chunk_size not set",
+			chunk:   config.ChunkConfig{ChangedTargetChunkSize: 125, MetadataMapChunkSize: 50_000},
+			wantErr: true,
+		},
+		{
+			name:    "changed_target_chunk_size not set",
+			chunk:   config.ChunkConfig{TargetChunkSize: 250, MetadataMapChunkSize: 50_000},
+			wantErr: true,
+		},
+		{
+			name:    "metadata_map_chunk_size not set",
+			chunk:   config.ChunkConfig{TargetChunkSize: 250, ChangedTargetChunkSize: 125},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewController(context.Background(), Params{
+				Logger:      zap.NewNop(),
+				ChunkConfig: tt.chunk,
+			})
+			if tt.wantErr {
+				require.Error(t, err, "expected error when %s", tt.name)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
