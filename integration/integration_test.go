@@ -19,17 +19,18 @@ package integration_test
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
+	"text/template"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/controller"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
@@ -42,7 +43,10 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
-const requestTimeout = 10 * time.Minute
+const (
+	requestTimeout     = 10 * time.Minute
+	configTemplateFile = "testdata/tango-config.yaml.tmpl"
+)
 
 func repoRemote(t *testing.T) string {
 	t.Helper()
@@ -53,32 +57,33 @@ func repoRemote(t *testing.T) string {
 
 func writeConfig(t *testing.T, dir, remote, clonePath, workerPath string) string {
 	t.Helper()
+
+	tmpl, err := template.ParseFiles(configTemplateFile)
+	require.NoError(t, err, "failed to parse config template")
+
 	configPath := filepath.Join(dir, "tango-config.yaml")
-	content := fmt.Sprintf(`storage:
-  type: "memory"
+	f, err := os.Create(configPath)
+	require.NoError(t, err, "failed to create config file")
+	defer f.Close()
 
-repository:
-  - remote: %q
-    default_branch: "main"
-    full_hash_repos: [""]
-    excluded_files: ["^@@?bazel_tools/"]
-    exclude_external_targets: true
-    bzlmod_enabled: true
-    query_timeout: 600
+	err = tmpl.Execute(f, struct {
+		Remote     string
+		ClonePath  string
+		WorkerPath string
+	}{
+		Remote:     remote,
+		ClonePath:  clonePath,
+		WorkerPath: workerPath,
+	})
+	require.NoError(t, err, "failed to render config template")
 
-service:
-  worker_pool_size: 2
-  repo_manager_clone_path: %q
-  worker_root_path: %q
-`, remote, clonePath, workerPath)
-	require.NoError(t, os.WriteFile(configPath, []byte(content), 0o644))
 	return configPath
 }
 
 func startServer(t *testing.T, remote string) string {
 	t.Helper()
 
-	cacheDir := filepath.Join(os.TempDir(), "tango-e2e-cache")
+	cacheDir := filepath.Join(t.TempDir(), "tango-e2e-cache")
 	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 
@@ -96,20 +101,24 @@ func startServer(t *testing.T, remote string) string {
 
 	store := storage.NewMemoryStorage()
 
-	rm := repomanager.NewRepoManager(appCtx, repomanager.Params{
-		Git:                  git.New(clonePath),
+	rm, err := repomanager.NewRepoManager(appCtx, repomanager.Params{
+		Git:                  git.New(clonePath, logger),
 		Logger:               logger,
 		RepoManagerClonePath: clonePath,
 		WorkerRootPath:       workerPath,
 		PoolSize:             2,
 	})
+	require.NoError(t, err, "failed to create repo manager")
+
+	cfg, err := config.Parse(configPath)
+	require.NoError(t, err, "failed to parse config")
 
 	orch, err := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
-		Storage:        store,
-		RepoManager:    rm,
-		Logger:         logger,
-		GitFactory:     git.New,
-		ConfigFilePath: configPath,
+		Storage:     store,
+		RepoManager: rm,
+		Logger:      logger,
+		GitFactory:  func(dir string) git.Interface { return git.New(dir, logger) },
+		Config:      cfg,
 	})
 	require.NoError(t, err, "failed to create orchestrator")
 
@@ -266,23 +275,25 @@ func getChangedTargets(t *testing.T, client pb.TangoYARPCClient, remote, firstSH
 		changedTargets []*pb.ChangedTarget
 		metadata       *pb.Metadata
 	)
-	for {
-		msg, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		require.NoError(t, err, "unexpected error receiving changed targets chunk")
-
-		switch item := msg.GetItem().(type) {
-		case *pb.GetChangedTargetsResponse_ChangedTargets:
-			if item.ChangedTargets != nil {
-				changedTargets = append(changedTargets, item.ChangedTargets.GetChangedTargets()...)
+	func() {
+		defer stream.CloseSend()
+		for {
+			msg, err := stream.Recv()
+			if err == io.EOF {
+				break
 			}
-		case *pb.GetChangedTargetsResponse_Metadata:
-			metadata = mergeMetadata(metadata, item.Metadata)
+			require.NoError(t, err, "unexpected error receiving changed targets chunk")
+
+			switch item := msg.GetItem().(type) {
+			case *pb.GetChangedTargetsResponse_ChangedTargets:
+				if item.ChangedTargets != nil {
+					changedTargets = append(changedTargets, item.ChangedTargets.GetChangedTargets()...)
+				}
+			case *pb.GetChangedTargetsResponse_Metadata:
+				metadata = mergeMetadata(metadata, item.Metadata)
+			}
 		}
-	}
-	_ = stream.CloseSend()
+	}()
 
 	require.NotNil(t, metadata, "expected metadata in response")
 	require.NotEmpty(t, metadata.GetTargetIdMapping(), "expected non-empty target ID mapping")

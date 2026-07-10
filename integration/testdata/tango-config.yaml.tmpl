@@ -1,0 +1,16 @@
+storage:
+  type: "memory"
+
+repository:
+  - remote: {{.Remote}}
+    default_branch: "main"
+    full_hash_repos: [""]
+    excluded_files: ["^@@?bazel_tools/"]
+    exclude_external_targets: true
+    bzlmod_enabled: true
+    query_timeout: 600
+
+service:
+  worker_pool_size: 2
+  repo_manager_clone_path: {{.ClonePath}}
+  worker_root_path: {{.WorkerPath}}

@@ -5,11 +5,13 @@ go_test(
     size = "large",
     timeout = "long",
     srcs = ["integration_test.go"],
+    data = glob(["testdata/**"]),
     tags = [
         "integration",
         "manual",
     ],
     deps = [
+        "//config",
         "//controller",
         "//core/git",
         "//core/repomanager",
