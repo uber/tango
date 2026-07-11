@@ -4,6 +4,9 @@ storage:
 repository:
   - remote: {{.Remote}}
     default_branch: "main"
+{{- if .BazelCommand}}
+    bazel_command: {{.BazelCommand}}
+{{- end}}
     full_hash_repos: [""]
     excluded_files: ["^@@?bazel_tools/"]
     exclude_external_targets: true

@@ -18,7 +18,7 @@ test:
 # Run integration tests (requires bazel; may take several minutes)
 test-integration:
 	@echo "Running integration tests..."
-	@$(BAZEL) test //integration:integration_test --test_output=errors --test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel)
+	@$(BAZEL) test //integration:integration_test --test_output=errors --test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) --test_env=HOME=$$HOME
 	@echo "Integration tests passed!"
 
 # Generate protobuf files using protoc

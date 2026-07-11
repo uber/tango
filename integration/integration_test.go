@@ -67,13 +67,15 @@ func writeConfig(t *testing.T, dir, remote, clonePath, workerPath string) string
 	defer f.Close()
 
 	err = tmpl.Execute(f, struct {
-		Remote     string
-		ClonePath  string
-		WorkerPath string
+		Remote       string
+		ClonePath    string
+		WorkerPath   string
+		BazelCommand string
 	}{
-		Remote:     remote,
-		ClonePath:  clonePath,
-		WorkerPath: workerPath,
+		Remote:       remote,
+		ClonePath:    clonePath,
+		WorkerPath:   workerPath,
+		BazelCommand: filepath.Join(remote, "tools", "bazel"),
 	})
 	require.NoError(t, err, "failed to render config template")
 
@@ -82,10 +84,6 @@ func writeConfig(t *testing.T, dir, remote, clonePath, workerPath string) string
 
 func startServer(t *testing.T, remote string) string {
 	t.Helper()
-
-	cacheDir := filepath.Join(t.TempDir(), "tango-e2e-cache")
-	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
-	t.Setenv("XDG_CACHE_HOME", cacheDir)
 
 	configDir := t.TempDir()
 	clonePath := t.TempDir()
