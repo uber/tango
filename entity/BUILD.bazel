@@ -1,0 +1,11 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "entity",
+    srcs = [
+        "build_description.go",
+        "get_target_graph_param.go",
+    ],
+    importpath = "github.com/uber/tango/entity",
+    visibility = ["//visibility:public"],
+)
