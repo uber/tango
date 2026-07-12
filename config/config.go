@@ -22,6 +22,17 @@ import (
 	yaml "github.com/goccy/go-yaml"
 )
 
+const (
+	_defaultBazelQueryTimeoutSeconds = 600
+	_defaultMaxNumTargets            = 250
+	_defaultMaxNumChangedTargets     = 125
+	_defaultMaxNumMetadataEntries    = 50_000
+)
+
+var (
+	_bzlmodEnabledDefault = true
+)
+
 var _ RepositoryConfigProvider = (*Config)(nil)
 
 // Config is the root configuration structure.
@@ -58,17 +69,23 @@ func Parse(configFilePath string) (*Config, error) {
 	if config.Storage.Type == "" {
 		config.Storage.Type = StorageTypeMemory
 	}
-	if config.Service.WorkerRootPath != "" && config.Service.RepoManagerClonePath == "" {
-		return nil, fmt.Errorf("service.repo_manager_clone_path must be set when worker_root_path is specified")
-	}
-	if config.Service.RepoManagerClonePath == "" {
-		config.Service.RepoManagerClonePath = filepath.Join(os.TempDir(), "tango-repo-manager")
+	if config.Service.WorkspacesRoot == "" {
+		return nil, fmt.Errorf("service.workspaces_root must be set")
 	}
 	if config.Service.WorkerRootPath == "" {
-		config.Service.WorkerRootPath = filepath.Join(config.Service.RepoManagerClonePath, ".workers")
+		config.Service.WorkerRootPath = filepath.Join(config.Service.WorkspacesRoot, ".workers")
 	}
-	if config.Service.WorkerPoolSize <= 0 {
-		return nil, fmt.Errorf("service.worker_pool_size must be > 0, got %d", config.Service.WorkerPoolSize)
+	if config.Service.MaxWorkerPoolSize <= 0 {
+		return nil, fmt.Errorf("service.max_worker_pool_size must be > 0, got %d", config.Service.MaxWorkerPoolSize)
+	}
+	if config.Service.Streaming.MaxNumTargets <= 0 {
+		config.Service.Streaming.MaxNumTargets = _defaultMaxNumTargets
+	}
+	if config.Service.Streaming.MaxNumChangedTargets <= 0 {
+		config.Service.Streaming.MaxNumChangedTargets = _defaultMaxNumChangedTargets
+	}
+	if config.Service.Streaming.MaxNumMetadataEntries <= 0 {
+		config.Service.Streaming.MaxNumMetadataEntries = _defaultMaxNumMetadataEntries
 	}
 	config.repositoryByRemote = make(map[string]*RepositoryConfig, len(config.Repository))
 	for i := range config.Repository {
@@ -78,6 +95,12 @@ func Parse(configFilePath string) (*Config, error) {
 		}
 		if _, exists := config.repositoryByRemote[remote]; exists {
 			return nil, fmt.Errorf("duplicate repository remote %q", remote)
+		}
+		if config.Repository[i].BzlmodEnabled == nil {
+			config.Repository[i].BzlmodEnabled = &_bzlmodEnabledDefault
+		}
+		if config.Repository[i].QueryTimeoutSeconds <= 0 {
+			config.Repository[i].QueryTimeoutSeconds = _defaultBazelQueryTimeoutSeconds
 		}
 		config.repositoryByRemote[remote] = &config.Repository[i]
 	}

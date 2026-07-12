@@ -64,15 +64,15 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	if scope == nil {
 		scope = tally.NoopScope
 	}
-	targetChunkSize := p.ChunkConfig.TargetChunkSize
+	targetChunkSize := p.ChunkConfig.MaxNumTargets
 	if targetChunkSize <= 0 {
 		targetChunkSize = common.DefaultTargetChunkSize
 	}
-	changedTargetChunkSize := p.ChunkConfig.ChangedTargetChunkSize
+	changedTargetChunkSize := p.ChunkConfig.MaxNumChangedTargets
 	if changedTargetChunkSize <= 0 {
 		changedTargetChunkSize = common.DefaultChangedTargetChunkSize
 	}
-	metadataMapChunkSize := p.ChunkConfig.MetadataMapChunkSize
+	metadataMapChunkSize := p.ChunkConfig.MaxNumMetadataEntries
 	if metadataMapChunkSize <= 0 {
 		metadataMapChunkSize = common.DefaultMetadataMapChunkSize
 	}

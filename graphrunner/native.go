@@ -94,7 +94,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		KnownSourceHashes: knownSourceHashes,
 		FullHashRepos:     g.config.FullHashRepos,
 		ExcludedRegex:     append(g.config.ExcludedFiles, g.extraExcludedFiles...),
-		UseBzlmod:         g.config.BzlmodEnabled,
+		UseBzlmod:         g.config.BzlmodEnabled == nil || *g.config.BzlmodEnabled,
 	}
 
 	hashStart := time.Now()

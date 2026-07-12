@@ -16,23 +16,30 @@ package config
 
 // ServiceConfig holds operational configuration for the Tango service.
 type ServiceConfig struct {
-	WorkerPoolSize       int         `yaml:"worker_pool_size"`        // number of worker workspaces per repo
-	RepoManagerClonePath string      `yaml:"repo_manager_clone_path"` // root directory for origin repo clones
-	WorkerRootPath       string      `yaml:"worker_root_path"`        // root directory for worker workspace checkouts; defaults to repo_manager_clone_path/.workers
-	Chunking             ChunkConfig `yaml:"chunking"`                // streaming chunk sizes; zero values fall back to package defaults
+	// MaxWorkerPoolSize is the max number of concurrent requests per repository.
+	// Each worker is a lightweight local clone (hardlinked to the origin, not a
+	// full copy) that handles one request at a time. Must be greater than 0.
+	MaxWorkerPoolSize int `yaml:"max_worker_pool_size"`
+	// WorkspacesRoot is the root directory where Tango stores repository clones
+	// and worker checkouts. Required. Layout: <workspaces_root>/<repo>/ for
+	// origin clones and <workspaces_root>/.workers/<repo>/worker-{1..N}/ for
+	// worker checkouts.
+	WorkspacesRoot string      `yaml:"workspaces_root"`
+	WorkerRootPath string      `yaml:"worker_root_path"` // root directory for worker workspace checkouts; defaults to workspaces_root/.workers
+	Streaming      ChunkConfig `yaml:"streaming"`        // streaming chunk sizes; zero values fall back to package defaults
 }
 
 // ChunkConfig controls the number of entries per gRPC stream message.
 // All fields are optional; a zero value means "use the package default".
 // Tune these when a monorepo's per-target size causes messages to approach
-// the 64MB default gRPC per-message limit.
+// gRPC's default 4MB per-message limit.
 type ChunkConfig struct {
-	// TargetChunkSize is the max number of OptimizedTarget entries per stream message.
-	TargetChunkSize int `yaml:"target_chunk_size"`
-	// ChangedTargetChunkSize is the max number of ChangedTarget entries per stream message.
+	// MaxNumTargets is the max number of OptimizedTarget entries per stream message.
+	MaxNumTargets int `yaml:"max_num_targets"`
+	// MaxNumChangedTargets is the max number of ChangedTarget entries per stream message.
 	// ChangedTarget carries both old and new targets (~2× the size of a regular target).
-	ChangedTargetChunkSize int `yaml:"changed_target_chunk_size"`
-	// MetadataMapChunkSize is the max number of entries per metadata map chunk.
+	MaxNumChangedTargets int `yaml:"max_num_changed_targets"`
+	// MaxNumMetadataEntries is the max number of entries per metadata map chunk.
 	// Applies to target_id_mapping and attribute_string_value_mapping.
-	MetadataMapChunkSize int `yaml:"metadata_map_chunk_size"`
+	MaxNumMetadataEntries int `yaml:"max_num_metadata_entries"`
 }
