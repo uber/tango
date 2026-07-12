@@ -11,10 +11,10 @@ func ToBuildDescription(desc *tangopb.BuildDescription) entity.BuildDescription 
 		return entity.BuildDescription{}
 	}
 	return entity.BuildDescription{
-		Remote:   desc.GetRemote(),
-		BaseSha:  desc.GetBaseSha(),
-		Requests: toChangeRequests(desc.GetRequests()),
-		Strategy: toComputationStrategy(desc.GetStrategy()),
+		Remote:         desc.GetRemote(),
+		BaseSha:        desc.GetBaseSha(),
+		ChangeRequests: toChangeRequests(desc.GetRequests()),
+		Strategy:       toComputationStrategy(desc.GetStrategy()),
 	}
 }
 
