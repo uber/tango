@@ -5,8 +5,7 @@ import (
 	"github.com/uber/tango/tangopb"
 )
 
-// ToBuildDescription converts a proto BuildDescription pointer to the domain type.
-// A nil proto value produces a zero-value BuildDescription.
+// ToBuildDescription converts a proto BuildDescription to the domain type.
 func ToBuildDescription(desc *tangopb.BuildDescription) entity.BuildDescription {
 	if desc == nil {
 		return entity.BuildDescription{}
@@ -19,7 +18,7 @@ func ToBuildDescription(desc *tangopb.BuildDescription) entity.BuildDescription 
 	}
 }
 
-// toChangeRequests converts a slice of proto Request pointers to domain ChangeRequests.
+// toChangeRequests converts a slice of proto Request to domain ChangeRequests.
 func toChangeRequests(requests []*tangopb.Request) []entity.ChangeRequest {
 	if len(requests) == 0 {
 		return nil
@@ -34,7 +33,7 @@ func toChangeRequests(requests []*tangopb.Request) []entity.ChangeRequest {
 	return out
 }
 
-// toComputationStrategy converts a proto ComputationStrategy to the domain type.
+// toComputationStrategy converts a proto ComputationStrategy to the domain ComputationStrategy.
 func toComputationStrategy(s tangopb.ComputationStrategy) entity.ComputationStrategy {
 	switch s {
 	case tangopb.COMPUTATION_STRATEGY_UNSET:

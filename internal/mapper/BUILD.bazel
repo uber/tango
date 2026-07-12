@@ -4,7 +4,7 @@ go_library(
     name = "mapper",
     srcs = [
         "build_description.go",
-        "request_options.go",
+        "target_graph.go",
     ],
     importpath = "github.com/uber/tango/internal/mapper",
     visibility = ["//visibility:public"],
