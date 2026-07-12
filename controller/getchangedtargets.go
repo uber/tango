@@ -369,7 +369,7 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 // classification and distance rules.
 func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
 	start := time.Now()
-	compareScope := c.scope.SubScope("compare_target_graphs")
+	compareScope := scope.SubScope("compare_target_graphs")
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
 
 	// 1) Decode each stream into a semantic graph keyed by canonical target name.

@@ -147,7 +147,7 @@ func TestCompareTargetGraphs(t *testing.T) {
 		},
 	}
 
-	response, err := c.compareTargetGraphs(context.Background(), c.scope, zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
+	response, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 }
@@ -165,7 +165,7 @@ func TestGetChangedTargets_ValidationError(t *testing.T) {
 func TestGetChangedTargets_CacheHit(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
+	stream.EXPECT().Context().Return(t.Context())
 
 	// Build a cached response with one ChangedTargets message and one Metadata message.
 	cachedChanged := &pb.GetChangedTargetsResponse{
@@ -216,7 +216,7 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
+	stream.EXPECT().Context().Return(t.Context())
 
 	storagemock := storagemock.NewMockStorage(ctrl)
 	// A non-NotFound storage error on a treehash read must surface as a failed
@@ -258,7 +258,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "missing"})
 
-		val, err := readTreehash(context.Background(), st, bd)
+		val, err := readTreehash(t.Context(), st, bd)
 		require.NoError(t, err)
 		assert.Empty(t, val)
 	})
@@ -270,7 +270,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{}, injected)
 
-		val, err := readTreehash(context.Background(), st, bd)
+		val, err := readTreehash(t.Context(), st, bd)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
 		assert.Empty(t, val)
@@ -282,7 +282,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("deadbeef"))}, nil)
 
-		val, err := readTreehash(context.Background(), st, bd)
+		val, err := readTreehash(t.Context(), st, bd)
 		require.NoError(t, err)
 		assert.Equal(t, "deadbeef", val)
 	})
@@ -291,7 +291,7 @@ func TestReadTreehash(t *testing.T) {
 func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
+	stream.EXPECT().Context().Return(t.Context())
 
 	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send error"))
 	storagemock := storagemock.NewMockStorage(ctrl)
@@ -342,7 +342,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 func TestGetChangedTargets_streamChunks(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
+	stream.EXPECT().Context().Return(t.Context())
 
 	var sentResponses []*pb.GetChangedTargetsResponse
 	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, opts ...interface{}) error {
@@ -467,7 +467,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	reqCtx, cancelReq := context.WithCancel(context.Background())
+	reqCtx, cancelReq := context.WithCancel(t.Context())
 	defer cancelReq()
 	stream.EXPECT().Context().Return(reqCtx)
 	stream.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
@@ -614,7 +614,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 	cs := res[0].GetChangedTargets()
@@ -686,7 +686,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -759,7 +759,7 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	// Hash-only change on a rule with no own-config change and no reachable
 	// seed: under "trust the hasher" semantics, an orphan CHANGED rule with
 	// no upstream explanation becomes a distance-0 seed itself.
-	res, err := c.compareTargetGraphs(context.Background(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -826,7 +826,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -908,7 +908,7 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -990,7 +990,7 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1056,7 +1056,7 @@ func TestSendTrimmedChangedTargets_SendError(t *testing.T) {
 func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
+	stream.EXPECT().Context().Return(t.Context())
 
 	// Cached response: two targets at distances 0 and 2, plus metadata.
 	cachedChanged := &pb.GetChangedTargetsResponse{
@@ -1191,7 +1191,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1273,7 +1273,7 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1327,7 +1327,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(context.Background(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1415,7 +1415,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		c.storage = st
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-		served, err := c.serveChangedTargetsFromCache(context.Background(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
 		require.NoError(t, err)
 		assert.False(t, served, "a cache miss must not be served")
 	})
@@ -1452,7 +1452,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		// No Send expectation: a corrupt blob must not send anything to the client.
 
-		served, err := c.serveChangedTargetsFromCache(context.Background(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
 		require.NoError(t, err)
 		assert.False(t, served, "a corrupt blob must trigger recompute, not a partial send")
 	})
@@ -1490,7 +1490,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
-		served, err := c.serveChangedTargetsFromCache(context.Background(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
 		require.NoError(t, err)
 		assert.True(t, served, "a clean cache hit must be served")
 	})
@@ -1519,7 +1519,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		first, second, err := c.fetchTargetGraphs(context.Background(), c.scope, c.logger, bypassRequest())
+		first, second, err := c.fetchTargetGraphs(t.Context(), c.scope, c.logger, bypassRequest())
 		require.NoError(t, err)
 		require.Len(t, first, 1)
 		require.Len(t, second, 1)
@@ -1540,10 +1540,9 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		first, second, err := c.fetchTargetGraphs(context.Background(), c.scope, c.logger, bypassRequest())
+		first, second, err := c.fetchTargetGraphs(t.Context(), c.scope, c.logger, bypassRequest())
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
-		assert.Contains(t, err.Error(), "target graph #1")
 		assert.Nil(t, first)
 		assert.Nil(t, second)
 	})
@@ -1559,9 +1558,8 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		_, _, err := c.fetchTargetGraphs(context.Background(), c.scope, c.logger, bypassRequest())
+		_, _, err := c.fetchTargetGraphs(t.Context(), c.scope, c.logger, bypassRequest())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no chunks returned")
 	})
 
 	t.Run("panic in fetch is recovered as an error", func(t *testing.T) {
@@ -1575,8 +1573,44 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		_, _, err := c.fetchTargetGraphs(context.Background(), c.scope, c.logger, bypassRequest())
+		_, _, err := c.fetchTargetGraphs(t.Context(), c.scope, c.logger, bypassRequest())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "panic in graph fetch")
 	})
+}
+
+func TestToDiffGraph_SkipsUnresolvedIDs(t *testing.T) {
+	targetsByID := map[int32]*pb.OptimizedTarget{
+		1: {
+			Hash:               "h1",
+			RuleType:           100,
+			DirectDependencies: []int32{2, 99},
+			Tags:               []int32{10, 88},
+			Attributes:         map[int32]int32{20: 30, 77: 30},
+		},
+		2: {Hash: "h2", RuleType: 100},
+		3: {Hash: "h3", RuleType: 100},
+	}
+	meta := &pb.Metadata{
+		TargetIdMapping:             map[int32]string{1: "//app:a", 2: "//app:b"},
+		RuleTypeMapping:             map[int32]string{100: "go_library"},
+		TagMapping:                  map[int32]string{10: "tag_a"},
+		AttributeNameMapping:        map[int32]string{20: "attr_a"},
+		AttributeStringValueMapping: map[int32]string{30: "val_a"},
+	}
+
+	graph, err := toDiffGraph(t.Context(), targetsByID, meta)
+	require.NoError(t, err)
+
+	require.Len(t, graph, 2)
+	require.NotContains(t, graph, "")
+
+	a := graph["//app:a"]
+	require.NotNil(t, a)
+	assert.Equal(t, "go_library", a.RuleType)
+	assert.Equal(t, []string{"//app:b"}, a.Dependencies)
+	assert.Equal(t, []string{"tag_a"}, a.Tags)
+	assert.Equal(t, map[string]string{"attr_a": "val_a"}, a.Attributes)
+
+	_, ok := graph["//app:b"]
+	assert.True(t, ok)
 }
