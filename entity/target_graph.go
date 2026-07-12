@@ -5,7 +5,12 @@ package entity
 // that must not reach the orchestrator, where it could poison the shared cache
 // with stripped graphs.
 type GetTargetGraphRequest struct {
-	Build             BuildDescription
+	// Build identifies the repository state to compute the graph for.
+	Build BuildDescription
+	// ExcludeFilesRegex are additional file-path regexes to exclude when
+	// computing target hashes, appended to the server-side repository config.
 	ExcludeFilesRegex []string
-	BypassCache       bool
+	// BypassCache, when true, skips the cache read and recomputes the graph,
+	// overwriting the existing cached result.
+	BypassCache bool
 }

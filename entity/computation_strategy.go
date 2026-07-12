@@ -4,9 +4,16 @@ package entity
 type ComputationStrategy int
 
 const (
+	// ComputationStrategyInvalid is the zero value for an unrecognized or
+	// out-of-range strategy; never set intentionally.
 	ComputationStrategyInvalid ComputationStrategy = iota
+	// ComputationStrategyUnset means no strategy was specified by the caller;
+	// the orchestrator picks its own default.
 	ComputationStrategyUnset
+	// ComputationStrategyShell computes the graph by shelling out to Bazel.
 	ComputationStrategyShell
+	// ComputationStrategyNative computes the graph using the in-process
+	// native graph runner.
 	ComputationStrategyNative
 )
 
