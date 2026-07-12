@@ -528,9 +528,8 @@ func getTargetsAndMetadata(ctx context.Context, graph []*pb.GetTargetGraphRespon
 }
 
 // toDiffGraph resolves a stream's int32 IDs into a semantic targetdiff.Graph
-// keyed by canonical target name. Targets whose ID has no name mapping are
-// skipped, mirroring the prior name-index behavior; dependency, tag, and
-// attribute IDs that don't resolve are likewise dropped.
+// keyed by canonical target name. Targets with no name mapping are skipped;
+// dependency, tag, and attribute IDs that don't resolve are dropped.
 func toDiffGraph(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarget, meta *pb.Metadata) (targetdiff.Graph, error) {
 	targetIDMap := meta.GetTargetIdMapping()
 	ruleTypeMap := meta.GetRuleTypeMapping()
