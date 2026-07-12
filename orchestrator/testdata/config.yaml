@@ -7,11 +7,12 @@ repository:
       - "*.gen.go"
     exclude_external_targets: true
     bzlmod_enabled: true
-    query_timeout: 15
+    query_timeout_seconds: 15
 
 service:
-  worker_pool_size: 3
-  chunking:
-    target_chunk_size: 250
-    changed_target_chunk_size: 125
-    metadata_map_chunk_size: 50000
+  max_worker_pool_size: 3
+  workspaces_root: "/tmp/tango-repo-manager"
+  streaming:
+    max_num_targets: 250
+    max_num_changed_targets: 125
+    max_num_metadata_entries: 50000

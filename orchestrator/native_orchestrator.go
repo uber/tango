@@ -190,7 +190,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 			WorkspacePath: ws.Path(),
 			Logger:        b.logger,
 			BazelCommand:  repoCfg.BazelCommand,
-			QueryTimeout:  time.Duration(repoCfg.QueryTimeout) * time.Second,
+			QueryTimeout:  time.Duration(repoCfg.QueryTimeoutSeconds) * time.Second,
 			StreamLogs:    repoCfg.StreamBazelLogs,
 		})
 		if err != nil {
