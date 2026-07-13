@@ -1,0 +1,28 @@
+load("@rules_go//go:def.bzl", "go_test")
+
+go_test(
+    name = "integration_test",
+    size = "large",
+    timeout = "long",
+    srcs = ["integration_test.go"],
+    data = glob(["testdata/**"]),
+    tags = [
+        "integration",
+        "manual",
+    ],
+    deps = [
+        "//config",
+        "//controller",
+        "//core/git",
+        "//core/repomanager",
+        "//core/storage",
+        "//orchestrator",
+        "//tangopb",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@org_uber_go_yarpc//:yarpc",
+        "@org_uber_go_yarpc//api/transport",
+        "@org_uber_go_yarpc//transport/grpc",
+        "@org_uber_go_zap//zaptest",
+    ],
+)
