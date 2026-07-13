@@ -4,11 +4,9 @@ Tango is configured via a single YAML file. Pass the file path to `config.Parse`
 
 ## Configuration Lifecycle
 
-In the internal example, `config.Parse` only runs once, at startup (see `example/main.go`). The result gets fed into the `RepoManager`, `Storage`, and other constructors as a one-shot value when the service wires itself together.
+### `service` / `storage` — requires a deployment/restart
 
-### `service` / `storage` — requires a deployment
-
-Editing the YAML file while the service is running does nothing until it's redeployed. To pick up a change to `service` or `storage`, redeploy the service.
+Editing the YAML file while the service is running does nothing until it's deployed or restarted. To pick up a change to `service` or `storage`, redeploy the service.
 
 ### `repository`
 
