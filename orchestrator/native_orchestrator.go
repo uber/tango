@@ -135,9 +135,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			}
 		}
 	}()
-	err = ws.Checkout(ctx, param.Req.BuildDescription.Remote, param.Req.BuildDescription.BaseSha)
+	err = ws.Checkout(ctx, remote, param.Req.BuildDescription.BaseSha)
 	if err != nil {
-		return nil, fmt.Errorf("checkout %s@%s: %w", param.Req.BuildDescription.Remote, param.Req.BuildDescription.BaseSha, err)
+		return nil, fmt.Errorf("checkout %s@%s: %w", remote, param.Req.BuildDescription.BaseSha, err)
 	}
 	logger.Infow("GetTargetGraph: Checked out base revision")
 
@@ -166,7 +166,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("compute treehash: %w", err)
 	}
-	treehashPath := common.GetGraphByTreeHash(param.Req.BuildDescription.Remote, treehash, param.Req.BuildDescription.GetStrategy(), param.Req.GetRequestOptions())
+	treehashPath := common.GetGraphByTreeHash(remote, treehash, param.Req.BuildDescription.GetStrategy(), param.Req.GetRequestOptions())
 	if !param.BypassCache {
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 		if err == nil {
@@ -206,7 +206,10 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	responses, err := common.ResultToGetTargetGraphResponse(ctx, result)
+	responses, err := common.ResultToGetTargetGraphResponse(ctx, result,
+		b.config.Service.Chunking.TargetChunkSize,
+		b.config.Service.Chunking.MetadataMapChunkSize,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph to response: %w", err)
 	}

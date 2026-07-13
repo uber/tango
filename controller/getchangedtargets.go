@@ -45,8 +45,13 @@ type job struct {
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets")
 	scope.Counter("calls").Inc(1)
+	logger := c.logger.WithLazy(
+		zap.Any("first_revision", request.GetFirstRevision()),
+		zap.Any("second_revision", request.GetSecondRevision()),
+	)
 	defer func() {
 		if retErr != nil {
+			logger.Error("GetChangedTargets failed", zap.Error(retErr))
 			scope.Counter("failure").Inc(1)
 			emitFailureMetric(scope, retErr)
 		} else {
@@ -60,10 +65,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
 	start := time.Now()
-	logger := c.logger.With(
-		zap.Any("first_revision", request.GetFirstRevision()),
-		zap.Any("second_revision", request.GetSecondRevision()),
-	)
 
 	logger.Info("GetChangedTargets: Processing request")
 
@@ -100,7 +101,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		if ctx.Err() != nil {
 			return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
 		}
-		logger.Error("GetChangedTargets: Failed to compare target graphs", zap.Error(err))
 		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))
 	}
 
@@ -109,7 +109,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	sendStart := time.Now()
 	if err := sendTrimmedChangedTargets(stream, changedTargetsResponses, maxDist, request.GetOutputConfig()); err != nil {
-		logger.Error("GetChangedTargets: Failed to send response", zap.Error(err))
 		return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send response: %w", err))
 	}
 	sendDuration := time.Since(sendStart)
@@ -139,7 +138,6 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 	cacheStart := time.Now()
 	treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
 	if err != nil {
-		logger.Error("GetChangedTargets: Failed to read revision treehash", zap.Error(err))
 		return false, common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
 	}
 	if treehash1 == "" || treehash2 == "" {
@@ -193,7 +191,6 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 	scope.Counter("changed_targets_cache_hit").Inc(1)
 	scope.Timer("cache_read_duration").Record(cacheReadDuration)
 	if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
-		logger.Error("GetChangedTargets: Failed to send cached response", zap.Error(sendErr))
 		return false, common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send cached response: %w", sendErr))
 	}
 	totalDuration := time.Since(start)
