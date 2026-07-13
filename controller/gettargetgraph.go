@@ -33,8 +33,12 @@ import (
 func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_target_graph")
 	scope.Counter("calls").Inc(1)
+	logger := c.logger.WithLazy(
+		zap.Any("build_description", request.GetBuildDescription()),
+	)
 	defer func() {
 		if retErr != nil {
+			logger.Error("GetTargetGraph failed", zap.Error(retErr))
 			scope.Counter("failure").Inc(1)
 			emitFailureMetric(scope, retErr)
 		} else {
@@ -44,9 +48,6 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	start := time.Now()
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
-	logger := c.logger.With(
-		zap.Any("build_description", request.GetBuildDescription()),
-	)
 	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetBuildDescription().GetRemote())})
 	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetRequestOptions(), request.GetBypassCache())
 	if err != nil {
@@ -110,14 +111,12 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 				logger.Debug("getGraph: treehash not found", zap.Error(err))
 			} else {
 				// Other errors (network, infra issues) should be retried
-				logger.Error("getGraph: Storage error", zap.Error(err))
 				return nil, err
 			}
 		} else {
 			defer treehashResponse.ReadCloser.Close()
 			treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)
 			if err != nil {
-				logger.Error("getGraph: Error reading treehash", zap.Error(err))
 				return nil, err
 			}
 			logger.Info("getGraph: treehash found")
@@ -130,7 +129,6 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 					return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
 				}
 				if !storage.IsNotFound(err) {
-					logger.Error("getGraph: Error reading graph from Storage", zap.Error(err))
 					return nil, common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
 				}
 				logger.Warn("getGraph: graph not found at treehash path", zap.Error(err))
