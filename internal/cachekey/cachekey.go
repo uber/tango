@@ -64,8 +64,7 @@ func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, requestOpt
 }
 
 // getReqURLsHash returns a fixed-length MD5 hash of the sorted request URLs.
-// Each URL's bytes are fed into the digest individually (no separator), matching
-// the Java MessageDigest.update(str.getBytes()) per-string behavior.
+// Each URL's bytes are fed into the digest individually (no separator)
 func getReqURLsHash(requests []*tangopb.Request) string {
 	if len(requests) == 0 {
 		return ""
