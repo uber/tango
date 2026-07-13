@@ -1,0 +1,22 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "cachekey",
+    srcs = ["cachekey.go"],
+    importpath = "github.com/uber/tango/internal/cachekey",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core/common",
+        "//tangopb",
+    ],
+)
+
+go_test(
+    name = "cachekey_test",
+    srcs = ["cachekey_test.go"],
+    embed = [":cachekey"],
+    deps = [
+        "//tangopb",
+        "@com_github_stretchr_testify//assert",
+    ],
+)

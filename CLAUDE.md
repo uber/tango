@@ -37,6 +37,8 @@ tango/                              # repo root (Go module github.com/uber/tango
 │   ├── storage/                    # Blob storage interface and impls (in-memory, disk)
 │   ├── workspace/                  # Workspace abstraction over a git checkout, request application
 │   └── ...                         # bazel, common, execcmd, itg, targethasher, ...
+├── internal/                       # Repo-private packages not part of the public API
+│   └── cachekey/                   # Cache path/key construction for graphs, treehashes, compared-target results
 ├── example/                        # Runnable server + client and benchmark CLI
 │   ├── client/
 │   └── cmd/query-bench/
@@ -221,7 +223,7 @@ Errors are classified by **origin** (user vs infra) for metrics. The contract li
 
 The cache is the single most performance-sensitive piece of Tango. Two rules:
 
-1. **Cache keys are content-addressable, derived from the git treehash** of the materialized workspace (base + applied requests). This is what makes the cache safe across branches and PR retargets: identical trees share entries regardless of how they were assembled. Helpers in `core/common` (`GetGraphByTreeHash`, `GetComparedTargetsCachePath`, `GetTreehashCachePath`) own the key shape — never construct cache paths inline.
+1. **Cache keys are content-addressable, derived from the git treehash** of the materialized workspace (base + applied requests). This is what makes the cache safe across branches and PR retargets: identical trees share entries regardless of how they were assembled. Helpers in `internal/cachekey` (`GetGraphByTreeHash`, `GetComparedTargetsCachePath`, `GetTreehashCachePath`) own the key shape — never construct cache paths inline.
 2. **Treat the cache as best-effort.** Reads tolerate `NotFoundError` silently; other storage errors are logged but don't fail the request — fall through to recompute.
 
 ### Cancellation and Background Work
