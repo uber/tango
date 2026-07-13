@@ -1,8 +1,7 @@
 package entity
 
 // ChangeRequest describes a single change (PR, diff) to layer on top of a
-// base revision. Named ChangeRequest (not Request) to avoid collision with
-// workspace.Request.
+// base revision.
 type ChangeRequest struct {
 	// URL identifies the change request (PR/diff link) being layered on.
 	URL string
