@@ -32,6 +32,8 @@ import (
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/graphrunner"
+	"github.com/uber/tango/internal/cachekey"
+	"github.com/uber/tango/internal/mapper"
 	"go.uber.org/zap"
 )
 
@@ -166,7 +168,11 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("compute treehash: %w", err)
 	}
-	treehashPath := common.GetGraphByTreeHash(remote, treehash, param.Req.BuildDescription.GetStrategy(), param.Req.GetRequestOptions())
+	entityBuild, err := mapper.ProtoToBuildDescription(param.Req.BuildDescription)
+	if err != nil {
+		return nil, fmt.Errorf("convert build description: %w", err)
+	}
+	treehashPath := cachekey.GetGraphByTreeHash(entityBuild.Remote, treehash, entityBuild.Strategy, param.Req.GetRequestOptions().GetExtraExcludeFilesRegex())
 	if !param.BypassCache {
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 		if err == nil {
@@ -217,7 +223,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
 	}
-	treehashCachePath := common.GetTreehashCachePath(param.Req.BuildDescription)
+	treehashCachePath := cachekey.GetTreehashCachePath(entityBuild)
 	treehashReader := bytes.NewReader([]byte(treehash))
 	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
 	if err != nil {
