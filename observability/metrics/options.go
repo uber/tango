@@ -18,9 +18,7 @@ import "github.com/uber-go/tally"
 
 // Option customizes a single emission. Options compose; later WithTags
 // override earlier on key collision.
-type Option interface {
-	apply(*emitOpts)
-}
+type Option func(*emitOpts)
 
 type emitOpts struct {
 	tags            map[string]string
@@ -28,22 +26,18 @@ type emitOpts struct {
 	valueBuckets    tally.ValueBuckets
 }
 
-type optFunc func(*emitOpts)
-
-func (f optFunc) apply(o *emitOpts) { f(o) }
-
 // applyOptions folds opts into a single emitOpts.
 func applyOptions(opts []Option) emitOpts {
 	var o emitOpts
 	for _, opt := range opts {
-		opt.apply(&o)
+		opt(&o)
 	}
 	return o
 }
 
 // WithTags attaches key/value tags to a single emission.
 func WithTags(tags map[string]string) Option {
-	return optFunc(func(o *emitOpts) {
+	return func(o *emitOpts) {
 		if len(tags) == 0 {
 			return
 		}
@@ -53,17 +47,17 @@ func WithTags(tags map[string]string) Option {
 		for k, v := range tags {
 			o.tags[k] = v
 		}
-	})
+	}
 }
 
 // WithDurationBuckets overrides the emitter's default duration buckets for
 // a single RecordDur call.
 func WithDurationBuckets(b tally.DurationBuckets) Option {
-	return optFunc(func(o *emitOpts) { o.durationBuckets = b })
+	return func(o *emitOpts) { o.durationBuckets = b }
 }
 
 // WithValueBuckets overrides the emitter's default value buckets for a
 // single RecordCount call.
 func WithValueBuckets(b tally.ValueBuckets) Option {
-	return optFunc(func(o *emitOpts) { o.valueBuckets = b })
+	return func(o *emitOpts) { o.valueBuckets = b }
 }
