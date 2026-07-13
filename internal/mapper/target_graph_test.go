@@ -31,7 +31,7 @@ func TestProtoToGetTargetGraphRequest(t *testing.T) {
 			name: "full",
 			req: &tangopb.GetTargetGraphRequest{
 				BuildDescription: &tangopb.BuildDescription{
-					Remote:   "gitolite@code.uber.internal:go-code",
+					Remote:   "git@example.com:org/repo",
 					BaseSha:  "abc123",
 					Strategy: tangopb.COMPUTATION_STRATEGY_SHELL,
 				},
@@ -42,7 +42,7 @@ func TestProtoToGetTargetGraphRequest(t *testing.T) {
 			},
 			want: entity.GetTargetGraphRequest{
 				Build: entity.BuildDescription{
-					Remote:   "gitolite@code.uber.internal:go-code",
+					Remote:   "git@example.com:org/repo",
 					BaseSha:  "abc123",
 					Strategy: entity.ComputationStrategyShell,
 				},
