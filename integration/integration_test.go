@@ -48,6 +48,11 @@ const (
 	configTemplateFile = "testdata/tango-config.yaml.tmpl"
 )
 
+// bazelToolsExcludeRegex excludes @bazel_tools's source files from disk-based hashing.
+// It ships platform-specific files (e.g. tools/test/tw.exe, a Windows-only test wrapper)
+// that don't exist on every OS, so stat-ing them to hash fails on machines missing them.
+var bazelToolsExcludeRegex = []string{"^@@?bazel_tools/"}
+
 func repoRemote(t *testing.T) string {
 	t.Helper()
 	remote := os.Getenv("TANGO_REPO_REMOTE")
@@ -266,6 +271,9 @@ func getChangedTargets(t *testing.T, client pb.TangoYARPCClient, remote, firstSH
 			Remote:  remote,
 			BaseSha: secondSHA,
 		},
+		RequestOptions: &pb.RequestOptions{
+			ExtraExcludeFilesRegex: bazelToolsExcludeRegex,
+		},
 	})
 	require.NoError(t, err, "failed to initiate GetChangedTargets stream")
 
@@ -360,6 +368,9 @@ func TestIntegration_GetTargetGraph(t *testing.T) {
 		BuildDescription: &pb.BuildDescription{
 			Remote:  remote,
 			BaseSha: pinnedSHA,
+		},
+		RequestOptions: &pb.RequestOptions{
+			ExtraExcludeFilesRegex: bazelToolsExcludeRegex,
 		},
 	})
 	require.NoError(t, err, "failed to initiate GetTargetGraph stream")
