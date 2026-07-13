@@ -30,7 +30,7 @@ func TestProtoToBuildDescription(t *testing.T) {
 		{
 			name: "full",
 			desc: &tangopb.BuildDescription{
-				Remote:  "gitolite@code.uber.internal:go-code",
+				Remote:  "git@example.com:org/repo",
 				BaseSha: "abc123",
 				Requests: []*tangopb.Request{
 					{Url: "https://example.com/pr/1", Commit: "sha1"},
@@ -39,7 +39,7 @@ func TestProtoToBuildDescription(t *testing.T) {
 				Strategy: tangopb.COMPUTATION_STRATEGY_NATIVE,
 			},
 			want: entity.BuildDescription{
-				Remote:  "gitolite@code.uber.internal:go-code",
+				Remote:  "git@example.com:org/repo",
 				BaseSha: "abc123",
 				ChangeRequests: []entity.ChangeRequest{
 					{URL: "https://example.com/pr/1", Commit: "sha1"},
