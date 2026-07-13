@@ -20,7 +20,10 @@ type RepositoryConfig struct {
 	// this URL and uses it as the lookup key for per-repo settings. Must be
 	// unique across all entries and match exactly what clients send in
 	// BuildDescription.remote.
-	Remote                 string   `yaml:"remote"`
+	Remote string `yaml:"remote"`
+	// TODO: FullHashRepos, ExcludedFiles, and ExcludeExternalTargets are not
+	// documented in config/README.md. Delete them if they turn out to be unneeded,
+	// otherwise document them there.
 	FullHashRepos          []string `yaml:"full_hash_repos"`
 	ExcludedFiles          []string `yaml:"excluded_files"`
 	ExcludeExternalTargets bool     `yaml:"exclude_external_targets"`
@@ -35,8 +38,10 @@ type RepositoryConfig struct {
 	QueryTimeoutSeconds int64 `yaml:"query_timeout_seconds"`
 	// BazelExtraArgs are extra arguments passed to `bazel query` invocations,
 	// inserted between the `query` subcommand and the query expression.
-	BazelExtraArgs  []string `yaml:"bazel_extra_args"`
-	StreamBazelLogs bool     `yaml:"stream_bazel_logs"`
+	BazelExtraArgs []string `yaml:"bazel_extra_args"`
+	// TODO: StreamBazelLogs is not documented in config/README.md. Delete it if
+	// it turns out to be unneeded, otherwise document it there.
+	StreamBazelLogs bool `yaml:"stream_bazel_logs"`
 }
 
 // RepositoryConfigProvider looks up per-repository configuration by remote.
