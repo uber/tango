@@ -74,33 +74,16 @@ func TestParse_ServiceDefaults(t *testing.T) {
 	tests := []struct {
 		name                      string
 		give                      string
-		wantWorkerRootPath        string
 		wantMaxNumTargets         int
 		wantMaxNumChangedTargets  int
 		wantMaxNumMetadataEntries int
 	}{
 		{
-			name: "worker_root_path and streaming default when unset",
+			name: "streaming defaults when unset",
 			give: _baseServiceYAML + `
 repository:
   - remote: "r1"
 `,
-			wantWorkerRootPath:        filepath.Join("/tmp/x", ".workers"),
-			wantMaxNumTargets:         _defaultMaxNumTargets,
-			wantMaxNumChangedTargets:  _defaultMaxNumChangedTargets,
-			wantMaxNumMetadataEntries: _defaultMaxNumMetadataEntries,
-		},
-		{
-			name: "worker_root_path explicit value preserved",
-			give: `
-service:
-  workspaces_root: "/tmp/x"
-  worker_root_path: "/tmp/custom-workers"
-  max_worker_pool_size: 1
-repository:
-  - remote: "r1"
-`,
-			wantWorkerRootPath:        "/tmp/custom-workers",
 			wantMaxNumTargets:         _defaultMaxNumTargets,
 			wantMaxNumChangedTargets:  _defaultMaxNumChangedTargets,
 			wantMaxNumMetadataEntries: _defaultMaxNumMetadataEntries,
@@ -115,7 +98,6 @@ repository:
 repository:
   - remote: "r1"
 `,
-			wantWorkerRootPath:        filepath.Join("/tmp/x", ".workers"),
 			wantMaxNumTargets:         10,
 			wantMaxNumChangedTargets:  20,
 			wantMaxNumMetadataEntries: 30,
@@ -126,7 +108,6 @@ repository:
 		t.Run(tt.name, func(t *testing.T) {
 			cfg, err := Parse(writeConfig(t, tt.give))
 			require.NoError(t, err)
-			assert.Equal(t, tt.wantWorkerRootPath, cfg.Service.WorkerRootPath)
 			assert.Equal(t, tt.wantMaxNumTargets, cfg.Service.Streaming.MaxNumTargets)
 			assert.Equal(t, tt.wantMaxNumChangedTargets, cfg.Service.Streaming.MaxNumChangedTargets)
 			assert.Equal(t, tt.wantMaxNumMetadataEntries, cfg.Service.Streaming.MaxNumMetadataEntries)

@@ -72,7 +72,7 @@ func run() error {
 
 	// Repo manager and orchestrator
 	repoManagerClonePath := cfg.Service.WorkspacesRoot
-	workerRootPath := cfg.Service.WorkerRootPath
+	workerRootPath := filepath.Join(repoManagerClonePath, ".workers")
 	if err := os.MkdirAll(repoManagerClonePath, 0o755); err != nil {
 		return fmt.Errorf("failed to create repo manager clone path: %w", err)
 	}

@@ -59,9 +59,6 @@ func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
 
 func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace) (targethasher.Result, error) {
 	query := "//external:all-targets + deps(//...:all-targets)"
-	if g.config.ExcludeExternalTargets {
-		query = "deps(//...:all-targets)"
-	}
 	additionalArgs := append(
 		[]string{"--order_output=no", "--proto:locations", "--noproto:default_values"},
 		g.config.BazelExtraArgs...,
@@ -92,8 +89,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 	hashConfig := targethasher.HashConfig{
 		KnownSourceHashes: knownSourceHashes,
-		FullHashRepos:     g.config.FullHashRepos,
-		ExcludedRegex:     append(g.config.ExcludedFiles, g.extraExcludedFiles...),
+		ExcludedRegex:     g.extraExcludedFiles,
 		UseBzlmod:         g.config.BzlmodEnabled == nil || *g.config.BzlmodEnabled,
 	}
 

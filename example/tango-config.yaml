@@ -9,11 +9,6 @@ storage:
 # Repository configuration
 repository:
   - remote: "https://github.com/uber/tango.git"
-    full_hash_repos:
-      - ""
-    excluded_files:
-      - "^@@?bazel_tools/"
-    exclude_external_targets: true
     bzlmod_enabled: true
     query_timeout_seconds: 300
 
@@ -22,5 +17,3 @@ service:
   max_worker_pool_size: 5
   # root for origin clones; required
   workspaces_root: "/tmp/tango-repo-manager"
-  # root for worker checkouts; defaults to workspaces_root/.workers
-  worker_root_path: "/tmp/tango/workers"
