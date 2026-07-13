@@ -25,7 +25,6 @@ import (
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/cachekey"
 	"github.com/uber/tango/internal/mapper"
-	"github.com/uber/tango/orchestrator"
 
 	"github.com/uber/tango/core/storage"
 	pb "github.com/uber/tango/tangopb"
@@ -149,7 +148,7 @@ func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequ
 		logger.Info("getGraph: bypass_cache=true, skipping cache lookup")
 	}
 	computeStart := time.Now()
-	graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: req, BypassCache: req.BypassCache})
+	graphReader, err := c.orchestrator.GetTargetGraph(ctx, req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())

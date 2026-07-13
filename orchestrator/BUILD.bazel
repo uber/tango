@@ -20,7 +20,6 @@ go_library(
         "//entity",
         "//graphrunner",
         "//internal/cachekey",
-        "//internal/mapper",
         "@com_github_uber_go_tally//:tally",
         "@org_uber_go_zap//:zap",
     ],

@@ -22,13 +22,7 @@ import (
 	"github.com/uber/tango/entity"
 )
 
-// GetTargetGraphParam is the input of GetTargetGraph
-type GetTargetGraphParam struct {
-	Req         entity.GetTargetGraphRequest
-	BypassCache bool
-}
-
 // Orchestrator defines high-level execution interface that "does everything"
 type Orchestrator interface {
-	GetTargetGraph(ctx context.Context, param GetTargetGraphParam) (storage.GraphReader, error)
+	GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (storage.GraphReader, error)
 }

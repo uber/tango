@@ -31,6 +31,7 @@ import (
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/workspace"
+	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
 	"github.com/uber/tango/internal/cachekey"
 	"go.uber.org/zap"
@@ -97,7 +98,7 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 
 // GetTargetGraph is used to compute the target graph locally.
 // It leases a workspace, checks out the base revision, applies the change requests, and computes the target graph.
-func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTargetGraphParam) (_ storage.GraphReader, retErr error) {
+func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (_ storage.GraphReader, retErr error) {
 	scope := b.scope.SubScope("get_target_graph")
 	scope.Counter("calls").Inc(1)
 	defer func() {
@@ -115,7 +116,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			scope.Counter("success").Inc(1)
 		}
 	}()
-	build := param.Req.Build
+	build := req.Build
 	logger := b.logger.With(zap.Any("build_description", build))
 	logger.Infow("GetTargetGraph: Processing request")
 
@@ -168,8 +169,8 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("compute treehash: %w", err)
 	}
-	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, param.Req.ExcludeFilesRegex)
-	if !param.BypassCache {
+	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
+	if !req.BypassCache {
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 		if err == nil {
 			logger.Infow("GetTargetGraph: Cache hit on treehash", zap.String("treehash", treehash))
@@ -200,7 +201,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			BazelClient:        client,
 			GitClient:          gitModule,
 			Config:             repoCfg,
-			ExtraExcludedFiles: param.Req.ExcludeFilesRegex,
+			ExtraExcludedFiles: req.ExcludeFilesRegex,
 			Scope:              b.scope,
 		})
 	}
