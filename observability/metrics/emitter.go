@@ -32,24 +32,8 @@ import (
 )
 
 // Emitter emits metrics under a per-operation subscope with a fixed set of
-// base tags. Implementations are safe for concurrent use.
-type Emitter interface {
-	// Inc increments the named counter under the op subscope by one.
-	Inc(op, name string, opts ...Option)
-	// Gauge sets the named gauge under the op subscope to v.
-	Gauge(op, name string, v float64, opts ...Option)
-	// RecordDur records d in the named histogram under the op subscope, using
-	// the default duration buckets unless overridden with WithDurationBuckets.
-	RecordDur(op, name string, d time.Duration, opts ...Option)
-	// RecordCount records v in the named histogram under the op subscope, using
-	// the default value buckets unless overridden with WithValueBuckets.
-	RecordCount(op, name string, v int64, opts ...Option)
-	// Tagged returns a child Emitter that adds tags to every emission. The
-	// receiver is left unchanged; passing no tags returns the receiver.
-	Tagged(tags map[string]string) Emitter
-}
-
-type defaultEmitter struct {
+// base tags. It is safe for concurrent use.
+type Emitter struct {
 	scope           tally.Scope
 	baseTags        map[string]string
 	durationBuckets tally.DurationBuckets
@@ -58,22 +42,24 @@ type defaultEmitter struct {
 
 // New returns a tally-backed Emitter. A nil scope falls back to
 // tally.NoopScope so callers do not need to special-case unwired metrics.
-func New(scope tally.Scope) Emitter {
+func New(scope tally.Scope) *Emitter {
 	if scope == nil {
 		scope = tally.NoopScope
 	}
-	return &defaultEmitter{
+	return &Emitter{
 		scope:           scope,
 		durationBuckets: _defaultDurationBuckets,
 		valueBuckets:    _defaultCountBuckets,
 	}
 }
 
-func (e *defaultEmitter) Tagged(tags map[string]string) Emitter {
+// Tagged returns a child Emitter that adds tags to every emission. The receiver
+// is left unchanged; passing no tags returns the receiver.
+func (e *Emitter) Tagged(tags map[string]string) *Emitter {
 	if len(tags) == 0 {
 		return e
 	}
-	return &defaultEmitter{
+	return &Emitter{
 		scope:           e.scope,
 		baseTags:        mergeTags(e.baseTags, tags),
 		durationBuckets: e.durationBuckets,
@@ -81,17 +67,21 @@ func (e *defaultEmitter) Tagged(tags map[string]string) Emitter {
 	}
 }
 
-func (e *defaultEmitter) Inc(op, name string, opts ...Option) {
+// Inc increments the named counter under the op subscope by one.
+func (e *Emitter) Inc(op, name string, opts ...Option) {
 	o := applyOptions(opts)
 	e.scope.SubScope(op).Tagged(mergeTags(e.baseTags, o.tags)).Counter(name).Inc(1)
 }
 
-func (e *defaultEmitter) Gauge(op, name string, v float64, opts ...Option) {
+// Gauge sets the named gauge under the op subscope to v.
+func (e *Emitter) Gauge(op, name string, v float64, opts ...Option) {
 	o := applyOptions(opts)
 	e.scope.SubScope(op).Tagged(mergeTags(e.baseTags, o.tags)).Gauge(name).Update(v)
 }
 
-func (e *defaultEmitter) RecordDur(op, name string, d time.Duration, opts ...Option) {
+// RecordDur records d in the named histogram under the op subscope, using the
+// default duration buckets unless overridden with WithDurationBuckets.
+func (e *Emitter) RecordDur(op, name string, d time.Duration, opts ...Option) {
 	o := applyOptions(opts)
 	buckets := o.durationBuckets
 	if buckets == nil {
@@ -100,7 +90,9 @@ func (e *defaultEmitter) RecordDur(op, name string, d time.Duration, opts ...Opt
 	e.scope.SubScope(op).Tagged(mergeTags(e.baseTags, o.tags)).Histogram(name, buckets).RecordDuration(d)
 }
 
-func (e *defaultEmitter) RecordCount(op, name string, v int64, opts ...Option) {
+// RecordCount records v in the named histogram under the op subscope, using the
+// default value buckets unless overridden with WithValueBuckets.
+func (e *Emitter) RecordCount(op, name string, v int64, opts ...Option) {
 	o := applyOptions(opts)
 	buckets := o.valueBuckets
 	if buckets == nil {
