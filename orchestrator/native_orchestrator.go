@@ -124,7 +124,11 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if !ok {
 		return nil, fmt.Errorf("no repository configuration found for remote %q", remote)
 	}
-	ws, err := b.repoManager.Lease(ctx, *param.Req.BuildDescription)
+	entityBuild, err := mapper.ProtoToBuildDescription(param.Req.BuildDescription)
+	if err != nil {
+		return nil, fmt.Errorf("convert build description: %w", err)
+	}
+	ws, err := b.repoManager.Lease(ctx, entityBuild)
 	if err != nil {
 		return nil, fmt.Errorf("lease workspace: %w", err)
 	}
@@ -167,10 +171,6 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	treehash, err := gitModule.RevParse(ctx, "HEAD^{tree}")
 	if err != nil {
 		return nil, fmt.Errorf("compute treehash: %w", err)
-	}
-	entityBuild, err := mapper.ProtoToBuildDescription(param.Req.BuildDescription)
-	if err != nil {
-		return nil, fmt.Errorf("convert build description: %w", err)
 	}
 	treehashPath := cachekey.GetGraphByTreeHash(entityBuild.Remote, treehash, entityBuild.Strategy, param.Req.GetRequestOptions().GetExtraExcludeFilesRegex())
 	if !param.BypassCache {
