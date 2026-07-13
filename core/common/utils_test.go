@@ -161,13 +161,13 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 func TestChunkTargets(t *testing.T) {
 	t.Parallel()
 
-	// Create 250 targets, chunk by 100 → expect 3 chunks (100, 100, 50)
-	targets := make([]*pb.OptimizedTarget, 250)
+	// Create 25 targets, chunk by 10 → expect 3 chunks (10, 10, 5)
+	targets := make([]*pb.OptimizedTarget, 25)
 	for i := range targets {
 		targets[i] = &pb.OptimizedTarget{Id: int32(i)}
 	}
 
-	responses := chunkTargets(targets, 100)
+	responses := chunkTargets(targets, 10)
 
 	require.Len(t, responses, 3)
 
@@ -180,13 +180,13 @@ func TestChunkTargets(t *testing.T) {
 			total++
 		}
 	}
-	assert.Equal(t, 250, total)
+	assert.Equal(t, 25, total)
 }
 
 func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 	t.Parallel()
 
-	numTargets := 500
+	numTargets := 50
 	result := targethasher.Result{
 		TargetNames: make([]string, numTargets),
 		Targets:     make(map[string]*targethasher.Target, numTargets),
@@ -205,23 +205,23 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 		wantMetadataChunks   int
 	}{
 		{
-			name:                 "250 per chunk",
-			targetChunkSize:      250,
-			metadataMapChunkSize: 200,
+			name:                 "25 per chunk",
+			targetChunkSize:      25,
+			metadataMapChunkSize: 20,
 			wantTargetChunks:     2,
 			wantMetadataChunks:   3,
 		},
 		{
-			name:                 "100 per chunk",
-			targetChunkSize:      100,
-			metadataMapChunkSize: 100,
+			name:                 "10 per chunk",
+			targetChunkSize:      10,
+			metadataMapChunkSize: 10,
 			wantTargetChunks:     5,
 			wantMetadataChunks:   5,
 		},
 		{
 			name:                 "all in one chunk",
-			targetChunkSize:      1000,
-			metadataMapChunkSize: 50_000,
+			targetChunkSize:      100,
+			metadataMapChunkSize: 5_000,
 			wantTargetChunks:     1,
 			wantMetadataChunks:   1,
 		},
