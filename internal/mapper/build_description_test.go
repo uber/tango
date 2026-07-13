@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/tangopb"
@@ -11,21 +12,30 @@ import (
 
 func TestProtoToBuildDescription(t *testing.T) {
 	tests := []struct {
-		name string
-		desc *tangopb.BuildDescription
-		want entity.BuildDescription
+		name    string
+		desc    *tangopb.BuildDescription
+		want    entity.BuildDescription
+		wantErr bool
 	}{
 		{
-			name: "nil",
-			desc: nil,
-			want: entity.BuildDescription{},
+			name:    "nil",
+			desc:    nil,
+			wantErr: true,
 		},
 		{
-			name: "empty",
-			desc: &tangopb.BuildDescription{},
-			want: entity.BuildDescription{
-				Strategy: entity.ComputationStrategyInvalid,
-			},
+			name:    "empty",
+			desc:    &tangopb.BuildDescription{},
+			wantErr: true,
+		},
+		{
+			name:    "missing remote",
+			desc:    &tangopb.BuildDescription{BaseSha: "abc123"},
+			wantErr: true,
+		},
+		{
+			name:    "missing base_sha",
+			desc:    &tangopb.BuildDescription{Remote: "git@example.com:org/repo"},
+			wantErr: true,
 		},
 		{
 			name: "full",
@@ -52,7 +62,12 @@ func TestProtoToBuildDescription(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ProtoToBuildDescription(tt.desc)
+			got, err := ProtoToBuildDescription(tt.desc)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}

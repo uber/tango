@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/tangopb"
@@ -11,21 +12,32 @@ import (
 
 func TestProtoToGetTargetGraphRequest(t *testing.T) {
 	tests := []struct {
-		name string
-		req  *tangopb.GetTargetGraphRequest
-		want entity.GetTargetGraphRequest
+		name    string
+		req     *tangopb.GetTargetGraphRequest
+		want    entity.GetTargetGraphRequest
+		wantErr bool
 	}{
 		{
-			name: "nil",
-			req:  nil,
-			want: entity.GetTargetGraphRequest{},
+			name:    "nil",
+			req:     nil,
+			wantErr: true,
 		},
 		{
-			name: "empty",
-			req:  &tangopb.GetTargetGraphRequest{},
-			want: entity.GetTargetGraphRequest{
-				Build: entity.BuildDescription{},
+			name:    "empty",
+			req:     &tangopb.GetTargetGraphRequest{},
+			wantErr: true,
+		},
+		{
+			name:    "missing build description",
+			req:     &tangopb.GetTargetGraphRequest{RequestOptions: &tangopb.RequestOptions{}},
+			wantErr: true,
+		},
+		{
+			name: "invalid build description",
+			req: &tangopb.GetTargetGraphRequest{
+				BuildDescription: &tangopb.BuildDescription{Remote: "remote"},
 			},
+			wantErr: true,
 		},
 		{
 			name: "full",
@@ -53,18 +65,23 @@ func TestProtoToGetTargetGraphRequest(t *testing.T) {
 		{
 			name: "output config is dropped",
 			req: &tangopb.GetTargetGraphRequest{
-				BuildDescription: &tangopb.BuildDescription{Remote: "remote"},
+				BuildDescription: &tangopb.BuildDescription{Remote: "remote", BaseSha: "abc123"},
 				OutputConfig:     &tangopb.OutputConfig{},
 			},
 			want: entity.GetTargetGraphRequest{
-				Build: entity.BuildDescription{Remote: "remote"},
+				Build: entity.BuildDescription{Remote: "remote", BaseSha: "abc123"},
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ProtoToGetTargetGraphRequest(tt.req)
+			got, err := ProtoToGetTargetGraphRequest(tt.req)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}
