@@ -19,12 +19,12 @@ import (
 
 	"github.com/uber/tango/core/storage"
 
-	"github.com/uber/tango/tangopb"
+	"github.com/uber/tango/entity"
 )
 
 // GetTargetGraphParam is the input of GetTargetGraph
 type GetTargetGraphParam struct {
-	Req         *tangopb.GetTargetGraphRequest
+	Req         entity.GetTargetGraphRequest
 	BypassCache bool
 }
 

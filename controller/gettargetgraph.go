@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/uber/tango/core/common"
+	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/cachekey"
 	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/orchestrator"
@@ -50,8 +51,12 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	start := time.Now()
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
-	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetBuildDescription().GetRemote())})
-	graphReader, err := c.getGraph(ctx, request.GetBuildDescription(), request.GetRequestOptions(), request.GetBypassCache())
+	entityReq, err := mapper.ProtoToGetTargetGraphRequest(request)
+	if err != nil {
+		return fmt.Errorf("convert get target graph request: %w", err)
+	}
+	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(entityReq.Build.Remote)})
+	graphReader, err := c.getGraph(ctx, entityReq)
 	if err != nil {
 		return err
 	}
@@ -92,18 +97,14 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 // entries store the full payload and stripping happens at send time, so
 // letting an orchestrator see it could poison the shared cache with
 // stripped graphs.
-func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDescription, requestOptions *pb.RequestOptions, bypassCache bool) (storage.GraphReader, error) {
+func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequest) (storage.GraphReader, error) {
 	start := time.Now()
-	entityBuild, err := mapper.ProtoToBuildDescription(buildDescription)
-	if err != nil {
-		return nil, fmt.Errorf("convert build description: %w", err)
-	}
 	logger := c.logger.With(
-		zap.Any("build_description", buildDescription),
+		zap.Any("build_description", req.Build),
 	)
-	if !bypassCache {
+	if !req.BypassCache {
 		// Look up the the git treehash based on cache path
-		treehashCachePath := cachekey.GetTreehashCachePath(entityBuild)
+		treehashCachePath := cachekey.GetTreehashCachePath(req.Build)
 		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
 		if err != nil {
 			if storage.IsNotFound(err) {
@@ -120,7 +121,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 				return nil, err
 			}
 			logger.Info("getGraph: treehash found")
-			treehashPath := cachekey.GetGraphByTreeHash(entityBuild.Remote, string(treehashBytes), entityBuild.Strategy, requestOptions.GetExtraExcludeFilesRegex())
+			treehashPath := cachekey.GetGraphByTreeHash(req.Build.Remote, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
@@ -148,7 +149,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 		logger.Info("getGraph: bypass_cache=true, skipping cache lookup")
 	}
 	computeStart := time.Now()
-	graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: &pb.GetTargetGraphRequest{BuildDescription: buildDescription, RequestOptions: requestOptions}, BypassCache: bypassCache})
+	graphReader, err := c.orchestrator.GetTargetGraph(ctx, orchestrator.GetTargetGraphParam{Req: req, BypassCache: req.BypassCache})
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())

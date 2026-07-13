@@ -33,7 +33,6 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/graphrunner"
 	"github.com/uber/tango/internal/cachekey"
-	"github.com/uber/tango/internal/mapper"
 	"go.uber.org/zap"
 )
 
@@ -116,19 +115,16 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			scope.Counter("success").Inc(1)
 		}
 	}()
-	logger := b.logger.With(zap.Any("build_description", param.Req.BuildDescription))
+	build := param.Req.Build
+	logger := b.logger.With(zap.Any("build_description", build))
 	logger.Infow("GetTargetGraph: Processing request")
 
-	remote := param.Req.BuildDescription.Remote
+	remote := build.Remote
 	repoCfg, ok := b.config.GetRepositoryConfig(remote)
 	if !ok {
 		return nil, fmt.Errorf("no repository configuration found for remote %q", remote)
 	}
-	entityBuild, err := mapper.ProtoToBuildDescription(param.Req.BuildDescription)
-	if err != nil {
-		return nil, fmt.Errorf("convert build description: %w", err)
-	}
-	ws, err := b.repoManager.Lease(ctx, entityBuild)
+	ws, err := b.repoManager.Lease(ctx, build)
 	if err != nil {
 		return nil, fmt.Errorf("lease workspace: %w", err)
 	}
@@ -141,23 +137,23 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			}
 		}
 	}()
-	err = ws.Checkout(ctx, remote, param.Req.BuildDescription.BaseSha)
+	err = ws.Checkout(ctx, build.Remote, build.BaseSha)
 	if err != nil {
-		return nil, fmt.Errorf("checkout %s@%s: %w", remote, param.Req.BuildDescription.BaseSha, err)
+		return nil, fmt.Errorf("checkout %s@%s: %w", build.Remote, build.BaseSha, err)
 	}
 	logger.Infow("GetTargetGraph: Checked out base revision")
 
-	requests := make([]workspace.Request, 0, len(param.Req.BuildDescription.Requests))
+	requests := make([]workspace.Request, 0, len(build.ChangeRequests))
 	gitFactory := b.gitFactory
 	if gitFactory == nil {
 		gitFactory = func(dir string) git.Interface { return git.New(dir, b.logger) }
 	}
 
 	gitModule := gitFactory(ws.Path())
-	for _, req := range param.Req.BuildDescription.Requests {
-		request, err := workspace.NewRequest(req.GetUrl(), gitModule, param.Req.BuildDescription.BaseSha, req.GetCommit(), logger)
+	for _, req := range build.ChangeRequests {
+		request, err := workspace.NewRequest(req.URL, gitModule, build.BaseSha, req.Commit, logger)
 		if err != nil {
-			return nil, fmt.Errorf("create request for %q: %w", req.GetUrl(), err)
+			return nil, fmt.Errorf("create request for %q: %w", req.URL, err)
 		}
 		requests = append(requests, request)
 	}
@@ -172,7 +168,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("compute treehash: %w", err)
 	}
-	treehashPath := cachekey.GetGraphByTreeHash(entityBuild.Remote, treehash, entityBuild.Strategy, param.Req.GetRequestOptions().GetExtraExcludeFilesRegex())
+	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, param.Req.ExcludeFilesRegex)
 	if !param.BypassCache {
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 		if err == nil {
@@ -204,7 +200,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 			BazelClient:        client,
 			GitClient:          gitModule,
 			Config:             repoCfg,
-			ExtraExcludedFiles: param.Req.GetRequestOptions().GetExtraExcludeFilesRegex(),
+			ExtraExcludedFiles: param.Req.ExcludeFilesRegex,
 			Scope:              b.scope,
 		})
 	}
@@ -223,7 +219,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTarget
 	if err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
 	}
-	treehashCachePath := cachekey.GetTreehashCachePath(entityBuild)
+	treehashCachePath := cachekey.GetTreehashCachePath(build)
 	treehashReader := bytes.NewReader([]byte(treehash))
 	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
 	if err != nil {

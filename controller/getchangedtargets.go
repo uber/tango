@@ -23,6 +23,7 @@ import (
 
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/cachekey"
 	"github.com/uber/tango/internal/mapper"
 	pb "github.com/uber/tango/tangopb"
@@ -175,7 +176,17 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			} else {
 				revision = request.GetSecondRevision()
 			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetRequestOptions(), request.GetBypassCache())
+			entityBuild, err := mapper.ProtoToBuildDescription(revision)
+			if err != nil {
+				results <- graphResult{order: idx, err: common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)}
+				return
+			}
+			entityReq := entity.GetTargetGraphRequest{
+				Build:             entityBuild,
+				ExcludeFilesRegex: request.GetRequestOptions().GetExtraExcludeFilesRegex(),
+				BypassCache:       request.GetBypassCache(),
+			}
+			graphReader, err := c.getGraph(jobs[idx].ctx, entityReq)
 			if err != nil || graphReader == nil {
 				results <- graphResult{order: idx, err: err}
 				return
