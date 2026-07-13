@@ -70,17 +70,11 @@ repository:
 	}
 }
 
-func TestServiceConfig_WorkerRootPath(t *testing.T) {
-	// Guards the layout documented on ServiceConfig.WorkspacesRoot:
-	// <workspaces_root>/.workers for worker checkouts.
-	svc := ServiceConfig{WorkspacesRoot: "/tmp/x"}
-	assert.Equal(t, filepath.Join("/tmp/x", ".workers"), svc.WorkerRootPath())
-}
-
 func TestParse_ServiceDefaults(t *testing.T) {
 	tests := []struct {
 		name                      string
 		give                      string
+		wantWorkerRootPath        string
 		wantMaxNumTargets         int
 		wantMaxNumChangedTargets  int
 		wantMaxNumMetadataEntries int
@@ -91,6 +85,7 @@ func TestParse_ServiceDefaults(t *testing.T) {
 repository:
   - remote: "r1"
 `,
+			wantWorkerRootPath:        filepath.Join("/tmp/x", ".workers"),
 			wantMaxNumTargets:         _defaultMaxNumTargets,
 			wantMaxNumChangedTargets:  _defaultMaxNumChangedTargets,
 			wantMaxNumMetadataEntries: _defaultMaxNumMetadataEntries,
@@ -105,6 +100,7 @@ repository:
 repository:
   - remote: "r1"
 `,
+			wantWorkerRootPath:        filepath.Join("/tmp/x", ".workers"),
 			wantMaxNumTargets:         10,
 			wantMaxNumChangedTargets:  20,
 			wantMaxNumMetadataEntries: 30,
@@ -115,6 +111,7 @@ repository:
 		t.Run(tt.name, func(t *testing.T) {
 			cfg, err := Parse(writeConfig(t, tt.give))
 			require.NoError(t, err)
+			assert.Equal(t, tt.wantWorkerRootPath, cfg.Service.WorkerRootPath)
 			assert.Equal(t, tt.wantMaxNumTargets, cfg.Service.Streaming.MaxNumTargets)
 			assert.Equal(t, tt.wantMaxNumChangedTargets, cfg.Service.Streaming.MaxNumChangedTargets)
 			assert.Equal(t, tt.wantMaxNumMetadataEntries, cfg.Service.Streaming.MaxNumMetadataEntries)

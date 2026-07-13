@@ -17,6 +17,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	yaml "github.com/goccy/go-yaml"
 )
@@ -74,6 +75,7 @@ func Parse(configFilePath string) (*Config, error) {
 	if config.Service.MaxWorkerPoolSize <= 0 {
 		return nil, fmt.Errorf("service.max_worker_pool_size must be > 0, got %d", config.Service.MaxWorkerPoolSize)
 	}
+	config.Service.WorkerRootPath = filepath.Join(config.Service.WorkspacesRoot, ".workers")
 	if config.Service.Streaming.MaxNumTargets <= 0 {
 		config.Service.Streaming.MaxNumTargets = _defaultMaxNumTargets
 	}
