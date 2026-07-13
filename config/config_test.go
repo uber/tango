@@ -70,6 +70,13 @@ repository:
 	}
 }
 
+func TestServiceConfig_WorkerRootPath(t *testing.T) {
+	// Guards the layout documented on ServiceConfig.WorkspacesRoot:
+	// <workspaces_root>/.workers for worker checkouts.
+	svc := ServiceConfig{WorkspacesRoot: "/tmp/x"}
+	assert.Equal(t, filepath.Join("/tmp/x", ".workers"), svc.WorkerRootPath())
+}
+
 func TestParse_ServiceDefaults(t *testing.T) {
 	tests := []struct {
 		name                      string

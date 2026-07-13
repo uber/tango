@@ -14,6 +14,8 @@
 
 package config
 
+import "path/filepath"
+
 // ServiceConfig holds operational configuration for the Tango service.
 type ServiceConfig struct {
 	// MaxWorkerPoolSize is the max number of concurrent requests per repository.
@@ -26,6 +28,12 @@ type ServiceConfig struct {
 	// worker checkouts.
 	WorkspacesRoot string      `yaml:"workspaces_root"`
 	Streaming      ChunkConfig `yaml:"streaming"` // streaming chunk sizes; zero values fall back to package defaults
+}
+
+// WorkerRootPath returns the root directory for worker workspace checkouts,
+// as documented on WorkspacesRoot: <workspaces_root>/.workers.
+func (s ServiceConfig) WorkerRootPath() string {
+	return filepath.Join(s.WorkspacesRoot, ".workers")
 }
 
 // ChunkConfig controls the number of entries per gRPC stream message.
