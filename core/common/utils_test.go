@@ -202,24 +202,28 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 		targetChunkSize      int
 		metadataMapChunkSize int
 		wantTargetChunks     int
+		wantMetadataChunks   int
 	}{
 		{
 			name:                 "250 per chunk",
 			targetChunkSize:      250,
-			metadataMapChunkSize: 50_000,
+			metadataMapChunkSize: 200,
 			wantTargetChunks:     2,
+			wantMetadataChunks:   3,
 		},
 		{
 			name:                 "100 per chunk",
 			targetChunkSize:      100,
-			metadataMapChunkSize: 50_000,
+			metadataMapChunkSize: 100,
 			wantTargetChunks:     5,
+			wantMetadataChunks:   5,
 		},
 		{
 			name:                 "all in one chunk",
 			targetChunkSize:      1000,
 			metadataMapChunkSize: 50_000,
 			wantTargetChunks:     1,
+			wantMetadataChunks:   1,
 		},
 	}
 
@@ -229,13 +233,17 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 			responses, err := ResultToGetTargetGraphResponse(context.Background(), result, tt.targetChunkSize, tt.metadataMapChunkSize)
 			require.NoError(t, err)
 
-			var targetChunks int
+			var targetChunks, metadataChunks int
 			for _, resp := range responses {
-				if _, ok := resp.Item.(*pb.GetTargetGraphResponse_Targets); ok {
+				switch resp.Item.(type) {
+				case *pb.GetTargetGraphResponse_Targets:
 					targetChunks++
+				case *pb.GetTargetGraphResponse_Metadata:
+					metadataChunks++
 				}
 			}
 			assert.Equal(t, tt.wantTargetChunks, targetChunks)
+			assert.Equal(t, tt.wantMetadataChunks, metadataChunks)
 		})
 	}
 }
