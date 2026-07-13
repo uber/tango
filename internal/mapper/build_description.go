@@ -5,8 +5,8 @@ import (
 	"github.com/uber/tango/tangopb"
 )
 
-// ToBuildDescription converts a proto BuildDescription to the domain type.
-func ToBuildDescription(desc *tangopb.BuildDescription) entity.BuildDescription {
+// ProtoToBuildDescription converts a proto BuildDescription to the domain type.
+func ProtoToBuildDescription(desc *tangopb.BuildDescription) entity.BuildDescription {
 	if desc == nil {
 		return entity.BuildDescription{}
 	}

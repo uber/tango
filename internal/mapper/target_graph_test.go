@@ -9,7 +9,7 @@ import (
 	"github.com/uber/tango/tangopb"
 )
 
-func TestToGetTargetGraphRequest(t *testing.T) {
+func TestProtoToGetTargetGraphRequest(t *testing.T) {
 	tests := []struct {
 		name string
 		req  *tangopb.GetTargetGraphRequest
@@ -64,7 +64,7 @@ func TestToGetTargetGraphRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ToGetTargetGraphRequest(tt.req)
+			got := ProtoToGetTargetGraphRequest(tt.req)
 			assert.Equal(t, tt.want, got)
 		})
 	}

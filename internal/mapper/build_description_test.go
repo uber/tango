@@ -9,7 +9,7 @@ import (
 	"github.com/uber/tango/tangopb"
 )
 
-func TestToBuildDescription(t *testing.T) {
+func TestProtoToBuildDescription(t *testing.T) {
 	tests := []struct {
 		name string
 		desc *tangopb.BuildDescription
@@ -52,7 +52,7 @@ func TestToBuildDescription(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ToBuildDescription(tt.desc)
+			got := ProtoToBuildDescription(tt.desc)
 			assert.Equal(t, tt.want, got)
 		})
 	}
