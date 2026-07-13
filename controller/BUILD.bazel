@@ -17,6 +17,7 @@ go_library(
         "//config",
         "//core/common",
         "//core/storage",
+        "//internal/mapper",
         "//orchestrator",
         "//tangopb",
         "@com_github_uber_go_tally//:tally",

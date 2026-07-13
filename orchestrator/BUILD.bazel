@@ -18,6 +18,7 @@ go_library(
         "//core/storage",
         "//core/workspace",
         "//graphrunner",
+        "//internal/mapper",
         "//tangopb",
         "@com_github_uber_go_tally//:tally",
         "@org_uber_go_zap//:zap",

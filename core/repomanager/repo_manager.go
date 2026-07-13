@@ -24,13 +24,13 @@ import (
 
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/workspace"
-	"github.com/uber/tango/tangopb"
+	"github.com/uber/tango/entity"
 	"go.uber.org/zap"
 )
 
 // RepoManager manages repository workspaces with a pool of workers per repo.
 type RepoManager interface {
-	Lease(ctx context.Context, desc tangopb.BuildDescription) (workspace.Workspace, error)
+	Lease(ctx context.Context, desc entity.BuildDescription) (workspace.Workspace, error)
 }
 
 type repoManager struct {
@@ -132,7 +132,7 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 
 // Lease borrows a worker workspace from the pool.
 // If all workers are leased, it blocks until one is returned or ctx is cancelled.
-func (r *repoManager) Lease(ctx context.Context, desc tangopb.BuildDescription) (workspace.Workspace, error) {
+func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (workspace.Workspace, error) {
 	repo := toShortRemote(desc.Remote)
 	pool := r.poolFor(repo)
 

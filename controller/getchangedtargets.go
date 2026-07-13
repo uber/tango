@@ -23,6 +23,7 @@ import (
 
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/internal/mapper"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
@@ -86,7 +87,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			return common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
 		}
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
+			cacheKey := mapper.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions().GetExtraExcludeFilesRegex())
 			cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
 			if cacheErr != nil && !storage.IsNotFound(cacheErr) {
 				logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
@@ -293,7 +294,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			return
 		}
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
+			cacheKey := mapper.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions().GetExtraExcludeFilesRegex())
 			if writeErr := storage.WriteChangedTargetsStream(c.appCtx, c.storage, cacheKey, changedTargetsResponses); writeErr != nil {
 				logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
 			}
@@ -1106,7 +1107,7 @@ func readTreehashParallel(ctx context.Context, st storage.Storage, first, second
 // Returns ("", err) on any other storage or read failure so callers can decide whether to
 // surface the error or fall back. Returns (treehash, nil) on a successful read.
 func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) (string, error) {
-	key := common.GetTreehashCachePath(buildDescription)
+	key := mapper.GetTreehashCachePath(mapper.ProtoToBuildDescription(buildDescription))
 	resp, err := st.Get(ctx, storage.DownloadRequest{Key: key})
 	if err != nil {
 		if storage.IsNotFound(err) {
