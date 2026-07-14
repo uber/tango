@@ -20,7 +20,6 @@ import (
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
-	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
@@ -31,11 +30,11 @@ import (
 // Params are the parameters for the controller.
 type Params struct {
 	fx.In
-	Logger       *zap.Logger
-	Storage      storage.Storage
-	Orchestrator orchestrator.Orchestrator
-	Scope        tally.Scope        `optional:"true"`
-	ChunkConfig  config.ChunkConfig `optional:"true"`
+	Logger          *zap.Logger
+	Storage         storage.Storage
+	Orchestrator    orchestrator.Orchestrator
+	Scope           tally.Scope `optional:"true"`
+	MaxMessageBytes int         `optional:"true"`
 }
 
 // _totalDurationBuckets covers 0–15 minutes in 10-second linear intervals.
@@ -64,18 +63,7 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	if scope == nil {
 		scope = tally.NoopScope
 	}
-	targetChunkSize := p.ChunkConfig.MaxNumTargets
-	if targetChunkSize <= 0 {
-		targetChunkSize = common.DefaultTargetChunkSize
-	}
-	changedTargetChunkSize := p.ChunkConfig.MaxNumChangedTargets
-	if changedTargetChunkSize <= 0 {
-		changedTargetChunkSize = common.DefaultChangedTargetChunkSize
-	}
-	metadataMapChunkSize := p.ChunkConfig.MaxNumMetadataEntries
-	if metadataMapChunkSize <= 0 {
-		metadataMapChunkSize = common.DefaultMetadataMapChunkSize
-	}
+	targetChunkSize, changedTargetChunkSize, metadataMapChunkSize := config.ChunkSizesForByteBudget(p.MaxMessageBytes)
 	return &controller{
 		logger:                 p.Logger,
 		storage:                p.Storage,

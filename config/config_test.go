@@ -70,6 +70,40 @@ repository:
 	}
 }
 
+func TestParse_ServiceDefaults(t *testing.T) {
+	tests := []struct {
+		name                string
+		give                string
+		wantMaxMessageBytes int
+	}{
+		{
+			name: "max_message_bytes unset",
+			give: _baseServiceYAML + `
+repository:
+  - remote: "r1"
+`,
+			wantMaxMessageBytes: 0,
+		},
+		{
+			name: "max_message_bytes explicit value preserved",
+			give: _baseServiceYAML + `
+  max_message_bytes: 1000000
+repository:
+  - remote: "r1"
+`,
+			wantMaxMessageBytes: 1000000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Parse(writeConfig(t, tt.give))
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantMaxMessageBytes, cfg.Service.MaxMessageBytes)
+		})
+	}
+}
+
 func TestParse_RepositoryDefaults(t *testing.T) {
 	tests := []struct {
 		name                    string

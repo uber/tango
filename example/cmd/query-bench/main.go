@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/jsonpb"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/targethasher"
@@ -112,9 +113,10 @@ func run() error {
 		totalDuration += elapsed
 		fmt.Printf("run %d: targethasher: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(targethasherResult.TargetNames))
 		start = time.Now()
+		targetChunkSize, _, metadataMapChunkSize := config.ChunkSizesForByteBudget(config.DefaultMaxMessageBytes)
 		response, err := common.ResultToGetTargetGraphResponse(
 			ctx, targethasherResult,
-			common.DefaultTargetChunkSize, common.DefaultMetadataMapChunkSize,
+			targetChunkSize, metadataMapChunkSize,
 		)
 		if err != nil {
 			return fmt.Errorf("run %d: converting to GetTargetGraphResponse: %w", i+1, err)

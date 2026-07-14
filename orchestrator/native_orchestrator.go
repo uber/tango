@@ -208,10 +208,8 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	responses, err := common.ResultToGetTargetGraphResponse(ctx, result,
-		b.config.Service.Streaming.MaxNumTargets,
-		b.config.Service.Streaming.MaxNumMetadataEntries,
-	)
+	targetChunkSize, _, metadataMapChunkSize := config.ChunkSizesForByteBudget(b.config.Service.MaxMessageBytes)
+	responses, err := common.ResultToGetTargetGraphResponse(ctx, result, targetChunkSize, metadataMapChunkSize)
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph to response: %w", err)
 	}

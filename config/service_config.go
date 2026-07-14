@@ -24,21 +24,9 @@ type ServiceConfig struct {
 	// and worker checkouts. Required. Layout: <workspaces_root_path>/<repo>/ for
 	// origin clones and <workspaces_root_path>/.workers/<repo>/worker-{1..N}/ for
 	// worker checkouts.
-	WorkspacesRootPath string      `yaml:"workspaces_root_path"`
-	Streaming          ChunkConfig `yaml:"streaming"` // streaming chunk sizes; zero values fall back to package defaults
-}
-
-// ChunkConfig controls the number of entries per gRPC stream message.
-// All fields are optional; a zero value means "use the package default".
-// Tune these when a monorepo's per-target size causes messages to approach
-// gRPC's default 4MB per-message limit.
-type ChunkConfig struct {
-	// MaxNumTargets is the max number of OptimizedTarget entries per stream message.
-	MaxNumTargets int `yaml:"max_num_targets"`
-	// MaxNumChangedTargets is the max number of ChangedTarget entries per stream message.
-	// ChangedTarget carries both old and new targets (~2× the size of a regular target).
-	MaxNumChangedTargets int `yaml:"max_num_changed_targets"`
-	// MaxNumMetadataEntries is the max number of entries per metadata map chunk.
-	// Applies to target_id_mapping and attribute_string_value_mapping.
-	MaxNumMetadataEntries int `yaml:"max_num_metadata_entries"`
+	WorkspacesRootPath string `yaml:"workspaces_root_path"`
+	// MaxMessageBytes caps the size of each gRPC stream message (targets, changed
+	// targets, and metadata mappings). Zero falls back to common.DefaultMaxMessageBytes.
+	// See common.ChunkSizesForByteBudget for how this is converted into per-entry-type limits.
+	MaxMessageBytes int `yaml:"max_message_bytes"`
 }

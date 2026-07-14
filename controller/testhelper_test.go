@@ -18,17 +18,18 @@ import (
 	"context"
 
 	"github.com/uber-go/tally"
-	"github.com/uber/tango/core/common"
+	"github.com/uber/tango/config"
 	"go.uber.org/zap"
 )
 
 func newTestController(logger *zap.Logger) *controller {
+	targetChunkSize, changedTargetChunkSize, metadataMapChunkSize := config.ChunkSizesForByteBudget(config.DefaultMaxMessageBytes)
 	return &controller{
 		logger:                 logger,
 		scope:                  tally.NoopScope,
-		targetChunkSize:        common.DefaultTargetChunkSize,
-		changedTargetChunkSize: common.DefaultChangedTargetChunkSize,
-		metadataMapChunkSize:   common.DefaultMetadataMapChunkSize,
+		targetChunkSize:        targetChunkSize,
+		changedTargetChunkSize: changedTargetChunkSize,
+		metadataMapChunkSize:   metadataMapChunkSize,
 		totalDurationBuckets:   _totalDurationBuckets,
 		appCtx:                 context.Background(),
 	}
