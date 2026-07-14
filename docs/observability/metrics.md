@@ -1,252 +1,200 @@
 # observability/metrics
 
-Tango's metrics library. A thin, opinionated wrapper over `tally.Scope` that pins the naming, and tag conventions Tango consumers emit so dashboards can query by tag rather than by name merging.
+Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins the metric path shape (`<scope>.<operation>.<metric>`) and the handful of tag and result values that mean the same thing across every Tango domain. It owns emission mechanics and universal conventions only — each package owns the metric names, buckets, and instruments that describe its own behavior.
 
 ## Why
 
-Tango is a library. Consumers wire it into their own `fx` graph with their own `tally.Scope`, and often deploy multiple flavors (long-running server, batch job, one-shot CLI) side-by-side. Without a shared convention every deployment invents its own metric names and tag layout, and dashboards devolve into per-name merges.
+Tango is a library. Consumers wire it into their own `fx` graph with their own `tally.Scope`, and often deploy multiple flavors (long-running server, batch job, one-shot CLI) side by side. Without a shared convention every deployment invents its own metric paths and tag layout, and dashboards devolve into per-name merges. This package fixes the path shape and the cross-domain tag vocabulary so dashboards stay stable across deployments — without centralizing every package's metric names, hiding the metrics dependency, or letting missing wiring silently disable telemetry.
 
-This package owns:
+## What this package owns
 
-- op-as-subscope emission (`e.Inc("get_target_graph", "requests")` lands under `<scope>.get_target_graph.requests`)
-- shared metric-name, op-name, and tag-key constants
-- default histogram buckets sized for RPC latency and large target counts
-- an in-flight gauge helper that owns the atomic counter callers otherwise reinvent
-- context-based emitter propagation so downstream helpers do not need the emitter or scope threaded through every signature, thus context is required in functions that need to emit metrics
+- op-as-subscope emission: an instrument bound as `(op, name)` lands under `<scope>.<op>.<name>`
+- the universal tag keys and result values shared by every domain (`result`, `failure_type`, `failure_source`; `success` / `failure`)
+- a concrete, Tally-backed `Emitter` that binds instruments and copies tags before retaining them
+- explicit no-op construction for deployments that intentionally do not emit
+
+It does not own controller, Bazel, storage, graph runner, or orchestrator metric names, histogram buckets, error classification, or context propagation. Those live in the package that implements each operation.
 
 ## Layout
 
 ```
 observability/metrics/
-├── emitter.go   — Emitter, TrackInFlight
-├── options.go   — Option, WithTags, WithDurationBuckets, WithValueBuckets
-├── buckets.go   — default histogram buckets
-├── names.go     — Op*, metric name, Tag*, Result* constants
-└── context.go   — WithEmitter, FromContext
+├── emitter.go       concrete Tally-backed emitter
+├── names.go         universal tag and result constants only
+└── emitter_test.go
+
+controller/request_metrics.go   request lifecycle + failure classification
+core/bazel/metrics.go           bazel query metrics + buckets
+graphrunner/metrics.go          graph runner metrics + buckets
 ```
 
 ## Emitter
 
-`Emitter` is a concrete struct. `New(scope)` returns a tally-backed emitter; `New(nil)` falls back to a no-op scope, useful for tests.
+`Emitter` is a concrete struct, not an interface: Tango has one metrics backend, and Tally already supplies test and no-op scopes. The API returns Tally instruments directly — it standardizes binding, it does not pretend metrics backends are interchangeable.
 
 ```go
+package metrics
+
 type Emitter struct {
-  scope           tally.Scope
-  baseTags        map[string]string
-  durationBuckets tally.DurationBuckets
-  valueBuckets    tally.ValueBuckets
-  inFlight        *sync.Map
+    scope tally.Scope
 }
 
-func (e *Emitter) Inc(op, name string, opts ...Option)                        // counter: +1 each call
-func (e *Emitter) Gauge(op, name string, v float64, opts ...Option)
-func (e *Emitter) RecordDur(op, name string, d time.Duration, opts ...Option) // duration histogram
-func (e *Emitter) RecordCount(op, name string, v int64, opts ...Option)       // value histogram (e.g. "4200 targets")
+// New creates an emitter for scope. A nil scope is a configuration error.
+func New(scope tally.Scope) (*Emitter, error)
+
+// Nop creates an explicitly disabled emitter.
+func Nop() *Emitter
+
+// Tagged returns an emitter with additional fixed tags. It copies tags and
+// does not modify its parent.
 func (e *Emitter) Tagged(tags map[string]string) *Emitter
 
-// Option customizes a single emission; WithTags / WithDurationBuckets /
-// WithValueBuckets each return one.
-type Option func(*emitOpts)
+// Counter binds a counter under <scope>.<op>.<name>.
+func (e *Emitter) Counter(op, name string) (tally.Counter, error)
+
+// Gauge binds a gauge under <scope>.<op>.<name>.
+func (e *Emitter) Gauge(op, name string) (tally.Gauge, error)
+
+// DurationHistogram binds a duration histogram using owner-selected buckets.
+func (e *Emitter) DurationHistogram(op, name string, buckets tally.DurationBuckets) (tally.Histogram, error)
+
+// ValueHistogram binds a value histogram using owner-selected buckets.
+func (e *Emitter) ValueHistogram(op, name string, buckets tally.ValueBuckets) (tally.Histogram, error)
 ```
 
-```go
-// New returns the default tally-backed Emitter. A nil scope falls back to
-// tally.NoopScope
-func New(scope tally.Scope) *Emitter
+Instruments are normally bound once during component construction and stored on a local metrics struct. Dynamic binding is reserved for bounded outcome tags such as `result` and `failure_type`.
 
-// Tagged returns a child Emitter that adds tags to every subsequent emission.
-// The parent is unchanged.
-func (e *Emitter) Tagged(tags map[string]string) *Emitter
+## Dependency direction
 
-// WithTags attaches key/value tags to a single emission. Multiple WithTags
-// compose with later-wins semantics on key collision.
-func WithTags(tags map[string]string) Option
+The emitter is a fixed dependency for the lifetime of a component, so it lives on that component — passed to constructors and stored in a field, never carried in a request context. `context.Context` stays responsible for deadlines, cancellation, and request-scoped values only.
 
-// WithDurationBuckets overrides the emitter's default duration histogram
-// buckets for a single RecordDur call.
-func WithDurationBuckets(b tally.DurationBuckets) Option
-
-// WithValueBuckets overrides the emitter's default value histogram buckets
-// for a single RecordCount call.
-func WithValueBuckets(b tally.ValueBuckets) Option
+```
+controller workflow -> controller metrics -> observability/metrics -> tally
+domain operation     -> domain metrics     -> observability/metrics -> tally
+infrastructure       -> local metrics      -> observability/metrics -> tally
 ```
 
-## Op-as-subscope
+`observability/metrics` does not depend on controller or domain error packages. Classification and emission are combined at the controller, because that is where the request-level outcome policy lives.
 
-Every emit call takes an op name as its first argument. For example, `e.Inc("get_target_graph", "requests")` emits under `<scope>.get_target_graph.requests`. Consumers that own their own ops (an extension RPC, a background job) should declare `const opXYZ = "xyz"` next to the emit site rather than adding to `names.go`.
+## Shared conventions
 
-## RecordRequest
-
-Single helper for the RPC defer pattern — records duration and emits the appropriate success/failure counter; if in error path, internally it also consults error classification for error type and include it in emission.
+Only values with the same meaning across every Tango domain live in `names.go`:
 
 ```go
-// RecordRequest records TotalDuration and emits a requests counter.
-// If err is nil, tags result=success. Otherwise, derives failure_type
-// and failure_source from the error via observability/errors.
-func RecordRequest(e *Emitter, op string, dur time.Duration, err error)
+const (
+    TagResult        = "result"
+    TagFailureType   = "failure_type"
+    TagFailureSource = "failure_source"
+)
+
+type Result string
+
+const (
+    ResultSuccess Result = "success"
+    ResultFailure Result = "failure"
+)
 ```
 
-Internally:
+Operation and metric names such as `get_target_graph`, `bazel_query_duration`, or `changed_targets_count` do not belong here. They are unexported constants in `controller`, `core/bazel`, or whichever package owns the operation.
+
+## Domain-local metrics
+
+Each component defines a small metrics struct in its own vocabulary and binds its fixed instruments — and its bucket policy — once, at construction.
 
 ```go
-func RecordRequest(e *Emitter, op string, dur time.Duration, err error) {
-    e.RecordDur(op, TotalDuration, dur)
+package bazel
+
+const opQuery = "query"
+
+type queryMetrics struct {
+    called      tally.Counter
+    succeeded   tally.Counter
+    failed      tally.Counter
+    duration    tally.Histogram
+    targetCount tally.Histogram
+}
+
+func newQueryMetrics(e *metrics.Emitter) (*queryMetrics, error) {
+    called, err := e.Counter(opQuery, "called")
     if err != nil {
-        recordFailure(e, op, err)
-    } else {
-        recordSuccess(e, op)
+        return nil, err
     }
+    // bind the remaining instruments with Bazel-specific buckets...
+    return &queryMetrics{called: called /* ... */}, nil
 }
 ```
 
-Every RPC handler:
+The owning client takes `*queryMetrics` (or the `*metrics.Emitter` it builds one from) as a required dependency. Future changes to Bazel metrics stay beside Bazel behavior instead of in a cross-package inventory.
+
+## Request metrics
+
+Request outcome policy lives at the controller boundary, where Tango holds the final returned error and can classify it once. The pattern is controller-local, not part of the emitter package.
 
 ```go
-defer func() {
-    metrics.RecordRequest(e, metrics.OpGetChangedTargets, time.Since(start), retErr)
-}()
-```
-
-`Inc` is the generic counter for everything else — cache lookups, patches applied, retries, workspace leases:
-
-```go
-e.Inc(op, TreehashCacheLookup, WithTags(map[string]string{TagResult: string(ResultHit)}))
-e.Inc(op, Patch...)
-```
-
-## TrackInFlight
-
-Gauges are update-only, so an in-flight counter needs an owning atomic somewhere. Rather than force every call site to allocate its own `atomic.Int64` and remember to update the gauge, the Emitter.TrackInFlight owns a per-op `*int64`:
-
-```go
-// TrackInFlight increments the in-flight counter for op, emits the gauge,
-// and returns a decrement closure the caller is expected to defer.
-// The counter is shared across Tagged children so increment/decrement
-// always refers to the same gauge series.
-func (e *Emitter) TrackInFlight(op string) func()
-```
-
-Call site:
-
-```go
-defer c.emitter.TrackInFlight(metrics.OpGetTargetGraph)()
-```
-
-The emitted gauge carries `TagOperation=op` so a single time-series carries the count for every operation, split by op in the dashboard.
-
-## Context propagation
-
-Emitter is passed via contexts so downstream helpers don't need it threaded through every signature.
-
-```go
-type emitterKey struct{}
-var noopEmitter = New(nil)
-
-func WithEmitter(ctx context.Context, e *Emitter) context.Context {
-   return context.WithValue(ctx, emitterKey{}, e)
+type requestMetrics struct {
+    called    tally.Counter
+    succeeded tally.Counter
+    duration  tally.Histogram
+    inFlight  tally.Gauge
+    active    atomic.Int64
+    // ...
 }
-func FromContext(ctx context.Context) *Emitter { // should never return nil
-   e, ok := ctx.Value(emitterKey{}).(*Emitter)
-   if !ok { return noopEmitter }
-   return e
+
+func (m *requestMetrics) Begin() *requestAttempt {
+    m.called.Inc(1)
+    m.inFlight.Update(float64(m.active.Add(1)))
+    return &requestAttempt{owner: m, start: time.Now()}
 }
-```
 
-The RPC handler applies request-scope tags once and installs the tagged Emitter on the context. Helpers pull it back out with `FromContext`, which never returns nil — a missing key falls back to a package-level noop.
-
-Observability is not business logic — a missing emitter should never crash the server or fail a request. In practice, a missing emitter means someone forgot to call `WithEmitter` in the handler setup; the consequence is lost metrics, which surfaces in dashboards and gets fixed. Callers who don't want metrics simply don't set an emitter rather than explicitly injecting a noop. The alternative — returning an error from `FromContext` — would force every call site to handle `if err := FromContext(ctx); err != nil {}` with nothing meaningful to do.
-
-## Constants
-
-### Operation names
-
-| Constant | Value |
-|---|---|
-| `OpGetTargetGraph` | `get_target_graph` |
-| `OpGetChangedTargets` | `get_changed_targets` |
-| `OpGetChangedTargetGraph` | `get_changed_target_graph` |
-| `OpGetGraph` | `get_graph` |
-| `OpCompareTargetGraphs` | `compare_target_graphs` |
-| `OpNativeOrchestrator` | `native_orchestrator` |
-| `OpGraphRunner` | `graph_runner` |
-
-### Metric names
-
-| Constant | Value |
-|---|---|
-| `Requests` | `requests` |
-| `TreehashCacheLookup` | `treehash_cache_lookup` |
-| `GraphCacheLookup` | `graph_cache_lookup` |
-| `ChangedTargetsCacheLookup` | `changed_targets_cache_lookup` |
-| `GraphCacheFetchDuration` | `graph_cache_fetch_duration` |
-| `ChangedTargetsCacheFetchDuration` | `changed_targets_cache_fetch_duration` |
-| `CompareDuration` | `compare_duration` |
-| `ChangedTargetsCount` | `changed_targets_count` |
-| `TotalDuration` | `total_duration` |
-| `Patch` | `patch` |
-| `PatchDuration` | `patch_duration` |
-| `BazelQueryDuration` | `bazel_query_duration` |
-| `GitFileHashesDuration` | `git_file_hashes_duration` |
-| `TargetHashDuration` | `target_hash_duration` |
-| `TargetsCount` | `targets_count` |
-| `StorageUploadDuration` | `storage_upload_duration` |
-| `InFlightRequests` | `in_flight_requests` |
-| `WorkspacesInFlight` | `in_flight_workspaces` |
-
-### Tag keys
-
-| Constant | Value |
-|---|---|
-| `TagRepo` | `repo` |
-| `TagEmitter` | `emitter` |
-| `TagResult` | `result` |
-| `TagOperation` | `operation` |
-| `TagFailureType` | `failure_type` |
-| `TagFailureSource` | `failure_source` |
-
-### Result values
-
-| Constant | Value |
-|---|---|
-| `ResultSuccess` | `success` |
-| `ResultFail` | `fail` |
-| `ResultHit` | `hit` |
-| `ResultMiss` | `miss` |
-
-## Usage
-
-```go
-func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
-    emitter := metrics.New(p.Scope).Tagged(map[string]string{
-        metrics.TagEmitter: "server",
+func (a *requestAttempt) Complete(err error) {
+    a.once.Do(func() {
+        m := a.owner
+        m.inFlight.Update(float64(m.active.Add(-1)))
+        m.duration.RecordDuration(time.Since(a.start))
+        if err == nil {
+            m.succeeded.Inc(1)
+            return
+        }
+        m.recordClassifiedFailure(classifyError(err))
     })
-    return &controller{emitter: emitter, /* ... */}
 }
+```
 
-func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb...) (retErr error) {
-    defer c.emitter.TrackInFlight(metrics.OpGetChangedTargets)()
-    e := c.emitter.Tagged(map[string]string{
-        metrics.TagRepo: common.ToShortRemote(req.GetFirstRevision().GetRemote()),
-    })
-    // linkRequestCtx combines app context (shutdown) with stream context (client disconnect)
+`classifyError` stays controller policy and uses Tango's classified-error contract without introducing a dependency from the metrics package to the error package. Handlers stay concise:
+
+```go
+func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
+    attempt := c.getChangedTargetsMetrics.Begin()
+    defer func() { attempt.Complete(retErr) }()
+
     ctx, cancel := c.linkRequestCtx(stream.Context())
     defer cancel()
-    ctx = metrics.WithEmitter(ctx, e)
-    start := time.Now()
-    defer func() {
-        metrics.RecordRequest(e, metrics.OpGetChangedTargets, time.Since(start), retErr)
-    }()
-
-    // ... compute changed targets ...
-    changedTargets := ...
-
-    e.RecordCount(
-        metrics.OpGetChangedTargets,
-        metrics.ChangedTargetsCount,
-        int64(len(changedTargets)),
-        metrics.WithValueBuckets(tally.ValueBuckets{10, 50, 100, 500, 1000}
-    )
-
+    // ... request workflow ...
     return nil
 }
 ```
+
+No emitter is stored on `ctx`.
+
+## Request-specific tags
+
+Tags with bounded cardinality may be applied to a derived emitter (`Tagged`) where the owning operation is constructed or recorded. Request identifiers, commit hashes, paths, and arbitrary repository URLs must never be tags. A repository tag is allowed only where a deployment has an explicit cardinality budget and normalizes the value consistently.
+
+In-flight gauges must not use request-specific tagged emitters: one atomic counter owns exactly one gauge series. If several dimensions genuinely need independent gauges, the owner keeps a separate counter per bounded series key.
+
+## Buckets
+
+There is no universal default spanning RPCs, storage calls, Bazel queries, and multi-hour builds. The package that owns an operation selects its buckets from the expected distribution and its dashboard needs; a shared set is introduced only when operations intentionally share a semantic range. Bucket slices are never mutable package globals — a constructor creates or copies the set before binding.
+
+## No-op behavior
+
+Missing production wiring is an error, not a silent fallback:
+
+```go
+emitter, err := metrics.New(scope)
+if err != nil {
+    return nil, fmt.Errorf("create metrics emitter: %w", err)
+}
+```
+
+Programs that intentionally emit nothing say so explicitly with `metrics.Nop()`. This keeps a forgotten wiring or a nil scope from quietly removing telemetry.
