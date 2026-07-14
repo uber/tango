@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/uber-go/tally"
-	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
@@ -28,6 +27,9 @@ import (
 )
 
 // Params are the parameters for the controller.
+// TODO: MaxMessageBytes should come from *config.Config via fx, not as a
+// standalone Params field. Wire it through the fx module once config is
+// provided as an fx dependency.
 type Params struct {
 	fx.In
 	Logger          *zap.Logger
@@ -41,14 +43,12 @@ type Params struct {
 var _totalDurationBuckets = tally.MustMakeLinearDurationBuckets(10*time.Second, 10*time.Second, 90)
 
 type controller struct {
-	logger                 *zap.Logger
-	storage                storage.Storage
-	orchestrator           orchestrator.Orchestrator
-	scope                  tally.Scope
-	targetChunkSize        int
-	changedTargetChunkSize int
-	metadataMapChunkSize   int
-	totalDurationBuckets   tally.Buckets
+	logger               *zap.Logger
+	storage              storage.Storage
+	orchestrator         orchestrator.Orchestrator
+	scope                tally.Scope
+	maxMessageBytes      int
+	totalDurationBuckets tally.Buckets
 
 	// appCtx is the application lifetime; cancel it on process shutdown.
 	// Used by linkRequestCtx and any fire-and-forget goroutines so they
@@ -63,17 +63,14 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	if scope == nil {
 		scope = tally.NoopScope
 	}
-	targetChunkSize, changedTargetChunkSize, metadataMapChunkSize := config.ChunkSizesForByteBudget(p.MaxMessageBytes)
 	return &controller{
-		logger:                 p.Logger,
-		storage:                p.Storage,
-		orchestrator:           p.Orchestrator,
-		scope:                  scope.SubScope("controller"),
-		targetChunkSize:        targetChunkSize,
-		changedTargetChunkSize: changedTargetChunkSize,
-		metadataMapChunkSize:   metadataMapChunkSize,
-		totalDurationBuckets:   _totalDurationBuckets,
-		appCtx:                 appCtx,
+		logger:               p.Logger,
+		storage:              p.Storage,
+		orchestrator:         p.Orchestrator,
+		scope:                scope.SubScope("controller"),
+		maxMessageBytes:      p.MaxMessageBytes,
+		totalDurationBuckets: _totalDurationBuckets,
+		appCtx:               appCtx,
 	}
 }
 

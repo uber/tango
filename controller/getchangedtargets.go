@@ -447,33 +447,22 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 
 	// Emit changes in chunks to stay within gRPC per-message size limits, followed by chunked metadata.
 	var results []*pb.GetChangedTargetsResponse
-	for i := 0; i < len(changed); i += c.changedTargetChunkSize {
-		end := i + c.changedTargetChunkSize
-		if end > len(changed) {
-			end = len(changed)
-		}
+	for _, chunk := range mapper.BySize(changed, c.maxMessageBytes) {
 		results = append(results, &pb.GetChangedTargetsResponse{
 			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
 				ChangedTargets: &pb.ChangedTargets{
-					ChangedTargets: changed[i:end],
+					ChangedTargets: chunk,
 				},
 			},
 		})
 	}
-	if len(results) == 0 {
-		results = append(results, &pb.GetChangedTargetsResponse{
-			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-				ChangedTargets: &pb.ChangedTargets{},
-			},
-		})
-	}
-	for _, meta := range common.ChunkMetadata(
+	for _, meta := range mapper.ChunkMetadata(
 		mappers.target.Invert(),
 		mappers.ruleType.Invert(),
 		mappers.tag.Invert(),
 		mappers.attrName.Invert(),
 		mappers.attrVal.Invert(),
-		c.metadataMapChunkSize,
+		c.maxMessageBytes,
 	) {
 		results = append(results, &pb.GetChangedTargetsResponse{
 			Item: &pb.GetChangedTargetsResponse_Metadata{

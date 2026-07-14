@@ -25,8 +25,8 @@ type ServiceConfig struct {
 	// origin clones and <workspaces_root_path>/.workers/<repo>/worker-{1..N}/ for
 	// worker checkouts.
 	WorkspacesRootPath string `yaml:"workspaces_root_path"`
-	// MaxMessageBytes caps the size of each gRPC stream message (targets, changed
-	// targets, and metadata mappings). Zero falls back to common.DefaultMaxMessageBytes.
-	// See common.ChunkSizesForByteBudget for how this is converted into per-entry-type limits.
+	// MaxMessageBytes caps the serialized size of each gRPC stream message (targets,
+	// changed targets, and metadata mappings), measured against each entry's actual
+	// wire size. Defaults to ~4.25MB when unset.
 	MaxMessageBytes int `yaml:"max_message_bytes"`
 }

@@ -34,6 +34,7 @@ import (
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
 	"github.com/uber/tango/internal/cachekey"
+	"github.com/uber/tango/internal/mapper"
 	"go.uber.org/zap"
 )
 
@@ -208,8 +209,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	targetChunkSize, _, metadataMapChunkSize := config.ChunkSizesForByteBudget(b.config.Service.MaxMessageBytes)
-	responses, err := common.ResultToGetTargetGraphResponse(ctx, result, targetChunkSize, metadataMapChunkSize)
+	responses, err := mapper.ResultToGetTargetGraphResponse(ctx, result, b.config.Service.MaxMessageBytes)
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph to response: %w", err)
 	}

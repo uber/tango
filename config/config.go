@@ -21,7 +21,10 @@ import (
 	yaml "github.com/goccy/go-yaml"
 )
 
-const _defaultBazelQueryTimeoutSeconds = 600
+const (
+	_defaultBazelQueryTimeoutSeconds = 600
+	_defaultMaxMessageBytes          = 4_250_000
+)
 
 var _bzlmodEnabledDefault = true
 
@@ -66,6 +69,9 @@ func Parse(configFilePath string) (*Config, error) {
 	}
 	if config.Service.MaxWorkerPoolSize <= 0 {
 		return nil, fmt.Errorf("service.max_worker_pool_size must be > 0, got %d", config.Service.MaxWorkerPoolSize)
+	}
+	if config.Service.MaxMessageBytes <= 0 {
+		config.Service.MaxMessageBytes = _defaultMaxMessageBytes
 	}
 	config.repositoryByRemote = make(map[string]*RepositoryConfig, len(config.Repository))
 	for i := range config.Repository {

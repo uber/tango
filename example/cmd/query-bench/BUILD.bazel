@@ -6,10 +6,9 @@ go_library(
     importpath = "github.com/uber/tango/example/cmd/query-bench",
     visibility = ["//visibility:private"],
     deps = [
-        "//config",
         "//core/bazel",
-        "//core/common",
         "//core/targethasher",
+        "//internal/mapper",
         "@com_github_gogo_protobuf//jsonpb",
         "@org_uber_go_zap//:zap",
     ],

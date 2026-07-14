@@ -3,7 +3,6 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "config",
     srcs = [
-        "chunk_sizes.go",
         "config.go",
         "repository_config.go",
         "service_config.go",
@@ -16,10 +15,7 @@ go_library(
 
 go_test(
     name = "config_test",
-    srcs = [
-        "chunk_sizes_test.go",
-        "config_test.go",
-    ],
+    srcs = ["config_test.go"],
     embed = [":config"],
     deps = [
         "@com_github_stretchr_testify//assert",

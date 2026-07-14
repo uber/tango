@@ -82,7 +82,7 @@ func TestParse_ServiceDefaults(t *testing.T) {
 repository:
   - remote: "r1"
 `,
-			wantMaxMessageBytes: 0,
+			wantMaxMessageBytes: _defaultMaxMessageBytes,
 		},
 		{
 			name: "max_message_bytes explicit value preserved",
