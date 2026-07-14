@@ -69,7 +69,7 @@ func TestProtoToGetTargetGraphRequest(t *testing.T) {
 				OutputConfig:     &tangopb.OutputConfig{},
 			},
 			want: entity.GetTargetGraphRequest{
-				Build: entity.BuildDescription{Remote: "remote", BaseSha: "abc123"},
+				Build: entity.BuildDescription{Remote: "remote", BaseSha: "abc123", Strategy: entity.ComputationStrategyInvalid},
 			},
 		},
 	}
