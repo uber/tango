@@ -115,11 +115,6 @@ func TestMemoryStorage_Exists(t *testing.T) {
 	assert.True(t, exists)
 }
 
-func TestNotFoundError_Error(t *testing.T) {
-	err := &NotFoundError{Path: "test/path"}
-	assert.NotEmpty(t, err.Error())
-}
-
 func TestIsNotFound(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -127,8 +122,8 @@ func TestIsNotFound(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "NotFoundError returns true",
-			err:      &NotFoundError{Path: "test"},
+			name:     "wrapped ErrNotFound returns true",
+			err:      NewNotFoundError("test"),
 			expected: true,
 		},
 		{

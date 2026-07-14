@@ -44,7 +44,7 @@ func New(rootDir string) (storage.Storage, error) {
 	return &diskStorage{rootDir: rootDir}, nil
 }
 
-// Get retrieves a blob by key. Returns storage.NotFoundError if not found.
+// Get retrieves a blob by key. Returns an error wrapping storage.ErrNotFound if not found.
 func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 	if ctx.Err() != nil {
 		return storage.DownloadResponse{}, ctx.Err()
@@ -53,7 +53,7 @@ func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (sto
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
+			return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
 		}
 		return storage.DownloadResponse{}, err
 	}

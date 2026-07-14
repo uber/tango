@@ -255,7 +255,7 @@ func TestReadTreehash(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		st := storagemock.NewMockStorage(ctrl)
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "missing"})
+			Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
 
 		val, err := readTreehash(context.Background(), st, bd)
 		require.NoError(t, err)
@@ -301,7 +301,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	})
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 		if strings.Contains(req.Key, "compared-targets") {
-			return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
+			return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
 		}
 		if strings.Contains(req.Key, "th") {
 			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil
@@ -402,7 +402,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 			switch {
 			case strings.Contains(req.Key, "compared-targets"):
-				return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
+				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
 			case strings.Contains(req.Key, "sha1"):
 				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
 			case strings.Contains(req.Key, "sha2"):
@@ -499,7 +499,7 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 			switch {
 			case strings.Contains(req.Key, "compared-targets"):
-				return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
+				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
 			case strings.Contains(req.Key, "sha1"):
 				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
 			case strings.Contains(req.Key, "sha2"):
