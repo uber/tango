@@ -71,7 +71,7 @@ func run() error {
 	logger.Infof("Using storage type: %s", cfg.Storage.Type)
 
 	// Repo manager and orchestrator
-	repoManagerClonePath := cfg.Service.WorkspacesRoot
+	repoManagerClonePath := cfg.Service.WorkspacesRootPath
 	workerRootPath := cfg.Service.WorkerRootPath
 	if err := os.MkdirAll(repoManagerClonePath, 0o755); err != nil {
 		return fmt.Errorf("failed to create repo manager clone path: %w", err)

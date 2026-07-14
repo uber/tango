@@ -5,7 +5,7 @@ repository:
   - remote: {{.Remote}}
     default_branch: "main"
 {{- if .BazelCommand}}
-    bazel_command: {{.BazelCommand}}
+    bazel_command_path: {{.BazelCommand}}
 {{- end}}
     full_hash_repos: [""]
     excluded_files: ["^@@?bazel_tools/"]
@@ -15,5 +15,5 @@ repository:
 
 service:
   max_worker_pool_size: 2
-  workspaces_root: {{.ClonePath}}
+  workspaces_root_path: {{.ClonePath}}
   worker_root_path: {{.WorkerPath}}

@@ -69,11 +69,11 @@ func Parse(configFilePath string) (*Config, error) {
 	if config.Storage.Type == "" {
 		config.Storage.Type = StorageTypeMemory
 	}
-	if config.Service.WorkspacesRoot == "" {
-		return nil, fmt.Errorf("service.workspaces_root must be set")
+	if config.Service.WorkspacesRootPath == "" {
+		return nil, fmt.Errorf("service.workspaces_root_path must be set")
 	}
 	if config.Service.WorkerRootPath == "" {
-		config.Service.WorkerRootPath = filepath.Join(config.Service.WorkspacesRoot, ".workers")
+		config.Service.WorkerRootPath = filepath.Join(config.Service.WorkspacesRootPath, ".workers")
 	}
 	if config.Service.MaxWorkerPoolSize <= 0 {
 		return nil, fmt.Errorf("service.max_worker_pool_size must be > 0, got %d", config.Service.MaxWorkerPoolSize)

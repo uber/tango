@@ -21,6 +21,6 @@ repository:
 service:
   max_worker_pool_size: 5
   # root for origin clones; required
-  workspaces_root: "/tmp/tango-repo-manager"
-  # root for worker checkouts; defaults to workspaces_root/.workers
+  workspaces_root_path: "/tmp/tango-repo-manager"
+  # root for worker checkouts; defaults to workspaces_root_path/.workers
   worker_root_path: "/tmp/tango/workers"

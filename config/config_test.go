@@ -25,7 +25,7 @@ import (
 
 const _baseServiceYAML = `
 service:
-  workspaces_root: "/tmp/x"
+  workspaces_root_path: "/tmp/x"
   max_worker_pool_size: 1
 `
 
@@ -42,7 +42,7 @@ func TestParse_ServiceValidation(t *testing.T) {
 		give string
 	}{
 		{
-			name: "workspaces_root required",
+			name: "workspaces_root_path required",
 			give: `
 service:
   max_worker_pool_size: 1
@@ -54,7 +54,7 @@ repository:
 			name: "max_worker_pool_size must be positive",
 			give: `
 service:
-  workspaces_root: "/tmp/x"
+  workspaces_root_path: "/tmp/x"
   max_worker_pool_size: 0
 repository:
   - remote: "r1"
@@ -94,7 +94,7 @@ repository:
 			name: "worker_root_path explicit value preserved",
 			give: `
 service:
-  workspaces_root: "/tmp/x"
+  workspaces_root_path: "/tmp/x"
   worker_root_path: "/tmp/custom-workers"
   max_worker_pool_size: 1
 repository:

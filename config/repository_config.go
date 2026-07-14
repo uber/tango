@@ -31,9 +31,9 @@ type RepositoryConfig struct {
 	// dependency management. Defaults to true if unset. Set to false only for
 	// repositories still using WORKSPACE.
 	BzlmodEnabled *bool `yaml:"bzlmod_enabled"`
-	// BazelCommand overrides the Bazel binary path. When empty, Tango
+	// BazelCommandPath overrides the Bazel binary path. When empty, Tango
 	// automatically downloads and caches Bazelisk from GitHub.
-	BazelCommand string `yaml:"bazel_command"`
+	BazelCommandPath string `yaml:"bazel_command_path"`
 	// QueryTimeoutSeconds is the Bazel query timeout in seconds. Defaults to 600.
 	QueryTimeoutSeconds int64 `yaml:"query_timeout_seconds"`
 	// BazelExtraArgs are extra arguments passed to `bazel query` invocations,
