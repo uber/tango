@@ -22,19 +22,15 @@ Controls how Tango operates at the service level — how many concurrent request
 service:
   max_worker_pool_size: 5
   workspaces_root: "/var/tango"
-  # streaming:
-  #   max_num_targets: 250
-  #   max_num_changed_targets: 125
-  #   max_num_metadata_entries: 50000
+  # max_message_bytes: 4250000
 ```
 
 | Field | Required | Type | Default | Description |
 |---|---|---|---|---|
 | `max_worker_pool_size` | **Yes** | `int` | | Max number of concurrent requests per repository. Each worker is a lightweight local clone (hardlinked to the origin, not a full copy) that handles one request at a time — setting this to 5 means up to 5 concurrent graph computations per repo, and additional requests queue until a worker is free. A good starting point is the expected peak concurrent requests per repo. Must be greater than 0. |
 | `workspaces_root` | **Yes** | `string` | | Root directory where Tango stores repository clones and worker checkouts. Required because Tango needs a known location to clone repositories and create worker checkouts — without it, there is no disk space allocated for graph computation. Choose a location with enough disk space to hold one origin clone plus N worker checkouts (where N is `max_worker_pool_size`) per configured repository. Use a persistent location in production — if this directory is lost, Tango re-clones from the remote on the next request, which can be slow for large repositories. Layout: `<workspaces_root>/<repo>/` for origin clones and `<workspaces_root>/.workers/<repo>/worker-{1..N}/` for worker checkouts. |
-| `streaming.max_num_targets` | No | `int` | `250` | Max number of target entries per gRPC stream message (see `OptimizedTarget` in `proto/tango.proto`). The default is sized to stay well under gRPC's default 4MB receive limit for a typical target. If a repository has unusually large targets, tune this down to fit its needs. |
-| `streaming.max_num_changed_targets` | No | `int` | `125` | Max number of changed target entries per stream message (see `ChangedTarget` in `proto/tango.proto`). Default is lower than `max_num_targets` because each entry carries both old and new targets (~2x the size). If a repository has unusually large targets, tune this down to fit its needs. |
-| `streaming.max_num_metadata_entries` | No | `int` | `50000` | Max number of ID-to-name mapping entries per stream message (see `Metadata` in `proto/tango.proto`). If a repository has unusually large metadata entries, tune this down to fit its needs. |
+| `max_message_bytes` | No | `int` | `4250000` (~4.25MB) | Caps the size of each gRPC stream message Tango sends (targets, changed targets, and metadata mappings — see `proto/tango.proto`). This is a single byte budget rather than separate per-entry-type counts: Tango derives how many targets, changed targets, or metadata entries fit in one message from fixed size assumptions (a target ≈ 40KB worst case, a changed target ≈ 2x that since it carries both an old and new target, a metadata entry ≈ 85 bytes), computed once rather than measured per request. The default stays well under gRPC's default 64MB per-message limit. If a repository has unusually large targets or metadata entries, tune this down to fit its needs. |
+
 
 ## `repository`
 
