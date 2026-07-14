@@ -112,7 +112,10 @@ func run() error {
 		totalDuration += elapsed
 		fmt.Printf("run %d: targethasher: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(targethasherResult.TargetNames))
 		start = time.Now()
-		response, err := common.ResultToGetTargetGraphResponse(ctx, targethasherResult) // also print the time to convert to GetTargetGraphResponse format
+		response, err := common.ResultToGetTargetGraphResponse(
+			ctx, targethasherResult,
+			common.DefaultTargetChunkSize, common.DefaultMetadataMapChunkSize,
+		)
 		if err != nil {
 			return fmt.Errorf("run %d: converting to GetTargetGraphResponse: %w", i+1, err)
 		}

@@ -161,13 +161,13 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 func TestChunkTargets(t *testing.T) {
 	t.Parallel()
 
-	// Create 250 targets, chunk by 100 → expect 3 chunks (100, 100, 50)
-	targets := make([]*pb.OptimizedTarget, 250)
+	// Create 25 targets, chunk by 10 → expect 3 chunks (10, 10, 5)
+	targets := make([]*pb.OptimizedTarget, 25)
 	for i := range targets {
 		targets[i] = &pb.OptimizedTarget{Id: int32(i)}
 	}
 
-	responses := chunkTargets(targets, 100)
+	responses := chunkTargets(targets, 10)
 
 	require.Len(t, responses, 3)
 
@@ -180,14 +180,13 @@ func TestChunkTargets(t *testing.T) {
 			total++
 		}
 	}
-	assert.Equal(t, 250, total)
+	assert.Equal(t, 25, total)
 }
 
 func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 	t.Parallel()
 
-	// 500 targets with DefaultTargetChunkSize=250 → 2 target chunks + 1 metadata = 3 responses
-	numTargets := 500
+	numTargets := 50
 	result := targethasher.Result{
 		TargetNames: make([]string, numTargets),
 		Targets:     make(map[string]*targethasher.Target, numTargets),
@@ -198,16 +197,53 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 		result.Targets[name] = &targethasher.Target{Name: name, Hash: []byte{0}, RuleType: "go_library"}
 	}
 
-	responses, err := ResultToGetTargetGraphResponse(context.Background(), result)
-	require.NoError(t, err)
-
-	// 2 target chunks + 1 metadata chunk (500 targets well under DefaultMetadataMapChunkSize)
-	require.Len(t, responses, 3)
-
-	for _, resp := range responses[:2] {
-		_, ok := resp.Item.(*pb.GetTargetGraphResponse_Targets)
-		assert.True(t, ok, "expected Targets chunk")
+	tests := []struct {
+		name                 string
+		targetChunkSize      int
+		metadataMapChunkSize int
+		wantTargetChunks     int
+		wantMetadataChunks   int
+	}{
+		{
+			name:                 "25 per chunk",
+			targetChunkSize:      25,
+			metadataMapChunkSize: 20,
+			wantTargetChunks:     2,
+			wantMetadataChunks:   3,
+		},
+		{
+			name:                 "10 per chunk",
+			targetChunkSize:      10,
+			metadataMapChunkSize: 10,
+			wantTargetChunks:     5,
+			wantMetadataChunks:   5,
+		},
+		{
+			name:                 "all in one chunk",
+			targetChunkSize:      100,
+			metadataMapChunkSize: 5_000,
+			wantTargetChunks:     1,
+			wantMetadataChunks:   1,
+		},
 	}
-	_, ok := responses[2].Item.(*pb.GetTargetGraphResponse_Metadata)
-	assert.True(t, ok, "last response should be Metadata")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			responses, err := ResultToGetTargetGraphResponse(context.Background(), result, tt.targetChunkSize, tt.metadataMapChunkSize)
+			require.NoError(t, err)
+
+			var targetChunks, metadataChunks int
+			for _, resp := range responses {
+				switch resp.Item.(type) {
+				case *pb.GetTargetGraphResponse_Targets:
+					targetChunks++
+				case *pb.GetTargetGraphResponse_Metadata:
+					metadataChunks++
+				}
+			}
+			assert.Equal(t, tt.wantTargetChunks, targetChunks)
+			assert.Equal(t, tt.wantMetadataChunks, metadataChunks)
+		})
+	}
 }
