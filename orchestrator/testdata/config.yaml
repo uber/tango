@@ -1,11 +1,5 @@
 repository:
   - remote: "git@github:uber/tango"
-    full_hash_repos:
-      - "//"
-      - "//external"
-    excluded_files:
-      - "*.gen.go"
-    exclude_external_targets: true
     bzlmod_enabled: true
     query_timeout_seconds: 15
 

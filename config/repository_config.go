@@ -21,12 +21,6 @@ type RepositoryConfig struct {
 	// unique across all entries and match exactly what clients send in
 	// BuildDescription.remote.
 	Remote string `yaml:"remote"`
-	// TODO: FullHashRepos, ExcludedFiles, and ExcludeExternalTargets are not
-	// documented in config/README.md. Delete them if they turn out to be unneeded,
-	// otherwise document them there.
-	FullHashRepos          []string `yaml:"full_hash_repos"`
-	ExcludedFiles          []string `yaml:"excluded_files"`
-	ExcludeExternalTargets bool     `yaml:"exclude_external_targets"`
 	// BzlmodEnabled indicates whether this repository uses Bzlmod for external
 	// dependency management. Defaults to true if unset. Set to false only for
 	// repositories still using WORKSPACE.
@@ -34,14 +28,11 @@ type RepositoryConfig struct {
 	// BazelCommandPath overrides the Bazel binary path. When empty, Tango
 	// automatically downloads and caches Bazelisk from GitHub.
 	BazelCommandPath string `yaml:"bazel_command_path"`
-	// QueryTimeoutSeconds is the Bazel query timeout in seconds. Defaults to 600.
-	QueryTimeoutSeconds int64 `yaml:"query_timeout_seconds"`
 	// BazelExtraArgs are extra arguments passed to `bazel query` invocations,
 	// inserted between the `query` subcommand and the query expression.
 	BazelExtraArgs []string `yaml:"bazel_extra_args"`
-	// TODO: StreamBazelLogs is not documented in config/README.md. Delete it if
-	// it turns out to be unneeded, otherwise document it there.
-	StreamBazelLogs bool `yaml:"stream_bazel_logs"`
+	// QueryTimeoutSeconds is the Bazel query timeout in seconds. Defaults to 600.
+	QueryTimeoutSeconds int64 `yaml:"query_timeout_seconds"`
 }
 
 // RepositoryConfigProvider looks up per-repository configuration by remote.

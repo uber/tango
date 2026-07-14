@@ -24,11 +24,12 @@ type ServiceConfig struct {
 	// and worker checkouts. Required. Layout: <workspaces_root_path>/<repo>/ for
 	// origin clones and <workspaces_root_path>/.workers/<repo>/worker-{1..N}/ for
 	// worker checkouts.
-	WorkspacesRootPath string `yaml:"workspaces_root_path"`
-	// TODO: WorkerRootPath is not documented in config/README.md. Delete it if
-	// it turns out to be unneeded, otherwise document it there.
-	WorkerRootPath string      `yaml:"worker_root_path"` // root directory for worker workspace checkouts; defaults to workspaces_root_path/.workers
-	Streaming      ChunkConfig `yaml:"streaming"`        // streaming chunk sizes; zero values fall back to package defaults
+	WorkspacesRootPath string      `yaml:"workspaces_root_path"`
+	Streaming          ChunkConfig `yaml:"streaming"` // streaming chunk sizes; zero values fall back to package defaults
+
+	// WorkerRootPath is the root directory for worker workspace checkouts,
+	// set by Parse to <workspaces_root_path>/.workers. Not settable via YAML.
+	WorkerRootPath string `yaml:"-"`
 }
 
 // ChunkConfig controls the number of entries per gRPC stream message.

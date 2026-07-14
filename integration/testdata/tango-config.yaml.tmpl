@@ -7,13 +7,9 @@ repository:
 {{- if .BazelCommand}}
     bazel_command_path: {{.BazelCommand}}
 {{- end}}
-    full_hash_repos: [""]
-    excluded_files: ["^@@?bazel_tools/"]
-    exclude_external_targets: true
     bzlmod_enabled: true
     query_timeout_seconds: 600
 
 service:
   max_worker_pool_size: 2
   workspaces_root_path: {{.ClonePath}}
-  worker_root_path: {{.WorkerPath}}

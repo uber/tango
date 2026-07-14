@@ -58,9 +58,12 @@ func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
 }
 
 func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace) (targethasher.Result, error) {
-	query := "//external:all-targets + deps(//...:all-targets)"
-	if g.config.ExcludeExternalTargets {
-		query = "deps(//...:all-targets)"
+	bzlmodEnabled := g.config.BzlmodEnabled == nil || *g.config.BzlmodEnabled
+	query := "deps(//...:all-targets)"
+	if !bzlmodEnabled {
+		// //external is only queryable under legacy WORKSPACE resolution;
+		// Bzlmod repos resolve external deps under @@<module> instead.
+		query = "//external:all-targets + " + query
 	}
 	additionalArgs := append(
 		[]string{"--order_output=no", "--proto:locations", "--noproto:default_values"},
@@ -74,8 +77,6 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		// --proto:locations: we need to get external file location to make CTC more accurate
 		// --noproto: parameters exclude fields from the output that are not used for hashing anyways, making
 		// proto blob smaller and serialization/deserialization faster
-		// TODO: pass in --enable_workspace or --enable_bzlmod based on the config
-
 		AdditionalArgs: additionalArgs,
 	})
 	g.scope.Timer("bazel_query_duration").Record(time.Since(bazelStart))
@@ -92,9 +93,8 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 	hashConfig := targethasher.HashConfig{
 		KnownSourceHashes: knownSourceHashes,
-		FullHashRepos:     g.config.FullHashRepos,
-		ExcludedRegex:     append(g.config.ExcludedFiles, g.extraExcludedFiles...),
-		UseBzlmod:         g.config.BzlmodEnabled == nil || *g.config.BzlmodEnabled,
+		ExcludedRegex:     g.extraExcludedFiles,
+		UseBzlmod:         bzlmodEnabled,
 	}
 
 	hashStart := time.Now()
