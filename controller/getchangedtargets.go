@@ -178,7 +178,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			}
 			entityBuild, err := mapper.ProtoToBuildDescription(revision)
 			if err != nil {
-				results <- graphResult{order: idx, err: common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)}
+				results <- graphResult{order: idx, err: fmt.Errorf("convert build description: %w", err)}
 				return
 			}
 			entityReq := entity.GetTargetGraphRequest{
