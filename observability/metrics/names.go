@@ -16,9 +16,10 @@ package metrics
 
 // Operation names.
 const (
-	OpGetTargetGraph    = "get_target_graph"
-	OpGetChangedTargets = "get_changed_targets"
-	OpGraphRunner       = "graph_runner"
+	OpGetTargetGraph     = "get_target_graph"
+	OpGetChangedTargets  = "get_changed_targets"
+	OpNativeOrchestrator = "native_orchestrator"
+	OpGraphRunner        = "graph_runner"
 )
 
 // Metric names.

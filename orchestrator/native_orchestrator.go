@@ -17,13 +17,11 @@ package orchestrator
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
 	"time"
 
-	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/common"
@@ -32,6 +30,7 @@ import (
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/graphrunner"
+	"github.com/uber/tango/observability/metrics"
 	"go.uber.org/zap"
 )
 
@@ -40,7 +39,6 @@ type nativeOrchestrator struct {
 	storage     storage.Storage
 	repoManager repomanager.RepoManager
 	logger      *zap.SugaredLogger
-	scope       tally.Scope
 	// gitFactory allows injecting a git.Interface constructor for testing
 	gitFactory  func(directory string) git.Interface
 	graphRunner graphrunner.GraphRunner
@@ -61,7 +59,6 @@ type Params struct {
 	Storage        storage.Storage
 	RepoManager    repomanager.RepoManager
 	Logger         *zap.SugaredLogger
-	Scope          tally.Scope
 	GitFactory     func(directory string) git.Interface
 	GraphRunner    graphrunner.GraphRunner
 	ConfigFilePath string
@@ -73,11 +70,6 @@ type Params struct {
 // shutting down (e.g. wire it to SIGTERM/SIGINT in main) to abort any
 // background goroutines the orchestrator spawns.
 func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, error) {
-	scope := p.Scope
-	if scope == nil {
-		scope = tally.NoopScope
-	}
-
 	// parse the config file
 	cfg, err := config.Parse(p.ConfigFilePath)
 	if err != nil {
@@ -88,7 +80,6 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 		storage:     p.Storage,
 		repoManager: p.RepoManager,
 		logger:      p.Logger,
-		scope:       scope.SubScope("orchestrator"),
 		gitFactory:  p.GitFactory,
 		graphRunner: p.GraphRunner,
 		appCtx:      appCtx,
@@ -99,22 +90,11 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 // GetTargetGraph is used to compute the target graph locally.
 // It leases a workspace, checks out the base revision, applies the change requests, and computes the target graph.
 func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, param GetTargetGraphParam) (_ storage.GraphReader, retErr error) {
-	scope := b.scope.SubScope("get_target_graph")
-	scope.Counter("calls").Inc(1)
+	e := metrics.FromContext(ctx)
+	defer e.TrackInFlight(metrics.OpNativeOrchestrator)()
+	start := time.Now()
 	defer func() {
-		if retErr != nil {
-			scope.Counter("failure").Inc(1)
-			var ce common.ClassifiedError
-			if !errors.As(retErr, &ce) {
-				ce = common.WithReason(common.FailureReasonUnknown, common.ErrorTypeInfra, retErr)
-			}
-			scope.Tagged(map[string]string{
-				"failure_type":   ce.Type(),
-				"failure_reason": ce.Reason(),
-			}).Counter("failure_type").Inc(1)
-		} else {
-			scope.Counter("success").Inc(1)
-		}
+		metrics.RecordRequest(e, metrics.OpNativeOrchestrator, time.Since(start), retErr)
 	}()
 	logger := b.logger.With(zap.Any("build_description", param.Req.BuildDescription))
 	logger.Infow("GetTargetGraph: Processing request")
