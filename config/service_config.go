@@ -20,15 +20,15 @@ type ServiceConfig struct {
 	// Each worker is a lightweight local clone (hardlinked to the origin, not a
 	// full copy) that handles one request at a time. Must be greater than 0.
 	MaxWorkerPoolSize int `yaml:"max_worker_pool_size"`
-	// WorkspacesRoot is the root directory where Tango stores repository clones
-	// and worker checkouts. Required. Layout: <workspaces_root>/<repo>/ for
-	// origin clones and <workspaces_root>/.workers/<repo>/worker-{1..N}/ for
+	// WorkspacesRootPath is the root directory where Tango stores repository clones
+	// and worker checkouts. Required. Layout: <workspaces_root_path>/<repo>/ for
+	// origin clones and <workspaces_root_path>/.workers/<repo>/worker-{1..N}/ for
 	// worker checkouts.
-	WorkspacesRoot string      `yaml:"workspaces_root"`
-	Streaming      ChunkConfig `yaml:"streaming"` // streaming chunk sizes; zero values fall back to package defaults
+	WorkspacesRootPath string      `yaml:"workspaces_root_path"`
+	Streaming          ChunkConfig `yaml:"streaming"` // streaming chunk sizes; zero values fall back to package defaults
 
 	// WorkerRootPath is the root directory for worker workspace checkouts,
-	// set by Parse to <workspaces_root>/.workers. Not settable via YAML.
+	// set by Parse to <workspaces_root_path>/.workers. Not settable via YAML.
 	WorkerRootPath string `yaml:"-"`
 }
 

@@ -25,9 +25,9 @@ type RepositoryConfig struct {
 	// dependency management. Defaults to true if unset. Set to false only for
 	// repositories still using WORKSPACE.
 	BzlmodEnabled *bool `yaml:"bzlmod_enabled"`
-	// BazelCommand overrides the Bazel binary path. When empty, Tango
+	// BazelCommandPath overrides the Bazel binary path. When empty, Tango
 	// automatically downloads and caches Bazelisk from GitHub.
-	BazelCommand string `yaml:"bazel_command"`
+	BazelCommandPath string `yaml:"bazel_command_path"`
 	// BazelExtraArgs are extra arguments passed to `bazel query` invocations,
 	// inserted between the `query` subcommand and the query expression.
 	BazelExtraArgs []string `yaml:"bazel_extra_args"`

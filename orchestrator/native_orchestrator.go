@@ -189,7 +189,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		client, err := bazel.NewBazelClient(ctx, bazel.Params{
 			WorkspacePath: ws.Path(),
 			Logger:        b.logger,
-			BazelCommand:  repoCfg.BazelCommand,
+			BazelCommand:  repoCfg.BazelCommandPath,
 			QueryTimeout:  time.Duration(repoCfg.QueryTimeoutSeconds) * time.Second,
 		})
 		if err != nil {
