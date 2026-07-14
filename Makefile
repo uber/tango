@@ -1,4 +1,4 @@
-.PHONY: build test test-integration proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
+.PHONY: build test test-integration benchmark proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -20,6 +20,20 @@ test-integration:
 	@echo "Running integration tests..."
 	@$(BAZEL) test //integration:integration_test --test_output=errors --test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) --test_env=HOME=$$HOME
 	@echo "Integration tests passed!"
+
+# Run GetChangedTargets benchmarks against fixed, checked-in commit pairs.
+# Measurement only: not part of `make test` / `make test-integration` and not
+# run in CI, so a slow benchmark never fails the build.
+benchmark:
+	@echo "Running benchmarks..."
+	@$(BAZEL) test //integration:integration_test \
+		--test_output=all \
+		--test_arg=-test.run=^$$ \
+		--test_arg=-test.bench=. \
+		--test_arg=-test.benchtime=3x \
+		--test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) \
+		--test_env=HOME=$$HOME
+	@echo "Benchmarks complete!"
 
 # Generate protobuf files using protoc
 proto:
@@ -90,6 +104,7 @@ help:
 	@echo "  make build            - Build all targets"
 	@echo "  make test             - Run all tests"
 	@echo "  make test-integration - Run integration tests (slow)"
+	@echo "  make benchmark        - Run GetChangedTargets benchmarks (measurement only, not in CI)"
 	@echo "  make gazelle          - Update BUILD.bazel files"
 	@echo "  make clean            - Clean generated files and binaries"
 	@echo ""
