@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/uber/tango/core/common"
+	"github.com/uber/tango/internal/cachekey"
+	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/orchestrator"
 
 	"github.com/uber/tango/core/storage"
@@ -92,18 +94,16 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 // stripped graphs.
 func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDescription, requestOptions *pb.RequestOptions, bypassCache bool) (storage.GraphReader, error) {
 	start := time.Now()
-	if buildDescription == nil {
-		return nil, errors.New("build description is empty or invalid")
-	}
-	if buildDescription.GetBaseSha() == "" || buildDescription.GetRemote() == "" {
-		return nil, fmt.Errorf("build description is missing required fields: base_sha: %s, remote: %s", buildDescription.GetBaseSha(), buildDescription.GetRemote())
+	entityBuild, err := mapper.ProtoToBuildDescription(buildDescription)
+	if err != nil {
+		return nil, fmt.Errorf("convert build description: %w", err)
 	}
 	logger := c.logger.With(
 		zap.Any("build_description", buildDescription),
 	)
 	if !bypassCache {
 		// Look up the the git treehash based on cache path
-		treehashCachePath := common.GetTreehashCachePath(buildDescription)
+		treehashCachePath := cachekey.GetTreehashCachePath(entityBuild)
 		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
 		if err != nil {
 			if storage.IsNotFound(err) {
@@ -120,7 +120,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 				return nil, err
 			}
 			logger.Info("getGraph: treehash found")
-			treehashPath := common.GetGraphByTreeHash(buildDescription.GetRemote(), string(treehashBytes), buildDescription.GetStrategy(), requestOptions)
+			treehashPath := cachekey.GetGraphByTreeHash(entityBuild.Remote, string(treehashBytes), entityBuild.Strategy, requestOptions.GetExtraExcludeFilesRegex())
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)

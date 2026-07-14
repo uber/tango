@@ -21,44 +21,43 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	pb "github.com/uber/tango/tangopb"
+	"github.com/uber/tango/entity"
 )
 
 func TestGetGraphByTreeHash(t *testing.T) {
 	t.Parallel()
 	remote := "git@github:uber/tango"
 	treehash := "abcd1234"
-	strategy := pb.COMPUTATION_STRATEGY_NATIVE
+	strategy := entity.ComputationStrategyNative
 
-	// Nil/empty options ⇒ no request-options suffix.
+	// Nil/empty exclude list ⇒ no suffix.
 	got := GetGraphByTreeHash(remote, treehash, strategy, nil)
 	assert.Equal(t, filepath.Join("uber/tango", "graphs", treehash, strategy.String()), got)
-	assert.Equal(t, got, GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{}))
+	assert.Equal(t, got, GetGraphByTreeHash(remote, treehash, strategy, []string{}))
 
 	// Different strategies ⇒ different keys.
-	assert.NotEqual(t, got, GetGraphByTreeHash(remote, treehash, pb.COMPUTATION_STRATEGY_SHELL, nil))
+	assert.NotEqual(t, got, GetGraphByTreeHash(remote, treehash, entity.ComputationStrategyShell, nil))
 
-	// Non-empty options ⇒ suffix appended; different lists ⇒ different keys.
-	withFoo := GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}})
+	// Non-empty list ⇒ suffix appended; different lists ⇒ different keys.
+	withFoo := GetGraphByTreeHash(remote, treehash, strategy, []string{"foo.*"})
 	assert.NotEqual(t, got, withFoo)
-	assert.NotEqual(t, withFoo, GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"bar.*"}}))
+	assert.NotEqual(t, withFoo, GetGraphByTreeHash(remote, treehash, strategy, []string{"bar.*"}))
 	// Order-independence: sort before hashing.
 	assert.Equal(t,
-		GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"a", "b"}}),
-		GetGraphByTreeHash(remote, treehash, strategy, &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"b", "a"}}),
+		GetGraphByTreeHash(remote, treehash, strategy, []string{"a", "b"}),
+		GetGraphByTreeHash(remote, treehash, strategy, []string{"b", "a"}),
 	)
 }
 
 func TestGetTreehashCachePath(t *testing.T) {
 	t.Parallel()
-	reqs := []*pb.Request{
-		{Url: "github://org/repo/pull/1"},
-		{Url: "custom://foo/bar"},
-	}
-	desc := &pb.BuildDescription{
-		Remote:   "git@github:uber/tango",
-		BaseSha:  "deadbeef",
-		Requests: reqs,
+	desc := entity.BuildDescription{
+		Remote:  "git@github:uber/tango",
+		BaseSha: "deadbeef",
+		ChangeRequests: []entity.ChangeRequest{
+			{URL: "github://org/repo/pull/1"},
+			{URL: "custom://foo/bar"},
+		},
 	}
 	got := GetTreehashCachePath(desc)
 	// URLs are sorted then fed individually into the digest (no separator)
@@ -80,27 +79,27 @@ func TestGetReqURLsHash(t *testing.T) {
 	}
 	tests := []struct {
 		name string
-		in   []*pb.Request
+		in   []entity.ChangeRequest
 		want string
 	}{
 		{
 			name: "empty",
-			in:   []*pb.Request{},
+			in:   []entity.ChangeRequest{},
 			want: "",
 		},
 		{
 			name: "single",
-			in:   []*pb.Request{{Url: "github://org/repo/pull/42"}},
+			in:   []entity.ChangeRequest{{URL: "github://org/repo/pull/42"}},
 			want: md5hex("github://org/repo/pull/42"),
 		},
 		{
 			name: "multiple",
-			in:   []*pb.Request{{Url: "a"}, {Url: "b"}},
+			in:   []entity.ChangeRequest{{URL: "a"}, {URL: "b"}},
 			want: md5hex("a", "b"),
 		},
 		{
 			name: "multiple sorted",
-			in:   []*pb.Request{{Url: "b"}, {Url: "a"}},
+			in:   []entity.ChangeRequest{{URL: "b"}, {URL: "a"}},
 			want: md5hex("a", "b"),
 		},
 	}
@@ -117,9 +116,9 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 	got := GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil)
 	assert.Equal(t, filepath.Join("uber/tango", "compared-targets", "abc_def"), got)
 
-	// Nil/empty options ⇒ legacy path.
-	assert.Equal(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{}))
+	// Nil/empty list ⇒ legacy path.
+	assert.Equal(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", []string{}))
 
 	// Different exclude lists ⇒ different keys.
-	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", &pb.RequestOptions{ExtraExcludeFilesRegex: []string{"foo.*"}}))
+	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", []string{"foo.*"}))
 }
