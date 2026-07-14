@@ -189,7 +189,7 @@ func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).Return(nil)
 
 	store := storagemock.NewMockStorage(ctrl)
-	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "x"})
+	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("x"))
 	orchestrator := orchestratormock.NewMockOrchestrator(ctrl)
 	// Provide a fake GraphReader that yields one message then EOF
 	graphReader := storagemock.NewMockGraphReader(ctrl)
@@ -311,7 +311,7 @@ func TestGetTargetGraph_GraphNotFound_FallsThrough(t *testing.T) {
 	store := storagemock.NewMockStorage(ctrl)
 	gomock.InOrder(
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "graphs/abc"}),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("graphs/abc")),
 	)
 	orch := orchestratormock.NewMockOrchestrator(ctrl)
 	graphReader := storagemock.NewMockGraphReader(ctrl)
@@ -364,7 +364,7 @@ func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 	cancel()
 	stream.EXPECT().Context().Return(ctx)
 	store := storagemock.NewMockStorage(ctrl)
-	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "x"})
+	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("x"))
 	orch := orchestratormock.NewMockOrchestrator(ctrl)
 	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(nil, errors.New("context canceled"))
 	c := NewController(context.Background(), Params{

@@ -30,7 +30,7 @@ import (
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
-	"github.com/uber/tango/orchestrator"
+	"github.com/uber/tango/entity"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
@@ -256,7 +256,7 @@ func TestReadTreehash(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		st := storagemock.NewMockStorage(ctrl)
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "missing"})
+			Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
 
 		val, err := readTreehash(t.Context(), st, bd)
 		require.NoError(t, err)
@@ -302,7 +302,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	})
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 		if strings.Contains(req.Key, "compared-targets") {
-			return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
+			return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
 		}
 		if strings.Contains(req.Key, "th") {
 			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil
@@ -403,7 +403,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 			switch {
 			case strings.Contains(req.Key, "compared-targets"):
-				return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
+				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
 			case strings.Contains(req.Key, "sha1"):
 				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
 			case strings.Contains(req.Key, "sha2"):
@@ -500,7 +500,7 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 			switch {
 			case strings.Contains(req.Key, "compared-targets"):
-				return storage.DownloadResponse{}, &storage.NotFoundError{Path: req.Key}
+				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
 			case strings.Contains(req.Key, "sha1"):
 				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
 			case strings.Contains(req.Key, "sha2"):
@@ -1409,7 +1409,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		st := storagemock.NewMockStorage(ctrl)
 		// Both treehash reads miss, so the cache path is skipped entirely.
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "missing"}).Times(2)
+			Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing")).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.storage = st
@@ -1512,7 +1512,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(_ context.Context, _ orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
+			func(_ context.Context, _ entity.GetTargetGraphRequest) (storage.GraphReader, error) {
 				return newMockGraphReader(ctrl, chunk), nil
 			}).Times(2)
 
@@ -1530,8 +1530,8 @@ func TestFetchTargetGraphs(t *testing.T) {
 		injected := errors.New("orchestrator boom")
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(_ context.Context, p orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
-				if p.Req.GetBuildDescription().GetBaseSha() == "sha1" {
+			func(_ context.Context, p entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+				if p.Build.BaseSha == "sha1" {
 					return nil, injected
 				}
 				return newMockGraphReader(ctrl, chunk), nil
@@ -1551,7 +1551,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(_ context.Context, _ orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
+			func(_ context.Context, _ entity.GetTargetGraphRequest) (storage.GraphReader, error) {
 				return newMockGraphReader(ctrl), nil
 			}).Times(2)
 
@@ -1566,7 +1566,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(_ context.Context, _ orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
+			func(_ context.Context, _ entity.GetTargetGraphRequest) (storage.GraphReader, error) {
 				panic("boom in orchestrator")
 			}).Times(2)
 

@@ -14,7 +14,7 @@ import (
 	reflect "reflect"
 
 	storage "github.com/uber/tango/core/storage"
-	orchestrator "github.com/uber/tango/orchestrator"
+	entity "github.com/uber/tango/entity"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -43,16 +43,16 @@ func (m *MockOrchestrator) EXPECT() *MockOrchestratorMockRecorder {
 }
 
 // GetTargetGraph mocks base method.
-func (m *MockOrchestrator) GetTargetGraph(ctx context.Context, param orchestrator.GetTargetGraphParam) (storage.GraphReader, error) {
+func (m *MockOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (storage.GraphReader, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetTargetGraph", ctx, param)
+	ret := m.ctrl.Call(m, "GetTargetGraph", ctx, req)
 	ret0, _ := ret[0].(storage.GraphReader)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetTargetGraph indicates an expected call of GetTargetGraph.
-func (mr *MockOrchestratorMockRecorder) GetTargetGraph(ctx, param any) *gomock.Call {
+func (mr *MockOrchestratorMockRecorder) GetTargetGraph(ctx, req any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTargetGraph", reflect.TypeOf((*MockOrchestrator)(nil).GetTargetGraph), ctx, param)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTargetGraph", reflect.TypeOf((*MockOrchestrator)(nil).GetTargetGraph), ctx, req)
 }

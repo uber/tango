@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	gitmock "github.com/uber/tango/core/git/gitmock"
-	"github.com/uber/tango/tangopb"
+	"github.com/uber/tango/entity"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
@@ -60,7 +60,7 @@ func TestLease_ClonesOriginAndCreatesWorker(t *testing.T) {
 	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(nil)
 
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
-	ws, err := rm.Lease(context.Background(), tangopb.BuildDescription{Remote: remote})
+	ws, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 	assert.Equal(t, workerDir, ws.Path())
 	require.NoError(t, ws.Release())
@@ -82,7 +82,7 @@ func TestLease_SkipsOriginClone_WhenExists(t *testing.T) {
 	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(nil)
 
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
-	ws, err := rm.Lease(context.Background(), tangopb.BuildDescription{Remote: remote})
+	ws, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 	assert.Equal(t, workerDir, ws.Path())
 	require.NoError(t, ws.Release())
@@ -105,12 +105,12 @@ func TestLease_ReusesWorker_AfterRelease(t *testing.T) {
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
 	ctx := context.Background()
 
-	ws1, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
+	ws1, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 	require.NoError(t, ws1.Release())
 
 	// Second lease reuses the same worker — no new clones
-	ws2, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
+	ws2, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 	assert.Equal(t, workerDir, ws2.Path())
 	require.NoError(t, ws2.Release())
@@ -134,9 +134,9 @@ func TestLease_CreatesMultipleWorkers(t *testing.T) {
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 2})
 	ctx := context.Background()
 
-	ws1, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
+	ws1, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
-	ws2, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
+	ws2, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 
 	assert.NotEqual(t, ws1.Path(), ws2.Path())
@@ -160,13 +160,13 @@ func TestLease_BlocksUntilReturn(t *testing.T) {
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
 	ctx := context.Background()
 
-	ws1, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
+	ws1, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 
 	// Second lease blocks because pool size = 1
 	done := make(chan error, 1)
 	go func() {
-		ws2, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
+		ws2, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 		if err == nil {
 			ws2.Release()
 		}
@@ -205,12 +205,12 @@ func TestLease_CtxCanceled(t *testing.T) {
 
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
 
-	ws1, err := rm.Lease(context.Background(), tangopb.BuildDescription{Remote: remote})
+	ws1, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
+	_, err = rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
 
 	require.NoError(t, ws1.Release())
@@ -226,7 +226,7 @@ func TestLease_OriginCloneFails(t *testing.T) {
 	g.EXPECT().Clone(gomock.Any(), remote, filepath.Join(root, "org/repo"), "-c", "gc.auto=0").Return(assert.AnError)
 
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
-	_, err := rm.Lease(context.Background(), tangopb.BuildDescription{Remote: remote})
+	_, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "clone origin")
 }
@@ -245,7 +245,7 @@ func TestLease_WorkerCloneFails(t *testing.T) {
 	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(assert.AnError)
 
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
-	_, err := rm.Lease(context.Background(), tangopb.BuildDescription{Remote: remote})
+	_, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "create worker")
 }
@@ -264,7 +264,7 @@ func TestLease_DiscoversExistingWorker(t *testing.T) {
 
 	// No Clone calls — everything already exists
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
-	ws, err := rm.Lease(context.Background(), tangopb.BuildDescription{Remote: remote})
+	ws, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 	assert.Contains(t, ws.Path(), "worker-1")
 	require.NoError(t, ws.Release())
@@ -293,9 +293,9 @@ func TestLease_DifferentRepos_IndependentPools(t *testing.T) {
 	ctx := context.Background()
 
 	// Both repos can be leased concurrently even with pool size 1
-	ws1, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote1})
+	ws1, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote1})
 	require.NoError(t, err)
-	ws2, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote2})
+	ws2, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote2})
 	require.NoError(t, err)
 
 	assert.Contains(t, ws1.Path(), "repo1")
@@ -326,11 +326,11 @@ func TestLease_WorkerCloneFails_SlotReturnedToPool(t *testing.T) {
 	ctx := context.Background()
 
 	// First attempt fails
-	_, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
+	_, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
 
 	// Slot was returned to pool — retry succeeds
-	ws, err := rm.Lease(ctx, tangopb.BuildDescription{Remote: remote})
+	ws, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 	require.NoError(t, ws.Release())
 }

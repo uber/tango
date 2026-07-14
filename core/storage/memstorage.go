@@ -35,13 +35,13 @@ func NewMemoryStorage() Storage {
 	}
 }
 
-// Get downloads a blob from the storage. Return NotFoundError when the blob is not found.
+// Get downloads a blob from the storage. Returns an error wrapping ErrNotFound when the blob is not found.
 func (m *memoryStorage) Get(ctx context.Context, req DownloadRequest) (DownloadResponse, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	b, ok := m.data[req.Key]
 	if !ok {
-		return DownloadResponse{}, &NotFoundError{Path: req.Key}
+		return DownloadResponse{}, NewNotFoundError(req.Key)
 	}
 	return DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(b))}, nil
 }

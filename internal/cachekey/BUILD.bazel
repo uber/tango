@@ -7,7 +7,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core/common",
-        "//tangopb",
+        "//entity",
     ],
 )
 
@@ -16,7 +16,7 @@ go_test(
     srcs = ["cachekey_test.go"],
     embed = [":cachekey"],
     deps = [
-        "//tangopb",
+        "//entity",
         "@com_github_stretchr_testify//assert",
     ],
 )

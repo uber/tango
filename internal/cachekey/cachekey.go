@@ -22,17 +22,17 @@ import (
 	"sort"
 
 	"github.com/uber/tango/core/common"
-	"github.com/uber/tango/tangopb"
+	"github.com/uber/tango/entity"
 )
 
 // GetGraphByTreeHash returns the cache path for the target graph by treehash.
 // strategy is part of the key because different computation strategies (e.g.
 // SHELL vs NATIVE) can produce different graphs from the same tree state.
-// requestOptions is folded into the key when any of its fields affect computation
-// (today: extra_exclude_files_regex). Empty/nil ⇒ legacy path unchanged.
-func GetGraphByTreeHash(remote, treehash string, strategy tangopb.ComputationStrategy, requestOptions *tangopb.RequestOptions) string {
+// excludeFilesRegex is folded into the key when non-empty (it affects
+// computation). Empty ⇒ legacy path unchanged.
+func GetGraphByTreeHash(remote, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) string {
 	path := filepath.Join(common.ToShortRemote(remote), "graphs", treehash, strategy.String())
-	if hash := hashRequestOptions(requestOptions); hash != "" {
+	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
 		path += "_requests-options-" + hash
 	}
 	return path
@@ -40,12 +40,12 @@ func GetGraphByTreeHash(remote, treehash string, strategy tangopb.ComputationStr
 
 // GetTreehashCachePath returns the cache path for the treehash mapping.
 // The git treehash is purely a function of git state (base SHA + applied
-// requests), so neither requestOptions nor the computation strategy is part
-// of this key.
-func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
+// requests), so neither excludeFilesRegex nor the computation strategy is
+// part of this key.
+func GetTreehashCachePath(buildDescription entity.BuildDescription) string {
 	path := filepath.Join(common.ToShortRemote(buildDescription.Remote), "treehashes", fmt.Sprintf("base-sha-%s", buildDescription.BaseSha))
-	if len(buildDescription.Requests) > 0 {
-		path += "_request-urls-" + getReqURLsHash(buildDescription.Requests)
+	if len(buildDescription.ChangeRequests) > 0 {
+		path += "_request-urls-" + getReqURLsHash(buildDescription.ChangeRequests)
 	}
 	return path
 }
@@ -53,25 +53,25 @@ func GetTreehashCachePath(buildDescription *tangopb.BuildDescription) string {
 // GetComparedTargetsCachePath returns the cache path for a compared target graph result.
 // treehash1 and treehash2 are the resolved treehashes of the first and second revisions.
 // remote is the shared git remote for both revisions.
-// requestOptions is folded into the key when any of its fields affect computation.
-// Empty/nil ⇒ legacy path unchanged.
-func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, requestOptions *tangopb.RequestOptions) string {
+// excludeFilesRegex is folded into the key when non-empty (it affects computation).
+// Empty ⇒ legacy path unchanged.
+func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, excludeFilesRegex []string) string {
 	path := filepath.Join(common.ToShortRemote(remote), "compared-targets", treehash1+"_"+treehash2)
-	if hash := hashRequestOptions(requestOptions); hash != "" {
+	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
 		path += "_requests-options-" + hash
 	}
 	return path
 }
 
-// getReqURLsHash returns a fixed-length MD5 hash of the sorted request URLs.
+// getReqURLsHash returns a fixed-length MD5 hash of the sorted change request URLs.
 // Each URL's bytes are fed into the digest individually (no separator)
-func getReqURLsHash(requests []*tangopb.Request) string {
+func getReqURLsHash(requests []entity.ChangeRequest) string {
 	if len(requests) == 0 {
 		return ""
 	}
 	urls := make([]string, 0, len(requests))
 	for _, req := range requests {
-		urls = append(urls, req.GetUrl())
+		urls = append(urls, req.URL)
 	}
 	sort.Strings(urls)
 	h := md5.New()
@@ -81,20 +81,15 @@ func getReqURLsHash(requests []*tangopb.Request) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-// hashRequestOptions returns "" when no field of RequestOptions contributes to
-// the cache (preserves legacy paths), otherwise the md5 hex digest of those
-// fields. As new fields are added to RequestOptions, fold them into the digest
-// here.
-func hashRequestOptions(opts *tangopb.RequestOptions) string {
-	if opts == nil {
+// hashExcludeFilesRegex returns "" when excludeFilesRegex is empty (preserves
+// legacy paths), otherwise the md5 hex digest of the sorted list. As new
+// fields affecting computation are added, fold them into the digest here.
+func hashExcludeFilesRegex(excludeFilesRegex []string) string {
+	if len(excludeFilesRegex) == 0 {
 		return ""
 	}
-	excludes := opts.GetExtraExcludeFilesRegex()
-	if len(excludes) == 0 {
-		return ""
-	}
-	sorted := make([]string, len(excludes))
-	copy(sorted, excludes)
+	sorted := make([]string, len(excludeFilesRegex))
+	copy(sorted, excludeFilesRegex)
 	sort.Strings(sorted)
 	h := md5.New()
 	for _, r := range sorted {

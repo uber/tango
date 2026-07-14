@@ -16,22 +16,22 @@ package storage
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 )
 
-// NotFoundError represents an error when a blob is not found in the storage.
-type NotFoundError struct {
-	Path string
-}
+// ErrNotFound is returned when a blob is not found in the storage.
+var ErrNotFound = errors.New("not found")
 
-func (e *NotFoundError) Error() string {
-	return "blob not found at path: " + e.Path
-}
-
-// IsNotFound checks if an error is a NotFoundError
+// IsNotFound checks if err is or wraps ErrNotFound.
 func IsNotFound(err error) bool {
-	_, ok := err.(*NotFoundError)
-	return ok
+	return errors.Is(err, ErrNotFound)
+}
+
+// NewNotFoundError wraps ErrNotFound with the key that was not found.
+func NewNotFoundError(key string) error {
+	return fmt.Errorf("storage get %q: %w", key, ErrNotFound)
 }
 
 // DownloadRequest represents a request to download a blob.
@@ -57,7 +57,7 @@ type UploadRequest struct {
 // caller, and implementations MUST NOT impose path semantics of their own.
 type Storage interface {
 	// Get downloads a blob from the storage. On success the returned DownloadResponse.ReadCloser
-	// is non-nil and the caller owns closing it. Returns NotFoundError when the blob is not found.
+	// is non-nil and the caller owns closing it. Returns an error wrapping ErrNotFound when the blob is not found.
 	Get(ctx context.Context, req DownloadRequest) (DownloadResponse, error)
 	// Put uploads a blob to the storage
 	Put(ctx context.Context, req UploadRequest) error

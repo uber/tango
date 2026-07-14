@@ -24,6 +24,9 @@ import (
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/entity"
+	"github.com/uber/tango/internal/cachekey"
+	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/internal/targetdiff"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
@@ -144,7 +147,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 		return false, nil
 	}
 
-	cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
+	cacheKey := cachekey.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions().GetExtraExcludeFilesRegex())
 	cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
 	if cacheErr != nil && !storage.IsNotFound(cacheErr) {
 		logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
@@ -241,7 +244,17 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 			} else {
 				revision = request.GetSecondRevision()
 			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, revision, request.GetRequestOptions(), request.GetBypassCache())
+			entityBuild, err := mapper.ProtoToBuildDescription(revision)
+			if err != nil {
+				results <- graphResult{order: idx, err: fmt.Errorf("convert build description: %w", err)}
+				return
+			}
+			entityReq := entity.GetTargetGraphRequest{
+				Build:             entityBuild,
+				ExcludeFilesRegex: request.GetRequestOptions().GetExtraExcludeFilesRegex(),
+				BypassCache:       request.GetBypassCache(),
+			}
+			graphReader, err := c.getGraph(jobs[idx].ctx, entityReq)
 			if err != nil || graphReader == nil {
 				results <- graphResult{order: idx, err: err}
 				return
@@ -345,7 +358,7 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 			return
 		}
 		if treehash1 != "" && treehash2 != "" {
-			cacheKey := common.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions())
+			cacheKey := cachekey.GetComparedTargetsCachePath(request.GetFirstRevision().GetRemote(), treehash1, treehash2, request.GetRequestOptions().GetExtraExcludeFilesRegex())
 			if writeErr := storage.WriteChangedTargetsStream(c.appCtx, c.storage, cacheKey, responses); writeErr != nil {
 				logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
 			}
@@ -704,6 +717,10 @@ func sendTrimmedChangedTargets(stream pb.TangoServiceGetChangedTargetsYARPCServe
 // (no filtering). See proto/tango.proto OutputConfig.max_distance for
 // the wire-default caveat when OutputConfig is supplied without
 // max_distance set.
+//
+// TODO: remove once GetChangedTargets consumes entity.BuildDescription via
+// internal/mapper, which already validates required fields on ProtoTo*
+// conversion (see https://github.com/uber/tango/pull/189).
 func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) error {
 	if request == nil {
 		return errors.New("request cannot be nil")
@@ -783,7 +800,11 @@ func readTreehashParallel(ctx context.Context, st storage.Storage, first, second
 // Returns ("", err) on any other storage or read failure so callers can decide whether to
 // surface the error or fall back. Returns (treehash, nil) on a successful read.
 func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) (string, error) {
-	key := common.GetTreehashCachePath(buildDescription)
+	entityBuild, err := mapper.ProtoToBuildDescription(buildDescription)
+	if err != nil {
+		return "", err
+	}
+	key := cachekey.GetTreehashCachePath(entityBuild)
 	resp, err := st.Get(ctx, storage.DownloadRequest{Key: key})
 	if err != nil {
 		if storage.IsNotFound(err) {

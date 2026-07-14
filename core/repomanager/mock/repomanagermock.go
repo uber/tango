@@ -14,7 +14,7 @@ import (
 	reflect "reflect"
 
 	workspace "github.com/uber/tango/core/workspace"
-	tangopb "github.com/uber/tango/tangopb"
+	entity "github.com/uber/tango/entity"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -43,7 +43,7 @@ func (m *MockRepoManager) EXPECT() *MockRepoManagerMockRecorder {
 }
 
 // Lease mocks base method.
-func (m *MockRepoManager) Lease(ctx context.Context, desc tangopb.BuildDescription) (workspace.Workspace, error) {
+func (m *MockRepoManager) Lease(ctx context.Context, desc entity.BuildDescription) (workspace.Workspace, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Lease", ctx, desc)
 	ret0, _ := ret[0].(workspace.Workspace)

@@ -32,6 +32,7 @@ import (
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	targethasher "github.com/uber/tango/core/targethasher"
 	workspacemock "github.com/uber/tango/core/workspace/workspacemock"
+	"github.com/uber/tango/entity"
 	graphmock "github.com/uber/tango/graphrunner/mock"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/mock/gomock"
@@ -72,10 +73,8 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
-	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
-		Req: &pb.GetTargetGraphRequest{
-			BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"},
-		},
+	reader, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, reader)
@@ -94,7 +93,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	defer ctrl.Finish()
 	st := storagemock.NewMockStorage(ctrl)
 	// First attempt returns NotFound to trigger compute path.
-	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, &storage.NotFoundError{Path: "missing"})
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
 	// Expect writes (graph list and treehash cache mapping)
 	st.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.UploadRequest) error {
 		_, err := io.Copy(io.Discard, req.Reader)
@@ -133,9 +132,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		Config:      testConfig(t),
 	})
 	require.Nil(t, err)
-	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
-		Req: &pb.GetTargetGraphRequest{BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}},
-	})
+	reader, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}})
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 	defer reader.Close()
@@ -165,9 +162,7 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
-	resp, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
-		Req: &pb.GetTargetGraphRequest{BuildDescription: &pb.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}},
-	})
+	resp, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}})
 	require.Error(t, err)
 	require.Nil(t, resp)
 }
@@ -205,13 +200,11 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
-	reader, err := o.GetTargetGraph(context.Background(), GetTargetGraphParam{
-		Req: &pb.GetTargetGraphRequest{
-			BuildDescription: &pb.BuildDescription{
-				Remote:   "git@github:uber/tango",
-				BaseSha:  "1234567890",
-				Requests: []*pb.Request{{Url: "github://org/repo/pull/123"}},
-			},
+	reader, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{
+			Remote:         "git@github:uber/tango",
+			BaseSha:        "1234567890",
+			ChangeRequests: []entity.ChangeRequest{{URL: "github://org/repo/pull/123"}},
 		},
 	})
 	require.NoError(t, err)
