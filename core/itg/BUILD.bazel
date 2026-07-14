@@ -1,0 +1,19 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "itg",
+    srcs = ["itg.go"],
+    importpath = "github.com/uber/tango/core/itg",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core/bazel",
+        "//core/git",
+        "//core/itg/cache",
+        "//core/itg/changeanalyzer",
+        "//core/itg/graph",
+        "//core/itg/workspaceutils",
+        "//core/targethasher",
+        "//tangopb",
+        "@org_uber_go_zap//:zap",
+    ],
+)
