@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 )
 
@@ -52,6 +53,8 @@ func TestNew(t *testing.T) {
 		s, err := New("")
 		assert.Error(t, err)
 		assert.Nil(t, s)
+		assert.Equal(t, tangoerrors.ErrorUser, tangoerrors.GetErrorCode(err))
+		assert.Equal(t, tangoerrors.FailureSourceStorage, tangoerrors.GetFailureSource(err))
 	})
 }
 
@@ -118,6 +121,7 @@ func TestStorage_Exists(t *testing.T) {
 		exists, err := s.Exists(cancelledCtx, "any.txt")
 		assert.Error(t, err)
 		assert.False(t, exists)
+		assert.ErrorIs(t, err, context.Canceled)
 	})
 }
 
@@ -168,6 +172,7 @@ func TestStorage_List(t *testing.T) {
 		cancel()
 		_, err := s.List(cancelledCtx, "itg")
 		assert.Error(t, err)
+		assert.ErrorIs(t, err, context.Canceled)
 	})
 
 	t.Run("partial-segment prefix matches sibling keys (literal prefix)", func(t *testing.T) {

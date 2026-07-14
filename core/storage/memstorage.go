@@ -48,11 +48,11 @@ func (m *memoryStorage) Get(ctx context.Context, req DownloadRequest) (DownloadR
 
 func (m *memoryStorage) Put(ctx context.Context, req UploadRequest) error {
 	if req.Reader == nil {
-		return errors.New("nil reader")
+		return NewStorageInfraError(errors.New("nil reader"))
 	}
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, &CtxReader{Ctx: ctx, R: req.Reader}); err != nil {
-		return err
+		return NewStorageInfraError(err)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

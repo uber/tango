@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 )
 
@@ -36,10 +37,10 @@ var _ storage.Storage = (*diskStorage)(nil)
 // The rootDir is the base directory where all blobs will be stored.
 func New(rootDir string) (storage.Storage, error) {
 	if rootDir == "" {
-		return nil, errors.New("root directory cannot be empty")
+		return nil, tangoerrors.NewUser(tangoerrors.FailureSourceStorage, errors.New("root directory cannot be empty"))
 	}
 	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		return nil, err
+		return nil, storage.NewStorageInfraError(err)
 	}
 	return &diskStorage{rootDir: rootDir}, nil
 }
@@ -55,7 +56,7 @@ func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (sto
 		if os.IsNotExist(err) {
 			return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
 		}
-		return storage.DownloadResponse{}, err
+		return storage.DownloadResponse{}, storage.NewStorageInfraError(err)
 	}
 	return storage.DownloadResponse{ReadCloser: file}, nil
 }
@@ -66,30 +67,33 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 		return ctx.Err()
 	}
 	if req.Reader == nil {
-		return errors.New("nil reader")
+		return storage.NewStorageInfraError(errors.New("nil reader"))
 	}
 
 	path := filepath.Join(d.rootDir, req.Key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return storage.NewStorageInfraError(err)
 	}
 
 	// Write atomically via temp file
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
-		return err
+		return storage.NewStorageInfraError(err)
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
 	if _, err := io.Copy(tmp, &storage.CtxReader{Ctx: ctx, R: req.Reader}); err != nil {
 		tmp.Close()
-		return err
+		return storage.NewStorageInfraError(err)
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return storage.NewStorageInfraError(err)
 	}
-	return os.Rename(tmpPath, path)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return storage.NewStorageInfraError(err)
+	}
+	return nil
 }
 
 // Exists checks whether a blob exists in the storage.
@@ -104,7 +108,7 @@ func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
 	if os.IsNotExist(err) {
 		return false, nil
 	}
-	return false, err
+	return false, storage.NewStorageInfraError(err)
 }
 
 // List returns all keys whose name starts with the given prefix.
@@ -142,5 +146,8 @@ func (d *diskStorage) List(ctx context.Context, prefix string) ([]string, error)
 		keys = append(keys, rel)
 		return nil
 	})
-	return keys, err
+	if err != nil {
+		return nil, storage.NewStorageInfraError(err)
+	}
+	return keys, nil
 }

@@ -19,6 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	tangoerrors "github.com/uber/tango/core/errors"
 )
 
 // ErrNotFound is returned when a blob is not found in the storage.
@@ -32,6 +34,11 @@ func IsNotFound(err error) bool {
 // NewNotFoundError wraps ErrNotFound with the key that was not found.
 func NewNotFoundError(key string) error {
 	return fmt.Errorf("storage get %q: %w", key, ErrNotFound)
+}
+
+// NewStorageInfraError classifies err as an infra failure originating in storage.
+func NewStorageInfraError(err error) error {
+	return tangoerrors.NewInfra(tangoerrors.FailureSourceStorage, err)
 }
 
 // DownloadRequest represents a request to download a blob.

@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tangoerrors "github.com/uber/tango/core/errors"
 )
 
 var errMarshal = errors.New("marshal failed")
@@ -56,6 +57,8 @@ func TestWriteStreamReturnsWriterError(t *testing.T) {
 	)
 
 	require.ErrorIs(t, err, errMarshal)
+	assert.Equal(t, tangoerrors.ErrorInfra, tangoerrors.GetErrorCode(err))
+	assert.Equal(t, tangoerrors.FailureSourceStorage, tangoerrors.GetFailureSource(err))
 }
 
 func TestMemoryStorage_List(t *testing.T) {

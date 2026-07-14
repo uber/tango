@@ -14,6 +14,7 @@ go_library(
     importpath = "github.com/uber/tango/core/storage",
     visibility = ["//visibility:public"],
     deps = [
+        "//core/errors",
         "//tangopb",
         "@com_github_gogo_protobuf//io",
         "@com_github_gogo_protobuf//proto",
@@ -25,6 +26,7 @@ go_test(
     srcs = ["storage_test.go"],
     embed = [":storage"],
     deps = [
+        "//core/errors",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
     ],

@@ -5,7 +5,10 @@ go_library(
     srcs = ["disk.go"],
     importpath = "github.com/uber/tango/core/storage/disk",
     visibility = ["//visibility:public"],
-    deps = ["//core/storage"],
+    deps = [
+        "//core/errors",
+        "//core/storage",
+    ],
 )
 
 go_test(
@@ -13,6 +16,7 @@ go_test(
     srcs = ["disk_test.go"],
     embed = [":disk"],
     deps = [
+        "//core/errors",
         "//core/storage",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",

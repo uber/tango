@@ -40,7 +40,10 @@ type reader[T any, PT protoMessage[T]] struct {
 func (r *reader[T, PT]) Read() (PT, error) {
 	m := PT(new(T))
 	if err := r.rc.ReadMsg(m); err != nil {
-		return nil, err
+		if err == io.EOF {
+			return nil, err
+		}
+		return nil, NewStorageInfraError(err)
 	}
 	if r.isEmpty(m) {
 		return nil, io.EOF

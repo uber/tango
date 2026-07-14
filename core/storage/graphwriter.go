@@ -45,7 +45,7 @@ func writeStream[T any, PT protoMessage[T]](ctx context.Context, st Storage, key
 				break
 			}
 			if err = w.WriteMsg(m); err != nil {
-				err = fmt.Errorf("write delimited: %w", err)
+				err = NewStorageInfraError(fmt.Errorf("write delimited: %w", err))
 				break
 			}
 		}
