@@ -70,43 +70,6 @@ repository:
 	}
 }
 
-func TestParse_ServiceDefaults(t *testing.T) {
-	tests := []struct {
-		name               string
-		give               string
-		wantWorkerRootPath string
-	}{
-		{
-			name: "worker_root_path defaults when unset",
-			give: _baseServiceYAML + `
-repository:
-  - remote: "r1"
-`,
-			wantWorkerRootPath: filepath.Join("/tmp/x", ".workers"),
-		},
-		{
-			name: "worker_root_path explicit value preserved",
-			give: `
-service:
-  workspaces_root_path: "/tmp/x"
-  worker_root_path: "/tmp/custom-workers"
-  max_worker_pool_size: 1
-repository:
-  - remote: "r1"
-`,
-			wantWorkerRootPath: "/tmp/custom-workers",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := Parse(writeConfig(t, tt.give))
-			require.NoError(t, err)
-			assert.Equal(t, tt.wantWorkerRootPath, cfg.Service.WorkerRootPath)
-		})
-	}
-}
-
 func TestParse_RepositoryDefaults(t *testing.T) {
 	tests := []struct {
 		name                    string

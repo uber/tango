@@ -60,7 +60,7 @@ func repoRemote(t *testing.T) string {
 	return remote
 }
 
-func writeConfig(t *testing.T, dir, remote, clonePath, workerPath string) string {
+func writeConfig(t *testing.T, dir, remote, clonePath string) string {
 	t.Helper()
 
 	tmpl, err := template.ParseFiles(configTemplateFile)
@@ -74,12 +74,10 @@ func writeConfig(t *testing.T, dir, remote, clonePath, workerPath string) string
 	err = tmpl.Execute(f, struct {
 		Remote       string
 		ClonePath    string
-		WorkerPath   string
 		BazelCommand string
 	}{
 		Remote:       remote,
 		ClonePath:    clonePath,
-		WorkerPath:   workerPath,
 		BazelCommand: filepath.Join(remote, "tools", "bazel"),
 	})
 	require.NoError(t, err, "failed to render config template")
@@ -92,9 +90,8 @@ func startServer(t *testing.T, remote string) string {
 
 	configDir := t.TempDir()
 	clonePath := t.TempDir()
-	workerPath := t.TempDir()
 
-	configPath := writeConfig(t, configDir, remote, clonePath, workerPath)
+	configPath := writeConfig(t, configDir, remote, clonePath)
 
 	zl := zaptest.NewLogger(t)
 	logger := zl.Sugar()
@@ -108,7 +105,6 @@ func startServer(t *testing.T, remote string) string {
 		Git:                  git.New(clonePath, logger),
 		Logger:               logger,
 		RepoManagerClonePath: clonePath,
-		WorkerRootPath:       workerPath,
 		PoolSize:             2,
 	})
 	require.NoError(t, err, "failed to create repo manager")
