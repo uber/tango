@@ -109,6 +109,7 @@ func run() error {
 		Logger:       zl,
 		Storage:      store,
 		Orchestrator: orch,
+		ChunkConfig:  cfg.Service.Streaming,
 	})
 
 	// YARPC transports and dispatcher
