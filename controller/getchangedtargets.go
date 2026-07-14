@@ -1024,6 +1024,10 @@ func computeDistances(ctx context.Context, changedByName map[string]*pb.ChangedT
 // (no filtering). See proto/tango.proto OutputConfig.max_distance for
 // the wire-default caveat when OutputConfig is supplied without
 // max_distance set.
+//
+// TODO: remove once GetChangedTargets consumes entity.BuildDescription via
+// internal/mapper, which already validates required fields on ProtoTo*
+// conversion (see https://github.com/uber/tango/pull/189).
 func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) error {
 	if request == nil {
 		return errors.New("request cannot be nil")
