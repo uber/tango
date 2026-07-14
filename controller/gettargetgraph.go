@@ -96,7 +96,7 @@ func (c *controller) getGraph(ctx context.Context, buildDescription *pb.BuildDes
 	start := time.Now()
 	entityBuild, err := mapper.ProtoToBuildDescription(buildDescription)
 	if err != nil {
-		return nil, common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)
+		return nil, fmt.Errorf("convert build description: %w", err)
 	}
 	logger := c.logger.With(
 		zap.Any("build_description", buildDescription),
