@@ -72,23 +72,17 @@ repository:
 
 func TestParse_ServiceDefaults(t *testing.T) {
 	tests := []struct {
-		name                      string
-		give                      string
-		wantWorkerRootPath        string
-		wantMaxNumTargets         int
-		wantMaxNumChangedTargets  int
-		wantMaxNumMetadataEntries int
+		name               string
+		give               string
+		wantWorkerRootPath string
 	}{
 		{
-			name: "worker_root_path and streaming default when unset",
+			name: "worker_root_path defaults when unset",
 			give: _baseServiceYAML + `
 repository:
   - remote: "r1"
 `,
-			wantWorkerRootPath:        filepath.Join("/tmp/x", ".workers"),
-			wantMaxNumTargets:         _defaultMaxNumTargets,
-			wantMaxNumChangedTargets:  _defaultMaxNumChangedTargets,
-			wantMaxNumMetadataEntries: _defaultMaxNumMetadataEntries,
+			wantWorkerRootPath: filepath.Join("/tmp/x", ".workers"),
 		},
 		{
 			name: "worker_root_path explicit value preserved",
@@ -100,25 +94,7 @@ service:
 repository:
   - remote: "r1"
 `,
-			wantWorkerRootPath:        "/tmp/custom-workers",
-			wantMaxNumTargets:         _defaultMaxNumTargets,
-			wantMaxNumChangedTargets:  _defaultMaxNumChangedTargets,
-			wantMaxNumMetadataEntries: _defaultMaxNumMetadataEntries,
-		},
-		{
-			name: "streaming explicit values preserved",
-			give: _baseServiceYAML + `
-  streaming:
-    max_num_targets: 10
-    max_num_changed_targets: 20
-    max_num_metadata_entries: 30
-repository:
-  - remote: "r1"
-`,
-			wantWorkerRootPath:        filepath.Join("/tmp/x", ".workers"),
-			wantMaxNumTargets:         10,
-			wantMaxNumChangedTargets:  20,
-			wantMaxNumMetadataEntries: 30,
+			wantWorkerRootPath: "/tmp/custom-workers",
 		},
 	}
 
@@ -127,9 +103,6 @@ repository:
 			cfg, err := Parse(writeConfig(t, tt.give))
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantWorkerRootPath, cfg.Service.WorkerRootPath)
-			assert.Equal(t, tt.wantMaxNumTargets, cfg.Service.Streaming.MaxNumTargets)
-			assert.Equal(t, tt.wantMaxNumChangedTargets, cfg.Service.Streaming.MaxNumChangedTargets)
-			assert.Equal(t, tt.wantMaxNumMetadataEntries, cfg.Service.Streaming.MaxNumMetadataEntries)
 		})
 	}
 }

@@ -22,16 +22,9 @@ import (
 	yaml "github.com/goccy/go-yaml"
 )
 
-const (
-	_defaultBazelQueryTimeoutSeconds = 600
-	_defaultMaxNumTargets            = 250
-	_defaultMaxNumChangedTargets     = 125
-	_defaultMaxNumMetadataEntries    = 50_000
-)
+const _defaultBazelQueryTimeoutSeconds = 600
 
-var (
-	_bzlmodEnabledDefault = true
-)
+var _bzlmodEnabledDefault = true
 
 var _ RepositoryConfigProvider = (*Config)(nil)
 
@@ -77,15 +70,6 @@ func Parse(configFilePath string) (*Config, error) {
 	}
 	if config.Service.MaxWorkerPoolSize <= 0 {
 		return nil, fmt.Errorf("service.max_worker_pool_size must be > 0, got %d", config.Service.MaxWorkerPoolSize)
-	}
-	if config.Service.Streaming.MaxNumTargets <= 0 {
-		config.Service.Streaming.MaxNumTargets = _defaultMaxNumTargets
-	}
-	if config.Service.Streaming.MaxNumChangedTargets <= 0 {
-		config.Service.Streaming.MaxNumChangedTargets = _defaultMaxNumChangedTargets
-	}
-	if config.Service.Streaming.MaxNumMetadataEntries <= 0 {
-		config.Service.Streaming.MaxNumMetadataEntries = _defaultMaxNumMetadataEntries
 	}
 	config.repositoryByRemote = make(map[string]*RepositoryConfig, len(config.Repository))
 	for i := range config.Repository {
