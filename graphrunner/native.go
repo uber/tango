@@ -18,12 +18,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/core/workspace"
+	"github.com/uber/tango/observability/metrics"
 )
 
 type nativeGraphRunner struct {
@@ -31,7 +31,6 @@ type nativeGraphRunner struct {
 	git                git.Interface
 	config             config.RepositoryConfig
 	extraExcludedFiles []string
-	scope              tally.Scope
 }
 
 type NativeGraphRunnerParams struct {
@@ -39,25 +38,20 @@ type NativeGraphRunnerParams struct {
 	GitClient          git.Interface
 	Config             config.RepositoryConfig
 	ExtraExcludedFiles []string
-	Scope              tally.Scope
 }
 
 // graph runner takes in a bazel query request and computes the graph
 func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
-	scope := p.Scope
-	if scope == nil {
-		scope = tally.NoopScope
-	}
 	return &nativeGraphRunner{
 		bazel:              p.BazelClient,
 		git:                p.GitClient,
 		config:             p.Config,
 		extraExcludedFiles: p.ExtraExcludedFiles,
-		scope:              scope.SubScope("graph_runner"),
 	}
 }
 
 func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace) (targethasher.Result, error) {
+	e := metrics.FromContext(ctx)
 	query := "//external:all-targets + deps(//...:all-targets)"
 	if g.config.ExcludeExternalTargets {
 		query = "deps(//...:all-targets)"
@@ -78,14 +72,14 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 		AdditionalArgs: additionalArgs,
 	})
-	g.scope.Timer("bazel_query_duration").Record(time.Since(bazelStart))
+	e.RecordDur(metrics.OpGraphRunner, metrics.BazelQueryDuration, time.Since(bazelStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
 
 	gitStart := time.Now()
 	knownSourceHashes, err := g.git.FileHashes(ctx, "HEAD")
-	g.scope.Timer("git_file_hashes_duration").Record(time.Since(gitStart))
+	e.RecordDur(metrics.OpGraphRunner, metrics.GitFileHashesDuration, time.Since(gitStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
@@ -99,11 +93,11 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 	hashStart := time.Now()
 	res, err := targethasher.FromProto(ctx, queryResult.Result, ws.Path(), hashConfig)
-	g.scope.Timer("target_hash_duration").Record(time.Since(hashStart))
+	e.RecordDur(metrics.OpGraphRunner, metrics.TargetHashDuration, time.Since(hashStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
 
-	g.scope.Gauge("target_count").Update(float64(len(res.Targets)))
+	e.Gauge(metrics.OpGraphRunner, metrics.TargetsCount, float64(len(res.Targets)))
 	return res, nil
 }

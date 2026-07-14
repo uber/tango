@@ -18,13 +18,18 @@ package metrics
 const (
 	OpGetTargetGraph    = "get_target_graph"
 	OpGetChangedTargets = "get_changed_targets"
+	OpGraphRunner       = "graph_runner"
 )
 
 // Metric names.
 const (
-	Requests         = "requests"
-	TotalDuration    = "total_duration"
-	InFlightRequests = "in_flight_requests"
+	Requests              = "requests"
+	TotalDuration         = "total_duration"
+	InFlightRequests      = "in_flight_requests"
+	BazelQueryDuration    = "bazel_query_duration"
+	GitFileHashesDuration = "git_file_hashes_duration"
+	TargetHashDuration    = "target_hash_duration"
+	TargetsCount          = "targets_count"
 )
 
 // Tag keys.
