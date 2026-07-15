@@ -34,6 +34,7 @@ func runChangedTargetsBenchmark(b *testing.B, firstSHA, secondSHA string) {
 	for i := 0; i < b.N; i++ {
 		getChangedTargets(b, client, remote, firstSHA, secondSHA)
 	}
+	b.ReportMetric(b.Elapsed().Seconds()/float64(b.N), "sec/op")
 }
 
 func BenchmarkGetChangedTargets_SmallDiff(b *testing.B) {
