@@ -145,8 +145,14 @@ func newRequestMetrics(e *metrics.Emitter, op string, buckets tally.DurationBuck
     }
 }
 
-func (m *requestMetrics) Record(start time.Time, err error) {
+// Begin records a received request and returns its start time for Complete.
+func (m *requestMetrics) Begin() time.Time {
     m.called.Inc(1)
+    return time.Now()
+}
+
+// Complete records the request's duration and outcome.
+func (m *requestMetrics) Complete(start time.Time, err error) {
     m.duration.RecordDuration(time.Since(start))
     if err == nil {
         m.succeeded.Inc(1)
@@ -171,8 +177,8 @@ func newController(p Params) *controller {
 
 ```go
 func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
-    start := time.Now()
-    defer func() { c.getChangedTargetsMetrics.Record(start, retErr) }()
+    start := c.getChangedTargetsMetrics.Begin()
+    defer func() { c.getChangedTargetsMetrics.Complete(start, retErr) }()
 
     ctx, cancel := c.linkRequestCtx(stream.Context())
     defer cancel()
