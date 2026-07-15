@@ -63,6 +63,12 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	if scope == nil {
 		scope = tally.NoopScope
 	}
+	// TODO: MaxMessageBytes should come from *config.Config via fx, not as a
+	// standalone Params field. Wire it through the fx module once config is
+	// provided as an fx dependency.
+	if p.MaxMessageBytes <= 0 {
+		p.MaxMessageBytes = 4_250_000
+	}
 	return &controller{
 		logger:               p.Logger,
 		storage:              p.Storage,
