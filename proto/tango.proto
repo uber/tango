@@ -8,11 +8,10 @@ option java_outer_classname = "TangoProto";
 option java_package = "com.uber.tango";
 
 enum ErrorCode {
-    ERROR_UNKNOWN = 0;
+    ERROR_INFRA = 0;
     ERROR_CANCELLED = 1;
     ERROR_USER = 2;
-    ERROR_INFRA = 3;
-    ERROR_INFRA_RETRYABLE = 4;
+    ERROR_INFRA_RETRYABLE = 3;
 }
 
 message TangoError {
