@@ -88,7 +88,6 @@ type MetricParams struct {
 }
 
 type queryMetrics struct {
-    called      tally.Counter
     succeeded   tally.Counter
     failed      tally.Counter
     duration    tally.Histogram
@@ -107,7 +106,6 @@ func newQueryMetrics(p MetricParams) *queryMetrics {
 
     e := p.Emitter
     return &queryMetrics{
-        called:      e.Counter(opQuery, "called"),
         succeeded:   e.Counter(opQuery, "succeeded"),
         failed:      e.Counter(opQuery, "failed"),
         duration:    e.DurationHistogram(opQuery, "duration", dur),
@@ -120,7 +118,7 @@ The owning client takes `*queryMetrics` (or the `*metrics.Emitter` it builds one
 
 ## Request metrics
 
-Request outcome policy lives at the controller boundary. The pattern is controller-local, not part of the emitter package. A `requestMetrics` is built once per RPC op in the controller constructor; its duration buckets follow the same default-and-override rule as domain-local metrics.
+Request outcome policy lives at the controller boundary. The pattern is controller-local, not part of the emitter package. Outcomes are broken down by `repo`, so a `requestMetrics` is built per request from a repo-tagged emitter; tally caches instruments by name+tags, so each `(op, repo)` series is bound once (lazily) and reused. Duration buckets follow the same default-and-override rule as domain-local metrics.
 
 ```go
 // default request-latency buckets
@@ -155,23 +153,27 @@ func (m *requestMetrics) Record(start time.Time, err error) {
 }
 ```
 
-The controller binds one per op during construction:
+The controller keeps the emitter and bucket policy, and builds `requestMetrics` per request off a repo-tagged emitter:
 
 ```go
+const tagRepo = "repo"
+
 func newController(p Params) *controller {
-    e := p.Emitter
     return &controller{
-        emitter:                  e,
-        getChangedTargetsMetrics: newRequestMetrics(e, opGetChangedTargets, p.RequestDurationBuckets),
-        getTargetGraphMetrics:    newRequestMetrics(e, opGetTargetGraph, p.RequestDurationBuckets),
+        emitter:                p.Emitter,
+        requestDurationBuckets: p.RequestDurationBuckets,
     }
 }
-```
 
-```go
 func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
+    // repo is bounded (allow-listed) and normalized to a stable key.
+    e := c.emitter.Tagged(map[string]string{
+        tagRepo: common.ToShortRemote(req.GetFirstRevision().GetRemote()),
+    })
+    m := newRequestMetrics(e, opGetChangedTargets, c.requestDurationBuckets)
+
     start := time.Now()
-    defer func() { c.getChangedTargetsMetrics.Record(start, retErr) }()
+    defer func() { m.Record(start, retErr) }()
 
     ctx, cancel := c.linkRequestCtx(stream.Context())
     defer cancel()
@@ -182,17 +184,9 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
 
 ## Request-specific tags
 
-Tags with bounded cardinality may be applied to a derived emitter (`Tagged`) where the owning operation is constructed or recorded. Request identifiers, commit hashes, paths, and arbitrary repository URLs must never be tags. A repository tag is allowed only where a deployment has an explicit cardinality budget and normalizes the value consistently.
+Each distinct tag value is a new series, so tag values must be bounded — never request IDs, commit hashes, paths, or raw repo URLs. `repo` is safe only with an explicit cardinality budget and a normalized, allow-listed value; the handler above applies it that way (`ToShortRemote`), and tally's name+tags caching keeps each `(op, repo)` series bound once despite the per-request derivation.
 
-```go
-const tagRepo = "repo"
-
-// inside a handler: apply a bounded tag to a derived emitter, bound at emit time
-e := c.emitter.Tagged(map[string]string{
-    tagRepo: common.ToShortRemote(req.GetFirstRevision().GetRemote()),
-})
-e.Counter(opGetChangedTargets, "called").Inc(1)
-```
+If the per-request emitter derivation ever shows up in a profile, memoize `*requestMetrics` in a map keyed by repo — but tally's caching makes that rarely worth it.
 
 ## Buckets
 
