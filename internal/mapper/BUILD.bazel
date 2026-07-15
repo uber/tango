@@ -11,8 +11,8 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core/targethasher",
-        "//internal/mapper/idmapper",
         "//entity",
+        "//internal/mapper/idmapper",
         "//tangopb",
         "@com_github_bazelbuild_buildtools//build_proto",
     ],
