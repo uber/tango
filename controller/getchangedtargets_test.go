@@ -296,18 +296,52 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send error"))
 	storagemock := storagemock.NewMockStorage(ctrl)
 
-	var buf bytes.Buffer
-	gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
+	// Build two graphs with differing hashes so compareTargetGraphs produces a change.
+	var buf1 bytes.Buffer
+	w1 := gogio.NewDelimitedWriter(&buf1)
+	w1.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{
+			Targets: []*pb.OptimizedTarget{{Id: 1, Hash: "old"}},
+		}},
 	})
+	w1.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{Metadata: &pb.Metadata{
+			TargetIdMapping: map[int32]string{1: "//pkg:t"},
+			RuleTypeMapping: map[int32]string{},
+		}},
+	})
+	graph1Bytes := buf1.Bytes()
+
+	var buf2 bytes.Buffer
+	w2 := gogio.NewDelimitedWriter(&buf2)
+	w2.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{
+			Targets: []*pb.OptimizedTarget{{Id: 1, Hash: "new"}},
+		}},
+	})
+	w2.WriteMsg(&pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{Metadata: &pb.Metadata{
+			TargetIdMapping: map[int32]string{1: "//pkg:t"},
+			RuleTypeMapping: map[int32]string{},
+		}},
+	})
+	graph2Bytes := buf2.Bytes()
+
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
-		if strings.Contains(req.Key, "compared-targets") {
+		switch {
+		case strings.Contains(req.Key, "compared-targets"):
 			return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
+		case strings.Contains(req.Key, "sha1"):
+			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
+		case strings.Contains(req.Key, "sha2"):
+			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
+		case strings.Contains(req.Key, "treehash1"):
+			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph1Bytes))}, nil
+		case strings.Contains(req.Key, "treehash2"):
+			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph2Bytes))}, nil
+		default:
+			return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
 		}
-		if strings.Contains(req.Key, "th") {
-			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil
-		}
-		return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("th")))}, nil
 	}).AnyTimes()
 
 	// Put is launched in a goroutine — use a channel to wait for it before the test ends.
