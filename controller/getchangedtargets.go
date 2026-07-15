@@ -27,6 +27,7 @@ import (
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/cachekey"
 	"github.com/uber/tango/internal/mapper"
+	"github.com/uber/tango/internal/mapper/idmapper"
 	"github.com/uber/tango/internal/targetdiff"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
@@ -599,21 +600,21 @@ func toDiffGraph(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarget,
 // by name, transposing them back into a wire response only needs these shared
 // name->ID mappers — identical names map to identical IDs regardless of revision.
 type canonicalMappers struct {
-	target   *common.NameIDMapper
-	ruleType *common.NameIDMapper
-	tag      *common.NameIDMapper
-	attrName *common.NameIDMapper
-	attrVal  *common.NameIDMapper
+	target   *idmapper.Mapper
+	ruleType *idmapper.Mapper
+	tag      *idmapper.Mapper
+	attrName *idmapper.Mapper
+	attrVal  *idmapper.Mapper
 }
 
 // newCanonicalMappers creates an empty set of canonical mappers.
 func newCanonicalMappers() *canonicalMappers {
 	return &canonicalMappers{
-		target:   common.NewNameIDMapper(),
-		ruleType: common.NewNameIDMapper(),
-		tag:      common.NewNameIDMapper(),
-		attrName: common.NewNameIDMapper(),
-		attrVal:  common.NewNameIDMapper(),
+		target:   idmapper.NewMapper(),
+		ruleType: idmapper.NewMapper(),
+		tag:      idmapper.NewMapper(),
+		attrName: idmapper.NewMapper(),
+		attrVal:  idmapper.NewMapper(),
 	}
 }
 

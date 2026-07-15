@@ -21,6 +21,7 @@ import (
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/uber/tango/core/targethasher"
+	"github.com/uber/tango/internal/mapper/idmapper"
 	"github.com/uber/tango/tangopb"
 )
 
@@ -67,10 +68,10 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 		targetNamesMapping[name] = int32(i + 1)
 	}
 
-	ruleTypeMapper := NewNameIDMapper()
-	tagMapper := NewNameIDMapper()
-	attrNameMapper := NewNameIDMapper()
-	attrStrValMapper := NewNameIDMapper()
+	ruleTypeMapper := idmapper.NewMapper()
+	tagMapper := idmapper.NewMapper()
+	attrNameMapper := idmapper.NewMapper()
+	attrStrValMapper := idmapper.NewMapper()
 
 	// Build the optimized targets slice
 	optimizedTargets := make([]*tangopb.OptimizedTarget, 0, len(result.Targets))

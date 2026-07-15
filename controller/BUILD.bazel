@@ -20,6 +20,7 @@ go_library(
         "//entity",
         "//internal/cachekey",
         "//internal/mapper",
+        "//internal/mapper/idmapper",
         "//internal/targetdiff",
         "//orchestrator",
         "//tangopb",
