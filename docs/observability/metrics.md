@@ -127,7 +127,6 @@ Request outcome policy lives at the controller boundary. The pattern is controll
 var defaultRequestDurationBuckets = tally.MustMakeExponentialDurationBuckets(time.Millisecond, 3, 10) // 1ms .. ~59s
 
 type requestMetrics struct {
-    called    tally.Counter
     succeeded tally.Counter
     failed    tally.Counter
     duration  tally.Histogram
@@ -138,21 +137,15 @@ func newRequestMetrics(e *metrics.Emitter, op string, buckets tally.DurationBuck
         buckets = defaultRequestDurationBuckets
     }
     return &requestMetrics{
-        called:    e.Counter(op, "called"),
         succeeded: e.Counter(op, "succeeded"),
         failed:    e.Counter(op, "failed"),
         duration:  e.DurationHistogram(op, "duration", buckets),
     }
 }
 
-// Begin records a received request and returns its start time for Complete.
-func (m *requestMetrics) Begin() time.Time {
-    m.called.Inc(1)
-    return time.Now()
-}
-
-// Complete records the request's duration and outcome.
-func (m *requestMetrics) Complete(start time.Time, err error) {
+// Record records the request's duration and outcome. Total request rate is
+// succeeded + failed.
+func (m *requestMetrics) Record(start time.Time, err error) {
     m.duration.RecordDuration(time.Since(start))
     if err == nil {
         m.succeeded.Inc(1)
@@ -177,8 +170,8 @@ func newController(p Params) *controller {
 
 ```go
 func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
-    start := c.getChangedTargetsMetrics.Begin()
-    defer func() { c.getChangedTargetsMetrics.Complete(start, retErr) }()
+    start := time.Now()
+    defer func() { c.getChangedTargetsMetrics.Record(start, retErr) }()
 
     ctx, cancel := c.linkRequestCtx(stream.Context())
     defer cancel()
