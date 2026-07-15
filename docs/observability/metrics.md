@@ -8,7 +8,7 @@ Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins t
 - a concrete, Tally-backed `Emitter` that binds instruments and copies tags before retaining them
 - explicit no-op construction for deployments that intentionally do not emit
 
-It does not own metric names from callers, such as controller, Bazel, storage, graph runner, or orchestrator, histogram buckets, error classification, or context propagation. Those live in the package that implements each operation.
+It does not own metric names or histogram buckets from callers, such as controller, Bazel, storage, graphrunner etc. Those live in the package that implements each operation.
 
 ## Layout
 
@@ -21,7 +21,6 @@ controller/request_metrics.go   request lifecycle + buckets
 core/bazel/metrics.go           bazel query metrics + buckets
 graphrunner/metrics.go          graph runner metrics + buckets
 ```
-
 
 
 ## Emitter
@@ -62,7 +61,7 @@ Only `New` returns an error, and only to surface a nil scope — a wiring mistak
 The emitter is a fixed dependency for the lifetime of a component, so it lives on that component — passed to constructors and stored in a field.
 
 ```
-controller workflow -> controller metrics -> observability/metrics -> tally
+controller workflow  -> controller metrics -> observability/metrics -> tally
 domain operation     -> domain metrics     -> observability/metrics -> tally
 infrastructure       -> local metrics      -> observability/metrics -> tally
 ```
@@ -76,11 +75,10 @@ package bazel
 
 const opQuery = "query"
 
-// default bucket, chosen for bazel's own ranges. Defaults, not constants
-// — a consumer overrides them via Params.
+// default bucket, chosen for bazel's own ranges
 var (
     defaultQueryDurationBuckets = tally.MustMakeExponentialDurationBuckets(100*time.Millisecond, 3, 8) // 100ms .. ~3.6m
-    defaultQueryTargetBuckets   = tally.MustMakeExponentialValueBuckets(1, 10, 6)                       // 1 .. 100k
+    defaultQueryTargetBuckets   = tally.MustMakeExponentialValueBuckets(1, 10, 6) // 1 .. 100k
 )
 
 type MetricParams struct {
@@ -118,15 +116,14 @@ func newQueryMetrics(p MetricParams) *queryMetrics {
 }
 ```
 
-The owning client takes `*queryMetrics` (or the `*metrics.Emitter` it builds one from) as a required dependency. Future changes to "bazel" metrics stay beside "bazel" behavior instead of in a cross-package inventory.
+The owning client takes `*queryMetrics` (or the `*metrics.Emitter` it builds one from) as a required dependency. Future changes to `bazel` metrics stay beside `bazel` behavior instead of in a cross-package inventory.
 
 ## Request metrics
 
 Request outcome policy lives at the controller boundary. The pattern is controller-local, not part of the emitter package. A `requestMetrics` is built once per RPC op in the controller constructor; its duration buckets follow the same default-and-override rule as domain-local metrics.
 
 ```go
-// default request-latency buckets. Default, not a constant — a consumer
-// overrides via the controller's Params.
+// default request-latency buckets
 var defaultRequestDurationBuckets = tally.MustMakeExponentialDurationBuckets(time.Millisecond, 3, 10) // 1ms .. ~59s
 
 type requestMetrics struct {
@@ -148,22 +145,14 @@ func newRequestMetrics(e *metrics.Emitter, op string, buckets tally.DurationBuck
     }
 }
 
-func (m *requestMetrics) Begin() *requestAttempt {
+func (m *requestMetrics) Record(start time.Time, err error) {
     m.called.Inc(1)
-    return &requestAttempt{owner: m, start: time.Now()}
-}
-
-func (a *requestAttempt) Complete(err error) {
-    a.once.Do(func() {
-        m := a.owner
-        m.duration.RecordDuration(time.Since(a.start))
-        if err == nil {
-            m.succeeded.Inc(1)
-            return
-        }
-        m.failed.Inc(1)
-        ...
-    })
+    m.duration.RecordDuration(time.Since(start))
+    if err == nil {
+        m.succeeded.Inc(1)
+        return
+    }
+    m.failed.Inc(1)
 }
 ```
 
@@ -182,8 +171,8 @@ func newController(p Params) *controller {
 
 ```go
 func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
-    attempt := c.getChangedTargetsMetrics.Begin()
-    defer func() { attempt.Complete(retErr) }()
+    start := time.Now()
+    defer func() { c.getChangedTargetsMetrics.Record(start, retErr) }()
 
     ctx, cancel := c.linkRequestCtx(stream.Context())
     defer cancel()
@@ -199,14 +188,11 @@ Tags with bounded cardinality may be applied to a derived emitter (`Tagged`) whe
 ```go
 const tagRepo = "repo"
 
-func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
-    e := c.emitter.Tagged(map[string]string{
-        tagRepo: common.ToShortRemote(req.GetFirstRevision().GetRemote()),
-    })
-
-    e.Counter(opGetChangedTargets, "requests").Inc(1)
-    // ...
-}
+// inside a handler: apply a bounded tag to a derived emitter, bound at emit time
+e := c.emitter.Tagged(map[string]string{
+    tagRepo: common.ToShortRemote(req.GetFirstRevision().GetRemote()),
+})
+e.Counter(opGetChangedTargets, "called").Inc(1)
 ```
 
 ## Buckets
