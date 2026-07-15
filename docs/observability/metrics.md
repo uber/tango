@@ -69,12 +69,25 @@ infrastructure       -> local metrics      -> observability/metrics -> tally
 
 ## Domain-local metrics
 
-Each component defines a small metrics struct in its own vocabulary and binds its fixed instruments — and its bucket policy — once, at construction.
+Each component defines a small metrics struct in its own vocabulary and binds its fixed instruments — and its bucket policy — once, at construction. Buckets are a default owned by the component, overrideable. For example,
 
 ```go
 package bazel
 
 const opQuery = "query"
+
+// default bucket, chosen for bazel's own ranges. Defaults, not constants
+// — a consumer overrides them via Params.
+var (
+    defaultQueryDurationBuckets = tally.MustMakeExponentialDurationBuckets(100*time.Millisecond, 3, 8) // 100ms .. ~3.6m
+    defaultQueryTargetBuckets   = tally.MustMakeExponentialValueBuckets(1, 10, 6)                       // 1 .. 100k
+)
+
+type MetricParams struct {
+    Emitter *metrics.Emitter
+    QueryDurationBuckets tally.DurationBuckets
+    QueryTargetBuckets   tally.ValueBuckets
+}
 
 type queryMetrics struct {
     called      tally.Counter
@@ -84,29 +97,55 @@ type queryMetrics struct {
     targetCount tally.Histogram
 }
 
-func newQueryMetrics(e *metrics.Emitter) *queryMetrics {
+func newQueryMetrics(p MetricParams) *queryMetrics {
+    dur := p.QueryDurationBuckets
+    if len(dur) == 0 {
+        dur = defaultQueryDurationBuckets
+    }
+    tgt := p.QueryTargetBuckets
+    if len(tgt) == 0 {
+        tgt = defaultQueryTargetBuckets
+    }
+
+    e := p.Emitter
     return &queryMetrics{
         called:      e.Counter(opQuery, "called"),
         succeeded:   e.Counter(opQuery, "succeeded"),
         failed:      e.Counter(opQuery, "failed"),
-        duration:    e.DurationHistogram(opQuery, "duration", queryDurationBuckets),
-        targetCount: e.ValueHistogram(opQuery, "target_count", queryTargetBuckets),
+        duration:    e.DurationHistogram(opQuery, "duration", dur),
+        targetCount: e.ValueHistogram(opQuery, "target_count", tgt),
     }
 }
 ```
 
-The owning client takes `*queryMetrics` (or the `*metrics.Emitter` it builds one from) as a required dependency. Future changes to Bazel metrics stay beside Bazel behavior instead of in a cross-package inventory.
+The owning client takes `*queryMetrics` (or the `*metrics.Emitter` it builds one from) as a required dependency. Future changes to "bazel" metrics stay beside "bazel" behavior instead of in a cross-package inventory.
 
 ## Request metrics
 
-Request outcome policy lives at the controller boundary. The pattern is controller-local, not part of the emitter package.
+Request outcome policy lives at the controller boundary. The pattern is controller-local, not part of the emitter package. A `requestMetrics` is built once per RPC op in the controller constructor; its duration buckets follow the same default-and-override rule as domain-local metrics.
 
 ```go
+// default request-latency buckets. Default, not a constant — a consumer
+// overrides via the controller's Params.
+var defaultRequestDurationBuckets = tally.MustMakeExponentialDurationBuckets(time.Millisecond, 3, 10) // 1ms .. ~59s
+
 type requestMetrics struct {
     called    tally.Counter
     succeeded tally.Counter
+    failed    tally.Counter
     duration  tally.Histogram
-    // ...
+}
+
+func newRequestMetrics(e *metrics.Emitter, op string, buckets tally.DurationBuckets) *requestMetrics {
+    if len(buckets) == 0 {
+        buckets = defaultRequestDurationBuckets
+    }
+    return &requestMetrics{
+        called:    e.Counter(op, "called"),
+        succeeded: e.Counter(op, "succeeded"),
+        failed:    e.Counter(op, "failed"),
+        duration:  e.DurationHistogram(op, "duration", buckets),
+    }
 }
 
 func (m *requestMetrics) Begin() *requestAttempt {
@@ -125,6 +164,19 @@ func (a *requestAttempt) Complete(err error) {
         m.failed.Inc(1)
         ...
     })
+}
+```
+
+The controller binds one per op during construction:
+
+```go
+func newController(p Params) *controller {
+    e := p.Emitter
+    return &controller{
+        emitter:                  e,
+        getChangedTargetsMetrics: newRequestMetrics(e, opGetChangedTargets, p.RequestDurationBuckets),
+        getTargetGraphMetrics:    newRequestMetrics(e, opGetTargetGraph, p.RequestDurationBuckets),
+    }
 }
 ```
 
@@ -160,6 +212,8 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
 ## Buckets
 
 Buckets must be explicit. There is no universal default spanning RPCs, storage calls, Bazel queries, and multi-hour builds. The package that owns an operation selects its buckets from the expected distribution and its dashboard needs; a shared set is introduced only when operations intentionally share a semantic range.
+
+The owning package defines a sensible default and keeps it local. Buckets are never promoted into `observability/metrics`
 
 ## No-op behavior
 
