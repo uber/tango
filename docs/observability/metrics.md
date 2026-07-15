@@ -1,36 +1,32 @@
 # observability/metrics
 
-Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins the metric path shape (`<scope>.<operation>.<metric>`) and the handful of tag and result values that mean the same thing across every Tango domain. It owns emission mechanics and universal conventions only — each package owns the metric names, buckets, and instruments that describe its own behavior.
-
-## Why
-
-Tango is a library. Consumers wire it into their own `fx` graph with their own `tally.Scope`, and often deploy multiple flavors (long-running server, batch job, one-shot CLI) side by side. Without a shared convention every deployment invents its own metric paths and tag layout, and dashboards devolve into per-name merges. This package fixes the path shape and the cross-domain tag vocabulary so dashboards stay stable across deployments — without centralizing every package's metric names, hiding the metrics dependency, or letting missing wiring silently disable telemetry.
+Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins the metric path shape (`<scope>.<operation>.<metric>`). It owns emission mechanics only — each package owns the metric names, buckets, and instruments that describe its own behavior.
 
 ## What this package owns
 
 - op-as-subscope emission: an instrument bound as `(op, name)` lands under `<scope>.<op>.<name>`
-- the universal tag keys and result values shared by every domain (`result`, `failure_type`, `failure_source`; `success` / `failure`)
 - a concrete, Tally-backed `Emitter` that binds instruments and copies tags before retaining them
 - explicit no-op construction for deployments that intentionally do not emit
 
-It does not own controller, Bazel, storage, graph runner, or orchestrator metric names, histogram buckets, error classification, or context propagation. Those live in the package that implements each operation.
+It does not own metric names from callers, such as controller, Bazel, storage, graph runner, or orchestrator, histogram buckets, error classification, or context propagation. Those live in the package that implements each operation.
 
 ## Layout
 
 ```
 observability/metrics/
 ├── emitter.go       concrete Tally-backed emitter
-├── names.go         universal tag and result constants only
 └── emitter_test.go
 
-controller/request_metrics.go   request lifecycle + failure classification
+controller/request_metrics.go   request lifecycle + buckets
 core/bazel/metrics.go           bazel query metrics + buckets
 graphrunner/metrics.go          graph runner metrics + buckets
 ```
 
+
+
 ## Emitter
 
-`Emitter` is a concrete struct, not an interface: Tango has one metrics backend, and Tally already supplies test and no-op scopes. The API returns Tally instruments directly — it standardizes binding, it does not pretend metrics backends are interchangeable.
+`Emitter` is a concrete struct: Tango has one metrics backend, and Tally already supplies test and no-op scopes. The API returns Tally instruments directly — it standardizes binding.
 
 ```go
 package metrics
@@ -50,52 +46,26 @@ func Nop() *Emitter
 func (e *Emitter) Tagged(tags map[string]string) *Emitter
 
 // Counter binds a counter under <scope>.<op>.<name>.
-func (e *Emitter) Counter(op, name string) (tally.Counter, error)
-
-// Gauge binds a gauge under <scope>.<op>.<name>.
-func (e *Emitter) Gauge(op, name string) (tally.Gauge, error)
+func (e *Emitter) Counter(op, name string) tally.Counter
 
 // DurationHistogram binds a duration histogram using owner-selected buckets.
-func (e *Emitter) DurationHistogram(op, name string, buckets tally.DurationBuckets) (tally.Histogram, error)
+func (e *Emitter) DurationHistogram(op, name string, buckets tally.DurationBuckets) tally.Histogram
 
 // ValueHistogram binds a value histogram using owner-selected buckets.
-func (e *Emitter) ValueHistogram(op, name string, buckets tally.ValueBuckets) (tally.Histogram, error)
+func (e *Emitter) ValueHistogram(op, name string, buckets tally.ValueBuckets) tally.Histogram
 ```
 
-Instruments are normally bound once during component construction and stored on a local metrics struct. Dynamic binding is reserved for bounded outcome tags such as `result` and `failure_type`.
+Only `New` returns an error, and only to surface a nil scope — a wiring mistake, not a runtime condition. The binding methods take constant `op`/`name` arguments and have no reachable failure path, so they return the instrument directly. Instruments are normally bound once during component construction and stored on a local metrics struct.
 
 ## Dependency direction
 
-The emitter is a fixed dependency for the lifetime of a component, so it lives on that component — passed to constructors and stored in a field, never carried in a request context. `context.Context` stays responsible for deadlines, cancellation, and request-scoped values only.
+The emitter is a fixed dependency for the lifetime of a component, so it lives on that component — passed to constructors and stored in a field.
 
 ```
 controller workflow -> controller metrics -> observability/metrics -> tally
 domain operation     -> domain metrics     -> observability/metrics -> tally
 infrastructure       -> local metrics      -> observability/metrics -> tally
 ```
-
-`observability/metrics` does not depend on controller or domain error packages. Classification and emission are combined at the controller, because that is where the request-level outcome policy lives.
-
-## Shared conventions
-
-Only values with the same meaning across every Tango domain live in `names.go`:
-
-```go
-const (
-    TagResult        = "result"
-    TagFailureType   = "failure_type"
-    TagFailureSource = "failure_source"
-)
-
-type Result string
-
-const (
-    ResultSuccess Result = "success"
-    ResultFailure Result = "failure"
-)
-```
-
-Operation and metric names such as `get_target_graph`, `bazel_query_duration`, or `changed_targets_count` do not belong here. They are unexported constants in `controller`, `core/bazel`, or whichever package owns the operation.
 
 ## Domain-local metrics
 
@@ -114,13 +84,14 @@ type queryMetrics struct {
     targetCount tally.Histogram
 }
 
-func newQueryMetrics(e *metrics.Emitter) (*queryMetrics, error) {
-    called, err := e.Counter(opQuery, "called")
-    if err != nil {
-        return nil, err
+func newQueryMetrics(e *metrics.Emitter) *queryMetrics {
+    return &queryMetrics{
+        called:      e.Counter(opQuery, "called"),
+        succeeded:   e.Counter(opQuery, "succeeded"),
+        failed:      e.Counter(opQuery, "failed"),
+        duration:    e.DurationHistogram(opQuery, "duration", queryDurationBuckets),
+        targetCount: e.ValueHistogram(opQuery, "target_count", queryTargetBuckets),
     }
-    // bind the remaining instruments with Bazel-specific buckets...
-    return &queryMetrics{called: called /* ... */}, nil
 }
 ```
 
@@ -128,39 +99,34 @@ The owning client takes `*queryMetrics` (or the `*metrics.Emitter` it builds one
 
 ## Request metrics
 
-Request outcome policy lives at the controller boundary, where Tango holds the final returned error and can classify it once. The pattern is controller-local, not part of the emitter package.
+Request outcome policy lives at the controller boundary. The pattern is controller-local, not part of the emitter package.
 
 ```go
 type requestMetrics struct {
     called    tally.Counter
     succeeded tally.Counter
     duration  tally.Histogram
-    inFlight  tally.Gauge
-    active    atomic.Int64
     // ...
 }
 
 func (m *requestMetrics) Begin() *requestAttempt {
     m.called.Inc(1)
-    m.inFlight.Update(float64(m.active.Add(1)))
     return &requestAttempt{owner: m, start: time.Now()}
 }
 
 func (a *requestAttempt) Complete(err error) {
     a.once.Do(func() {
         m := a.owner
-        m.inFlight.Update(float64(m.active.Add(-1)))
         m.duration.RecordDuration(time.Since(a.start))
         if err == nil {
             m.succeeded.Inc(1)
             return
         }
-        m.recordClassifiedFailure(classifyError(err))
+        m.failed.Inc(1)
+        ...
     })
 }
 ```
-
-`classifyError` stays controller policy and uses Tango's classified-error contract without introducing a dependency from the metrics package to the error package. Handlers stay concise:
 
 ```go
 func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
@@ -174,17 +140,26 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
 }
 ```
 
-No emitter is stored on `ctx`.
-
 ## Request-specific tags
 
 Tags with bounded cardinality may be applied to a derived emitter (`Tagged`) where the owning operation is constructed or recorded. Request identifiers, commit hashes, paths, and arbitrary repository URLs must never be tags. A repository tag is allowed only where a deployment has an explicit cardinality budget and normalizes the value consistently.
 
-In-flight gauges must not use request-specific tagged emitters: one atomic counter owns exactly one gauge series. If several dimensions genuinely need independent gauges, the owner keeps a separate counter per bounded series key.
+```go
+const tagRepo = "repo"
+
+func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
+    e := c.emitter.Tagged(map[string]string{
+        tagRepo: common.ToShortRemote(req.GetFirstRevision().GetRemote()),
+    })
+
+    e.Counter(opGetChangedTargets, "requests").Inc(1)
+    // ...
+}
+```
 
 ## Buckets
 
-There is no universal default spanning RPCs, storage calls, Bazel queries, and multi-hour builds. The package that owns an operation selects its buckets from the expected distribution and its dashboard needs; a shared set is introduced only when operations intentionally share a semantic range. Bucket slices are never mutable package globals — a constructor creates or copies the set before binding.
+Buckets must be explicit. There is no universal default spanning RPCs, storage calls, Bazel queries, and multi-hour builds. The package that owns an operation selects its buckets from the expected distribution and its dashboard needs; a shared set is introduced only when operations intentionally share a semantic range.
 
 ## No-op behavior
 
