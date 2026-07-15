@@ -54,7 +54,7 @@ func (e *Emitter) DurationHistogram(op, name string, buckets tally.DurationBucke
 func (e *Emitter) ValueHistogram(op, name string, buckets tally.ValueBuckets) tally.Histogram
 ```
 
-Only `New` returns an error, and only to surface a nil scope — a wiring mistake, not a runtime condition. The binding methods take constant `op`/`name` arguments and have no reachable failure path, so they return the instrument directly. Instruments are normally bound once during component construction and stored on a local metrics struct.
+Only `New` returns an error, and only to surface a nil scope — a wiring mistake, not a runtime condition. The binding methods take constant `op`/`name` arguments and have no reachable failure path, so they return the instrument directly. Instruments are usually bound once during component construction and stored on a local metrics struct; a component whose metrics carry a per-request tag (see [Request metrics](#request-metrics)) builds its struct per request instead.
 
 ## Dependency direction
 
@@ -68,24 +68,18 @@ infrastructure       -> local metrics      -> observability/metrics -> tally
 
 ## Domain-local metrics
 
-Each component defines a small metrics struct in its own vocabulary and binds its fixed instruments — and its bucket policy — once, at construction. Buckets are a default owned by the component, overrideable. For example,
+A domain component defines a small metrics struct in its own vocabulary. When its metrics carry no per-request tag, it binds them — and its bucket policy — once, at construction. Buckets are a default owned by the component, overrideable. For example,
 
 ```go
 package bazel
 
 const opQuery = "query"
 
-// default bucket, chosen for bazel's own ranges
+// default buckets, chosen for bazel's own ranges
 var (
     defaultQueryDurationBuckets = tally.MustMakeExponentialDurationBuckets(100*time.Millisecond, 3, 8) // 100ms .. ~3.6m
-    defaultQueryTargetBuckets   = tally.MustMakeExponentialValueBuckets(1, 10, 6) // 1 .. 100k
+    defaultQueryTargetBuckets   = tally.MustMakeExponentialValueBuckets(1, 10, 6)                       // 1 .. 100k
 )
-
-type MetricParams struct {
-    Emitter *metrics.Emitter
-    QueryDurationBuckets tally.DurationBuckets
-    QueryTargetBuckets   tally.ValueBuckets
-}
 
 type queryMetrics struct {
     succeeded   tally.Counter
@@ -94,17 +88,13 @@ type queryMetrics struct {
     targetCount tally.Histogram
 }
 
-func newQueryMetrics(p MetricParams) *queryMetrics {
-    dur := p.QueryDurationBuckets
+func newQueryMetrics(e *metrics.Emitter, dur tally.DurationBuckets, tgt tally.ValueBuckets) *queryMetrics {
     if len(dur) == 0 {
         dur = defaultQueryDurationBuckets
     }
-    tgt := p.QueryTargetBuckets
     if len(tgt) == 0 {
         tgt = defaultQueryTargetBuckets
     }
-
-    e := p.Emitter
     return &queryMetrics{
         succeeded:   e.Counter(opQuery, "succeeded"),
         failed:      e.Counter(opQuery, "failed"),
@@ -114,7 +104,7 @@ func newQueryMetrics(p MetricParams) *queryMetrics {
 }
 ```
 
-The owning client takes `*queryMetrics` (or the `*metrics.Emitter` it builds one from) as a required dependency. Future changes to `bazel` metrics stay beside `bazel` behavior instead of in a cross-package inventory.
+The bazel client's exported `Params` carries the `Emitter` and optional bucket overrides and passes them to `newQueryMetrics`; unset buckets fall back to the defaults above. Keeping this here means future changes to `bazel` metrics stay beside `bazel` behavior instead of in a cross-package inventory.
 
 ## Request metrics
 
@@ -185,8 +175,6 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
 ## Request-specific tags
 
 Each distinct tag value is a new series, so tag values must be bounded — never request IDs, commit hashes, paths, or raw repo URLs. `repo` is safe only with an explicit cardinality budget and a normalized, allow-listed value; the handler above applies it that way (`ToShortRemote`), and tally's name+tags caching keeps each `(op, repo)` series bound once despite the per-request derivation.
-
-If the per-request emitter derivation ever shows up in a profile, memoize `*requestMetrics` in a map keyed by repo — but tally's caching makes that rarely worth it.
 
 ## Buckets
 
