@@ -73,10 +73,11 @@ func ResultToTargetGraph(ctx context.Context, result targethasher.Result) (entit
 	return entity.TargetGraph{Targets: targets}, nil
 }
 
-// TargetGraphToProto converts an entity.TargetGraph into chunked
-// GetTargetGraphResponse messages ready for streaming. Each message is
-// bounded by maxMessageBytes of real wire size.
-func TargetGraphToProto(ctx context.Context, graph entity.TargetGraph, maxMessageBytes int) ([]*tangopb.GetTargetGraphResponse, error) {
+// TargetGraphToChunks converts a string-based entity.TargetGraph into
+// ID-mapped entity.GraphChunk slices, ready for storage or proto
+// conversion. Each chunk is bounded by maxMessageBytes of estimated wire
+// size.
+func TargetGraphToChunks(ctx context.Context, graph entity.TargetGraph, maxMessageBytes int) ([]entity.GraphChunk, error) {
 	targetNamesMapping := make(map[string]int32, len(graph.Targets))
 	for i, t := range graph.Targets {
 		targetNamesMapping[t.Name] = int32(i + 1)
@@ -87,7 +88,8 @@ func TargetGraphToProto(ctx context.Context, graph entity.TargetGraph, maxMessag
 	attrNameMapper := idmapper.NewMapper()
 	attrStrValMapper := idmapper.NewMapper()
 
-	optimizedTargets := make([]*tangopb.OptimizedTarget, 0, len(graph.Targets))
+	protoTargets := make([]*tangopb.OptimizedTarget, 0, len(graph.Targets))
+	idTargets := make([]entity.IDTarget, 0, len(graph.Targets))
 	for i, t := range graph.Targets {
 		if i%cancelCheckInterval == 0 {
 			if err := ctx.Err(); err != nil {
@@ -103,8 +105,9 @@ func TargetGraphToProto(ctx context.Context, graph entity.TargetGraph, maxMessag
 			depIDs = append(depIDs, depID)
 		}
 
-		ot := &tangopb.OptimizedTarget{
-			Id:                 targetNamesMapping[t.Name],
+		id := targetNamesMapping[t.Name]
+		idt := entity.IDTarget{
+			ID:                 id,
 			Hash:               t.Hash,
 			DirectDependencies: depIDs,
 			Root:               t.Root,
@@ -112,24 +115,25 @@ func TargetGraphToProto(ctx context.Context, graph entity.TargetGraph, maxMessag
 		}
 
 		if t.RuleType != "" {
-			ot.RuleType = ruleTypeMapper.ID(t.RuleType)
+			idt.RuleType = ruleTypeMapper.ID(t.RuleType)
 		}
 		if len(t.Tags) > 0 {
 			tagIDs := make([]int32, 0, len(t.Tags))
 			for _, tag := range t.Tags {
 				tagIDs = append(tagIDs, tagMapper.ID(tag))
 			}
-			ot.Tags = tagIDs
+			idt.Tags = tagIDs
 		}
 		if len(t.Attributes) > 0 {
 			attrs := make(map[int32]int32, len(t.Attributes))
 			for k, v := range t.Attributes {
 				attrs[attrNameMapper.ID(k)] = attrStrValMapper.ID(v)
 			}
-			ot.Attributes = attrs
+			idt.Attributes = attrs
 		}
 
-		optimizedTargets = append(optimizedTargets, ot)
+		idTargets = append(idTargets, idt)
+		protoTargets = append(protoTargets, idTargetToProtoTarget(&idt))
 	}
 
 	targetIDToName := make(map[int32]string, len(targetNamesMapping))
@@ -137,18 +141,22 @@ func TargetGraphToProto(ctx context.Context, graph entity.TargetGraph, maxMessag
 		targetIDToName[id] = s
 	}
 
-	var responses []*tangopb.GetTargetGraphResponse
-	targetChunks, err := BySize(optimizedTargets, maxMessageBytes)
+	// Use proto Size() for accurate chunking, then build entity chunks.
+	targetChunks, err := BySize(protoTargets, maxMessageBytes)
 	if err != nil {
 		return nil, err
 	}
-	for _, chunk := range targetChunks {
-		responses = append(responses, &tangopb.GetTargetGraphResponse{
-			Item: &tangopb.GetTargetGraphResponse_Targets{
-				Targets: &tangopb.OptimizedTargets{Targets: chunk},
-			},
-		})
+
+	var chunks []entity.GraphChunk
+	idx := 0
+	for _, pc := range targetChunks {
+		chunk := entity.GraphChunk{
+			Targets: idTargets[idx : idx+len(pc)],
+		}
+		idx += len(pc)
+		chunks = append(chunks, chunk)
 	}
+
 	metaChunks, err := ChunkMetadata(
 		targetIDToName,
 		ruleTypeMapper.Invert(),
@@ -161,10 +169,109 @@ func TargetGraphToProto(ctx context.Context, graph entity.TargetGraph, maxMessag
 		return nil, err
 	}
 	for _, meta := range metaChunks {
-		responses = append(responses, &tangopb.GetTargetGraphResponse{
-			Item: &tangopb.GetTargetGraphResponse_Metadata{Metadata: meta},
+		chunks = append(chunks, entity.GraphChunk{
+			Metadata: protoMetadataToEntity(meta),
 		})
 	}
 
+	return chunks, nil
+}
+
+// TargetGraphToProto converts an entity.TargetGraph into chunked
+// GetTargetGraphResponse messages ready for streaming. Each message is
+// bounded by maxMessageBytes of real wire size.
+func TargetGraphToProto(ctx context.Context, graph entity.TargetGraph, maxMessageBytes int) ([]*tangopb.GetTargetGraphResponse, error) {
+	chunks, err := TargetGraphToChunks(ctx, graph, maxMessageBytes)
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]*tangopb.GetTargetGraphResponse, 0, len(chunks))
+	for i := range chunks {
+		responses = append(responses, GraphChunkToProto(&chunks[i]))
+	}
 	return responses, nil
+}
+
+// GraphChunkToProto converts an entity.GraphChunk to the corresponding
+// proto GetTargetGraphResponse.
+func GraphChunkToProto(chunk *entity.GraphChunk) *tangopb.GetTargetGraphResponse {
+	if chunk.Metadata != nil {
+		return &tangopb.GetTargetGraphResponse{
+			Item: &tangopb.GetTargetGraphResponse_Metadata{
+				Metadata: entityMetadataToProto(chunk.Metadata),
+			},
+		}
+	}
+	targets := make([]*tangopb.OptimizedTarget, len(chunk.Targets))
+	for i := range chunk.Targets {
+		targets[i] = idTargetToProtoTarget(&chunk.Targets[i])
+	}
+	return &tangopb.GetTargetGraphResponse{
+		Item: &tangopb.GetTargetGraphResponse_Targets{
+			Targets: &tangopb.OptimizedTargets{Targets: targets},
+		},
+	}
+}
+
+// ProtoToGraphChunk converts a proto GetTargetGraphResponse to an
+// entity.GraphChunk.
+func ProtoToGraphChunk(resp *tangopb.GetTargetGraphResponse) entity.GraphChunk {
+	switch item := resp.GetItem().(type) {
+	case *tangopb.GetTargetGraphResponse_Targets:
+		targets := make([]entity.IDTarget, len(item.Targets.GetTargets()))
+		for i, t := range item.Targets.GetTargets() {
+			targets[i] = protoTargetToIDTarget(t)
+		}
+		return entity.GraphChunk{Targets: targets}
+	case *tangopb.GetTargetGraphResponse_Metadata:
+		return entity.GraphChunk{Metadata: protoMetadataToEntity(item.Metadata)}
+	default:
+		return entity.GraphChunk{}
+	}
+}
+
+func idTargetToProtoTarget(t *entity.IDTarget) *tangopb.OptimizedTarget {
+	return &tangopb.OptimizedTarget{
+		Id:                 t.ID,
+		Hash:               t.Hash,
+		DirectDependencies: t.DirectDependencies,
+		RuleType:           t.RuleType,
+		Tags:               t.Tags,
+		Root:               t.Root,
+		External:           t.External,
+		Attributes:         t.Attributes,
+	}
+}
+
+func protoTargetToIDTarget(t *tangopb.OptimizedTarget) entity.IDTarget {
+	return entity.IDTarget{
+		ID:                 t.GetId(),
+		Hash:               t.GetHash(),
+		DirectDependencies: t.GetDirectDependencies(),
+		RuleType:           t.GetRuleType(),
+		Tags:               t.GetTags(),
+		Root:               t.GetRoot(),
+		External:           t.GetExternal(),
+		Attributes:         t.GetAttributes(),
+	}
+}
+
+func entityMetadataToProto(m *entity.GraphMetadata) *tangopb.Metadata {
+	return &tangopb.Metadata{
+		TargetIdMapping:             m.TargetIDMapping,
+		RuleTypeMapping:             m.RuleTypeMapping,
+		TagMapping:                  m.TagMapping,
+		AttributeNameMapping:        m.AttributeNameMapping,
+		AttributeStringValueMapping: m.AttributeStringValueMapping,
+	}
+}
+
+func protoMetadataToEntity(m *tangopb.Metadata) *entity.GraphMetadata {
+	return &entity.GraphMetadata{
+		TargetIDMapping:             m.GetTargetIdMapping(),
+		RuleTypeMapping:             m.GetRuleTypeMapping(),
+		TagMapping:                  m.GetTagMapping(),
+		AttributeNameMapping:        m.GetAttributeNameMapping(),
+		AttributeStringValueMapping: m.GetAttributeStringValueMapping(),
+	}
 }
