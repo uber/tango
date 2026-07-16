@@ -60,6 +60,24 @@ func (e *Emitter) DurationHistogram(op, name string, b tally.DurationBuckets) ta
 func (e *Emitter) ValueHistogram(op, name string, b tally.ValueBuckets) tally.Histogram {
     return e.scope.SubScope(op).Histogram(name, b)
 }
+
+func TagKey(tags map[string]string) string {
+    keys := make([]string, 0, len(tags))
+    for k := range tags {
+        keys = append(keys, k)
+    }
+    sort.Strings(keys)
+    var b strings.Builder
+    for i, k := range keys {
+        if i > 0 {
+            b.WriteByte(',')
+        }
+        b.WriteString(k)
+        b.WriteByte(':')
+        b.WriteString(tags[k])
+    }
+    return b.String()
+}
 ```
 
 
@@ -138,61 +156,44 @@ Each domain implements its own metrics struct, which memoizes tagged emitters at
 ```go
 package orchestrator
 
-// Buckets live at the callsite, visible without walking an object tree.
 var orchestratorFinishBuckets = tally.MustMakeExponentialDurationBuckets(time.Second, 2, 20) // 1s .. ~3h
 
 type orchestratorOp struct {
-    byResult map[string]*metrics.Emitter
-    start    time.Time
+    owner *orchestratorMetrics
+    repo  string
+    start time.Time
 }
 
 type orchestratorMetrics struct {
-    base         *metrics.Emitter
-    byRepo       map[string]*metrics.Emitter
-    byRepoResult map[string]map[string]*metrics.Emitter
+    base   *metrics.Emitter
+    cached map[string]*metrics.Emitter
 }
 
 func newOrchestratorMetrics(e *metrics.Emitter) *orchestratorMetrics {
-    return &orchestratorMetrics{
-        base:         e,
-        byRepo:       make(map[string]*metrics.Emitter),
-        byRepoResult: make(map[string]map[string]*metrics.Emitter),
-    }
+    return &orchestratorMetrics{base: e, cached: make(map[string]*metrics.Emitter)}
 }
 
-func (m *orchestratorMetrics) emitterFor(repo string) *metrics.Emitter {
-    if e, ok := m.byRepo[repo]; ok {
+func (m *orchestratorMetrics) emitterFor(tags map[string]string) *metrics.Emitter {
+    key := metrics.TagKey(tags)
+    if e, ok := m.cached[key]; ok {
         return e
     }
-    e := m.base.Tagged(map[string]string{metrics.TagRepo: repo})
-    m.byRepo[repo] = e
+    e := m.base.Tagged(tags)
+    m.cached[key] = e
     return e
 }
 
-func (m *orchestratorMetrics) resultEmittersFor(repo string) map[string]*metrics.Emitter {
-    // Memoize per repo — Tagged is called once per distinct (repo, result)
-    // pair, not per request.
-    if re, ok := m.byRepoResult[repo]; ok {
-        return re
-    }
-    tagged := m.emitterFor(repo)
-    re := map[string]*metrics.Emitter{
-        metrics.ResultSuccess:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultSuccess}),
-        metrics.ResultFailure:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultFailure}),
-        metrics.ResultCancelled: tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultCancelled}),
-    }
-    m.byRepoResult[repo] = re
-    return re
-}
-
 func (m *orchestratorMetrics) Begin(repo string) *orchestratorOp {
-    m.emitterFor(repo).Counter(metrics.OpGetTargetGraph, "start").Inc(1)
-    return &orchestratorOp{byResult: m.resultEmittersFor(repo), start: time.Now()}
+    m.emitterFor(map[string]string{metrics.TagRepo: repo}).
+        Counter(metrics.OpGetTargetGraph, "start").Inc(1)
+    return &orchestratorOp{owner: m, repo: repo, start: time.Now()}
 }
 
 func (o *orchestratorOp) Complete(err error) {
-    o.byResult[metrics.Outcome(err)].
-        DurationHistogram(metrics.OpGetTargetGraph, "finish", orchestratorFinishBuckets).
+    o.owner.emitterFor(map[string]string{
+        metrics.TagRepo:   o.repo,
+        metrics.TagResult: metrics.Outcome(err),
+    }).DurationHistogram(metrics.OpGetTargetGraph, "finish", orchestratorFinishBuckets).
         RecordDuration(time.Since(o.start))
 }
 ```
@@ -228,71 +229,53 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 
 ## Request metrics
 
-Request lifecycle follows the same `start`/`finish` convention, with the controller owning its own methods. The struct memoizes result-tagged emitters per repo — `Tagged` is called once per distinct `(repo, result)` pair, not per request.
+The controller follows the same pattern with `Begin(repo, op, buckets)` so different RPC methods pass their own operation name and bucket range.
 
 ```go
 package controller
 
-// Buckets live at the callsite. Request-level latency is minutes-scale.
 var getChangedTargetsFinishBuckets = tally.MustMakeExponentialDurationBuckets(
     time.Second, 3, 10, // 1s .. ~5h
 )
 
+type requestOp struct {
+    owner   *requestMetrics
+    repo    string
+    op      string
+    buckets tally.DurationBuckets
+    start   time.Time
+}
+
 type requestMetrics struct {
-    base       *metrics.Emitter
-    byRepo     map[string]*metrics.Emitter              // repo -> repo-tagged emitter (for start)
-    byRepoResult map[string]map[string]*metrics.Emitter  // repo -> result -> result-tagged emitter (for finish)
+    base   *metrics.Emitter
+    cached map[string]*metrics.Emitter
 }
 
 func newRequestMetrics(e *metrics.Emitter) *requestMetrics {
-    return &requestMetrics{
-        base:         e,
-        byRepo:       make(map[string]*metrics.Emitter),
-        byRepoResult: make(map[string]map[string]*metrics.Emitter),
-    }
+    return &requestMetrics{base: e, cached: make(map[string]*metrics.Emitter)}
 }
 
-func (m *requestMetrics) emitterFor(repo string) *metrics.Emitter {
-    // Memoize per repo — Tagged is called once per distinct repo.
-    if e, ok := m.byRepo[repo]; ok {
+func (m *requestMetrics) emitterFor(tags map[string]string) *metrics.Emitter {
+    key := metrics.TagKey(tags)
+    if e, ok := m.cached[key]; ok {
         return e
     }
-    e := m.base.Tagged(map[string]string{metrics.TagRepo: repo})
-    m.byRepo[repo] = e
+    e := m.base.Tagged(tags)
+    m.cached[key] = e
     return e
 }
 
-func (m *requestMetrics) resultEmittersFor(repo string) map[string]*metrics.Emitter {
-    // Memoize per repo — Tagged is called once per distinct (repo, result)
-    // pair, not per request.
-    if re, ok := m.byRepoResult[repo]; ok {
-        return re
-    }
-    tagged := m.emitterFor(repo)
-    re := map[string]*metrics.Emitter{
-        metrics.ResultSuccess:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultSuccess}),
-        metrics.ResultFailure:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultFailure}),
-        metrics.ResultCancelled: tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultCancelled}),
-    }
-    m.byRepoResult[repo] = re
-    return re
-}
-
-type requestOp struct {
-    byResult map[string]*metrics.Emitter
-    op       string
-    buckets  tally.DurationBuckets
-    start    time.Time
-}
-
 func (m *requestMetrics) Begin(repo, op string, buckets tally.DurationBuckets) *requestOp {
-    m.emitterFor(repo).Counter(op, "start").Inc(1)
-    return &requestOp{byResult: m.resultEmittersFor(repo), op: op, buckets: buckets, start: time.Now()}
+    m.emitterFor(map[string]string{metrics.TagRepo: repo}).
+        Counter(op, "start").Inc(1)
+    return &requestOp{owner: m, repo: repo, op: op, buckets: buckets, start: time.Now()}
 }
 
 func (o *requestOp) Complete(err error) {
-    o.byResult[metrics.Outcome(err)].
-        DurationHistogram(o.op, "finish", o.buckets).
+    o.owner.emitterFor(map[string]string{
+        metrics.TagRepo:   o.repo,
+        metrics.TagResult: metrics.Outcome(err),
+    }).DurationHistogram(o.op, "finish", o.buckets).
         RecordDuration(time.Since(o.start))
 }
 ```
@@ -300,33 +283,17 @@ func (o *requestOp) Complete(err error) {
 The controller builds `requestMetrics` once at construction:
 
 ```go
-type controller struct {
-    metrics *requestMetrics
-    // ...
-}
-
-func newController(p Params) *controller {
-    return &controller{
-        metrics: newRequestMetrics(p.Emitter),
-    }
-}
-
 func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
-    repo := ToShortRemote(req.GetFirstRevision().GetRemote())
+    repo := common.ToShortRemote(req.GetFirstRevision().GetRemote())
     op := c.metrics.Begin(repo, metrics.OpGetChangedTargets, getChangedTargetsFinishBuckets)
     defer func() { op.Complete(retErr) }()
-
-    ctx, cancel := c.linkRequestCtx(stream.Context())
-    defer cancel()
-    // ... request workflow ...
-    return nil
+    // ...
 }
 ```
 
 Sub-operations use the same struct with their own buckets:
 
 ```go
-// Diffing is seconds-scale — different range from the enclosing operation.
 var compareFinishBuckets = tally.MustMakeExponentialDurationBuckets(
     10*time.Millisecond, 2, 12, // 10ms .. ~40s
 )
