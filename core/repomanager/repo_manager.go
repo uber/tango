@@ -153,7 +153,11 @@ func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (
 	select {
 	case slot = <-pool.avail:
 	case <-ctx.Done():
-		return nil, fmt.Errorf("%w: pool for repo %s: %w", ErrPoolTimeout, repo, ctx.Err())
+		err := ctx.Err()
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: pool for repo %s: %w", ErrPoolTimeout, repo, err)
+		}
+		return nil, fmt.Errorf("pool for repo %s: %w", repo, err)
 	}
 
 	// Lazily create the worker clone on first use
