@@ -143,7 +143,7 @@ func TestTargetGraphToProto_EmptyGraph(t *testing.T) {
 	assert.True(t, ok)
 }
 
-func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
+func TestTargetGraphToProto_Chunking(t *testing.T) {
 	t.Parallel()
 
 	numTargets := 50
@@ -157,7 +157,10 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 		result.Targets[name] = &targethasher.Target{Name: name, Hash: []byte{0}, RuleType: "go_library"}
 	}
 
-	baseline, err := ResultToGetTargetGraphResponse(context.Background(), result, 1<<30)
+	graph, err := ResultToTargetGraph(context.Background(), result)
+	require.NoError(t, err)
+
+	baseline, err := TargetGraphToProto(context.Background(), graph, 1<<30)
 	require.NoError(t, err)
 	var targetBytes int
 	for _, resp := range baseline {
@@ -181,7 +184,7 @@ func TestResultToGetTargetGraphResponse_Chunking(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			responses, err := ResultToGetTargetGraphResponse(context.Background(), result, tt.maxMessageBytes)
+			responses, err := TargetGraphToProto(context.Background(), graph, tt.maxMessageBytes)
 			require.NoError(t, err)
 
 			var targetChunks, totalTargets int

@@ -168,13 +168,3 @@ func TargetGraphToProto(ctx context.Context, graph entity.TargetGraph, maxMessag
 
 	return responses, nil
 }
-
-// ResultToGetTargetGraphResponse is a convenience that composes
-// ResultToTargetGraph and TargetGraphToProto.
-func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result, maxMessageBytes int) ([]*tangopb.GetTargetGraphResponse, error) {
-	graph, err := ResultToTargetGraph(ctx, result)
-	if err != nil {
-		return nil, err
-	}
-	return TargetGraphToProto(ctx, graph, maxMessageBytes)
-}
