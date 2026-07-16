@@ -32,13 +32,54 @@ func ProtoToGetTargetGraphRequest(req *tangopb.GetTargetGraphRequest) (entity.Ge
 	}, nil
 }
 
-// ResultToGetTargetGraphResponse converts a targethasher.Result into chunked
-// GetTargetGraphResponse messages ready for streaming or storage. Each message
-// is bounded by maxMessageBytes of real wire size (see chunkTargets).
-func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result, maxMessageBytes int) ([]*tangopb.GetTargetGraphResponse, error) {
-	targetNamesMapping := make(map[string]int32, len(result.TargetNames))
+// ResultToTargetGraph converts a targethasher.Result into a proto-free
+// entity.TargetGraph. Targets are emitted in the topological order given
+// by result.TargetNames. Only STRING attributes with non-nil name and
+// value are included.
+func ResultToTargetGraph(ctx context.Context, result targethasher.Result) (entity.TargetGraph, error) {
+	targets := make([]entity.OptimizedTarget, 0, len(result.TargetNames))
 	for i, name := range result.TargetNames {
-		targetNamesMapping[name] = int32(i + 1)
+		if i%cancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return entity.TargetGraph{}, err
+			}
+		}
+		t, ok := result.Targets[name]
+		if !ok {
+			continue
+		}
+		ot := entity.OptimizedTarget{
+			Name:         name,
+			Hash:         hex.EncodeToString(t.Hash),
+			Dependencies: t.Deps,
+			RuleType:     t.RuleType,
+			Tags:         t.Tags,
+			Root:         t.Root,
+			External:     t.External,
+		}
+		if len(t.Attributes) > 0 {
+			attrs := make(map[string]string, len(t.Attributes))
+			for _, attr := range t.Attributes {
+				if attr.GetType() == buildpb.Attribute_STRING && attr.Name != nil && attr.StringValue != nil {
+					attrs[*attr.Name] = *attr.StringValue
+				}
+			}
+			if len(attrs) > 0 {
+				ot.Attributes = attrs
+			}
+		}
+		targets = append(targets, ot)
+	}
+	return entity.TargetGraph{Targets: targets}, nil
+}
+
+// TargetGraphToProto converts an entity.TargetGraph into chunked
+// GetTargetGraphResponse messages ready for streaming. Each message is
+// bounded by maxMessageBytes of real wire size.
+func TargetGraphToProto(ctx context.Context, graph entity.TargetGraph, maxMessageBytes int) ([]*tangopb.GetTargetGraphResponse, error) {
+	targetNamesMapping := make(map[string]int32, len(graph.Targets))
+	for i, t := range graph.Targets {
+		targetNamesMapping[t.Name] = int32(i + 1)
 	}
 
 	ruleTypeMapper := idmapper.NewMapper()
@@ -46,20 +87,15 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 	attrNameMapper := idmapper.NewMapper()
 	attrStrValMapper := idmapper.NewMapper()
 
-	optimizedTargets := make([]*tangopb.OptimizedTarget, 0, len(result.Targets))
-
-	n := 0
-	for _, t := range result.Targets {
-		if n%cancelCheckInterval == 0 {
+	optimizedTargets := make([]*tangopb.OptimizedTarget, 0, len(graph.Targets))
+	for i, t := range graph.Targets {
+		if i%cancelCheckInterval == 0 {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 		}
-		n++
-		nameID := targetNamesMapping[t.Name]
-
-		depIDs := make([]int32, 0, len(t.Deps))
-		for _, depName := range t.Deps {
+		depIDs := make([]int32, 0, len(t.Dependencies))
+		for _, depName := range t.Dependencies {
 			depID, ok := targetNamesMapping[depName]
 			if !ok {
 				continue
@@ -68,15 +104,16 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 		}
 
 		ot := &tangopb.OptimizedTarget{
-			Id:                 nameID,
-			Hash:               hex.EncodeToString(t.Hash),
+			Id:                 targetNamesMapping[t.Name],
+			Hash:               t.Hash,
 			DirectDependencies: depIDs,
+			Root:               t.Root,
+			External:           t.External,
 		}
 
 		if t.RuleType != "" {
 			ot.RuleType = ruleTypeMapper.ID(t.RuleType)
 		}
-
 		if len(t.Tags) > 0 {
 			tagIDs := make([]int32, 0, len(t.Tags))
 			for _, tag := range t.Tags {
@@ -84,16 +121,10 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 			}
 			ot.Tags = tagIDs
 		}
-		ot.Root = t.Root
-		ot.External = t.External
 		if len(t.Attributes) > 0 {
 			attrs := make(map[int32]int32, len(t.Attributes))
-			for _, attr := range t.Attributes {
-				if attr.GetType() == buildpb.Attribute_STRING && attr.Name != nil && attr.StringValue != nil {
-					nameID := attrNameMapper.ID(*attr.Name)
-					valID := attrStrValMapper.ID(*attr.StringValue)
-					attrs[nameID] = valID
-				}
+			for k, v := range t.Attributes {
+				attrs[attrNameMapper.ID(k)] = attrStrValMapper.ID(v)
 			}
 			ot.Attributes = attrs
 		}
@@ -136,4 +167,14 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 	}
 
 	return responses, nil
+}
+
+// ResultToGetTargetGraphResponse is a convenience that composes
+// ResultToTargetGraph and TargetGraphToProto.
+func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Result, maxMessageBytes int) ([]*tangopb.GetTargetGraphResponse, error) {
+	graph, err := ResultToTargetGraph(ctx, result)
+	if err != nil {
+		return nil, err
+	}
+	return TargetGraphToProto(ctx, graph, maxMessageBytes)
 }

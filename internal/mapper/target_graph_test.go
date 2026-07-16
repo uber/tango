@@ -90,10 +90,48 @@ func TestProtoToGetTargetGraphRequest(t *testing.T) {
 	}
 }
 
-func TestResultToGetTargetGraphResponse_EmptyResult(t *testing.T) {
+func TestResultToTargetGraph(t *testing.T) {
 	t.Parallel()
 
-	responses, err := ResultToGetTargetGraphResponse(context.Background(), targethasher.Result{}, 1<<20)
+	result := targethasher.Result{
+		TargetNames: []string{"//pkg:a", "//pkg:b"},
+		Targets: map[string]*targethasher.Target{
+			"//pkg:a": {Name: "//pkg:a", Hash: []byte{0xab}, RuleType: "go_library", Deps: []string{"//pkg:b"}, Tags: []string{"manual"}, Root: true},
+			"//pkg:b": {Name: "//pkg:b", Hash: []byte{0xcd}, RuleType: "go_test", External: true},
+		},
+	}
+
+	graph, err := ResultToTargetGraph(context.Background(), result)
+	require.NoError(t, err)
+	require.Len(t, graph.Targets, 2)
+
+	a := graph.Targets[0]
+	assert.Equal(t, "//pkg:a", a.Name)
+	assert.Equal(t, "ab", a.Hash)
+	assert.Equal(t, "go_library", a.RuleType)
+	assert.Equal(t, []string{"//pkg:b"}, a.Dependencies)
+	assert.Equal(t, []string{"manual"}, a.Tags)
+	assert.True(t, a.Root)
+	assert.False(t, a.External)
+
+	b := graph.Targets[1]
+	assert.Equal(t, "//pkg:b", b.Name)
+	assert.Equal(t, "cd", b.Hash)
+	assert.True(t, b.External)
+}
+
+func TestResultToTargetGraph_EmptyResult(t *testing.T) {
+	t.Parallel()
+
+	graph, err := ResultToTargetGraph(context.Background(), targethasher.Result{})
+	require.NoError(t, err)
+	assert.Empty(t, graph.Targets)
+}
+
+func TestTargetGraphToProto_EmptyGraph(t *testing.T) {
+	t.Parallel()
+
+	responses, err := TargetGraphToProto(context.Background(), entity.TargetGraph{}, 1<<20)
 	require.NoError(t, err)
 	require.Len(t, responses, 2)
 
