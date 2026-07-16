@@ -209,11 +209,11 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	responses, err := mapper.ResultToGetTargetGraphResponse(ctx, result, b.config.Service.MaxMessageBytes)
+	graph, err := mapper.ResultToTargetGraph(ctx, result)
 	if err != nil {
-		return nil, fmt.Errorf("convert target graph to response: %w", err)
+		return nil, fmt.Errorf("convert target graph: %w", err)
 	}
-	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, responses)
+	err = mapper.WriteTargetGraph(ctx, b.storage, treehashPath, graph, b.config.Service.MaxMessageBytes)
 	if err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
 	}
