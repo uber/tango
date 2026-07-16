@@ -1,27 +1,26 @@
 # observability/metrics
 
-Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins the metric path shape (`<scope>.<operation>.<metric>`). It owns emission mechanics only — each package owns the metric names, buckets, and instruments that describe its own behavior.
+Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins the metric path shape (`<scope>.<operation>.<metric>`) and enforces a uniform lifecycle convention: every instrumented operation emits a `start` counter and a `finish` duration histogram tagged with its outcome, so dashboards and alerts share a single query shape across all operations. It owns emission mechanics only — each domain package owns its own `Begin`/`Complete`, buckets, memoization, and any custom value histograms.
 
 ## What this package owns
 
 - op-as-subscope emission: an instrument bound as `(op, name)` lands under `<scope>.<op>.<name>`
 - a concrete, Tally-backed `Emitter` that binds instruments and copies tags before retaining them
 - explicit no-op construction for deployments that intentionally do not emit
-- a small set of shared vocabulary constants — operation names, tag keys, and result values — so every operation tags outcomes the same way
+- a small set of shared vocabulary constants — operation names, tag keys, result values, and `Outcome(err)` classification — so every operation tags outcomes the same way
 
-It does not own metric names or histogram buckets from callers, such as controller, Bazel, storage, graphrunner etc. Those live in the package that implements each operation.
+It does not own `Begin`/`Complete`, buckets, memoization, or custom value metrics. Those live in the domain package that implements each operation.
 
 ## Layout
 
 ```
 observability/metrics/
 ├── emitter.go       concrete Tally-backed emitter
-├── names.go         shared op / tag-key / result-value constants
+├── names.go         shared op / tag-key / result-value constants + Outcome()
 └── emitter_test.go
 
-controller/request_metrics.go   request lifecycle + buckets
-core/bazel/metrics.go           bazel query metrics + buckets
-graphrunner/metrics.go          graph runner metrics + buckets
+controller/metrics.go           request lifecycle: Begin/Complete, repo memoization, buckets
+graphrunner/metrics.go          graph runner lifecycle: Begin/Complete, buckets, target_counts
 ```
 
 
@@ -49,8 +48,8 @@ func New(scope tally.Scope) (*Emitter, error) {
 // Nop returns an explicitly disabled emitter backed by tally.NoopScope.
 func Nop() *Emitter { return &Emitter{scope: tally.NoopScope} }
 
-// Tagged returns a child that merges tags into every instrument it binds. It
-// copies tags and does not modify its parent.
+// Tagged returns a child emitter with additional fixed tags. It copies tags
+// and does not modify its parent.
 func (e *Emitter) Tagged(tags map[string]string) *Emitter {
     if len(tags) == 0 {
         return e
@@ -90,7 +89,34 @@ func (e *Emitter) opScope(op string) tally.Scope {
 }
 ```
 
-Only `New` returns an error, and only to surface a nil scope — a wiring mistake, not a runtime condition. The binding methods take constant `op`/`name` arguments and have no reachable failure path, so they return the instrument directly. Instruments are usually bound once during component construction and stored on a local metrics struct; a component whose metrics carry a per-request tag (see [Request metrics](#request-metrics)) builds its struct per request instead.
+Only `New` returns an error, and only to surface a nil scope — a wiring mistake, not a runtime condition. The binding methods take constant `op`/`name` arguments and have no reachable failure path, so they return the instrument directly.
+
+### Outcome
+
+The metrics package exports `Outcome` so every domain classifies errors the same way. The `start`/`finish` lifecycle convention and its memoization are domain-local — see [Domain-local metrics](#domain-local-metrics).
+
+```go
+// Outcome maps an error to a result tag value.
+func Outcome(err error) string {
+    switch {
+    case err == nil:
+        return ResultSuccess
+    case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+        return ResultCancelled
+    default:
+        return ResultFailure
+    }
+}
+```
+
+Every instrumented operation emits exactly two metrics under the `start`/`finish` convention:
+
+| Metric | Kind | Records |
+|---|---|---|
+| `<scope>.<op>.start` | counter | operations attempted |
+| `<scope>.<op>.finish` | histogram, `result`-tagged | operations completed — latency + outcome |
+
+Custom value metrics like `target_counts` are separate — see [Domain-local metrics](#domain-local-metrics).
 
 ## Conventions
 
@@ -119,14 +145,15 @@ const (
 
 // Result values for TagResult.
 const (
-    ResultSuccess = "success"
-    ResultFailure = "failure"
-    ResultHit     = "hit"
-    ResultMiss    = "miss"
+    ResultSuccess   = "success"
+    ResultFailure   = "failure"
+    ResultCancelled = "cancelled"
+    ResultHit       = "hit"
+    ResultMiss      = "miss"
 )
 ```
 
-An outcome is recorded as one latency histogram tagged `result=success|failure` — not a pair of `succeeded`/`failed` counters. A histogram already carries a per-bucket count, so the success and failure *rates* are derived from it (sum the buckets, group by `result`), and a separate outcome counter would be redundant. See [Request metrics](#request-metrics).
+The `result` tag is the sole outcome signal — there are no separate `succeeded`/`failed` counters. Success, failure, and cancelled counts are derived from the `finish` histogram by summing its buckets grouped by `result`.
 
 ## Dependency direction
 
@@ -140,121 +167,157 @@ infrastructure       -> local metrics      -> observability/metrics -> tally
 
 ## Domain-local metrics
 
-A domain component defines a small metrics struct in its own vocabulary. Instruments whose tags are fixed for the component's lifetime are bound once, at construction; an instrument whose tags depend on the outcome (the `result`-tagged latency histogram) is bound at record time — tally caches it by name+tags, and the `result` value is bounded (`success`/`failure`), so this stays low-cardinality. Buckets are a default owned by the component, overrideable. For example,
+Each domain implements `Begin`/`Complete` on its own metrics struct, which pre-builds result-tagged emitters at construction. Memoization is domain-local — each struct owns its cached emitters and their lifecycle.
 
 ```go
-package bazel
+package graphrunner
 
-const opQuery = "query"
-
-// default buckets, chosen for bazel's own ranges
+// Buckets live at the callsite, visible without walking an object tree.
 var (
-    defaultQueryDurationBuckets = tally.MustMakeExponentialDurationBuckets(100*time.Millisecond, 3, 8) // 100ms .. ~3.6m
-    defaultQueryTargetBuckets   = tally.MustMakeExponentialValueBuckets(1, 10, 6)                       // 1 .. 100k
+    graphRunnerFinishBuckets = tally.MustMakeExponentialDurationBuckets(100*time.Millisecond, 2, 20) // 100ms .. ~1.7h
+    targetCountBuckets       = tally.MustMakeExponentialValueBuckets(1, 10, 7)                       // 1 .. 1M
 )
 
-type queryMetrics struct {
-    emitter     *metrics.Emitter
-    buckets     tally.DurationBuckets
+type graphRunnerOp struct {
+    metrics *graphRunnerMetrics
+    start   time.Time
+}
+
+type graphRunnerMetrics struct {
+    byResult    map[string]*metrics.Emitter
     targetCount tally.Histogram
 }
 
-func newQueryMetrics(e *metrics.Emitter, dur tally.DurationBuckets, tgt tally.ValueBuckets) *queryMetrics {
-    if len(dur) == 0 {
-        dur = defaultQueryDurationBuckets
-    }
-    if len(tgt) == 0 {
-        tgt = defaultQueryTargetBuckets
-    }
-    return &queryMetrics{
-        emitter:     e,
-        buckets:     dur,
-        targetCount: e.ValueHistogram(opQuery, "target_count", tgt),
+func newGraphRunnerMetrics(e *metrics.Emitter) *graphRunnerMetrics {
+    // Memoize result-tagged emitters once at construction — Begin/Complete
+    // reuse these instead of calling Tagged per request.
+    return &graphRunnerMetrics{
+        byResult: map[string]*metrics.Emitter{
+            metrics.ResultSuccess:   e.Tagged(map[string]string{metrics.TagResult: metrics.ResultSuccess}),
+            metrics.ResultFailure:   e.Tagged(map[string]string{metrics.TagResult: metrics.ResultFailure}),
+            metrics.ResultCancelled: e.Tagged(map[string]string{metrics.TagResult: metrics.ResultCancelled}),
+        },
+        targetCount: e.ValueHistogram(metrics.OpGraphRunner, "target_counts", targetCountBuckets),
     }
 }
 
-// record emits query latency tagged with the outcome (success/failure counts
-// are derived from this histogram) and the target count on success.
-func (m *queryMetrics) record(start time.Time, targets int, err error) {
-    result := metrics.ResultSuccess
-    if err != nil {
-        result = metrics.ResultFailure
-    }
-    m.emitter.Tagged(map[string]string{metrics.TagResult: result}).
-        DurationHistogram(opQuery, "duration", m.buckets).
-        RecordDuration(time.Since(start))
-    if err == nil {
-        m.targetCount.RecordValue(float64(targets))
+func (m *graphRunnerMetrics) Begin() *graphRunnerOp {
+    m.byResult[metrics.ResultSuccess].Counter(metrics.OpGraphRunner, "start").Inc(1)
+    return &graphRunnerOp{metrics: m, start: time.Now()}
+}
+
+func (o *graphRunnerOp) Complete(err error) {
+    o.metrics.byResult[metrics.Outcome(err)].
+        DurationHistogram(metrics.OpGraphRunner, "finish", graphRunnerFinishBuckets).
+        RecordDuration(time.Since(o.start))
+}
+```
+
+The struct is built once in the constructor and stored on the runner:
+
+```go
+type nativeGraphRunner struct {
+    metrics *graphRunnerMetrics
+    // ... bazel, git, config ...
+}
+
+func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
+    return &nativeGraphRunner{
+        metrics: newGraphRunnerMetrics(p.Emitter),
+        // ...
     }
 }
 ```
 
-The bazel client's exported `Params` carries the `Emitter` and optional bucket overrides and passes them to `newQueryMetrics`; unset buckets fall back to the defaults above. Keeping this here means future changes to `bazel` metrics stay beside `bazel` behavior instead of in a cross-package inventory.
+At the callsite:
+
+```go
+func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace) (_ targethasher.Result, retErr error) {
+    op := g.metrics.Begin()
+    defer func() { op.Complete(retErr) }()
+
+    // ... bazel query, git file hashes, target hashing ...
+
+    g.metrics.targetCount.RecordValue(float64(len(res.Targets)))
+    return res, nil
+}
+```
 
 ## Request metrics
 
-Request outcome policy lives at the controller boundary — the pattern is controller-local, not part of the emitter package. A request emits two things: a `started` counter when it begins, and a single latency histogram tagged with the outcome when it completes. The success/failure *count* is derived from the histogram (sum its buckets, group by `result`), so there is no separate outcome counter. Outcomes are broken down by `repo`, so `requestMetrics` is built per request from a repo-tagged emitter; tally caches by name+tags, so each `(op, repo)` series is bound once and reused. Duration buckets follow the same default-and-override rule as domain-local metrics.
+Request lifecycle follows the same `start`/`finish` convention, with the controller owning its own `Begin`/`Complete`. Outcomes are broken down by `repo`, so the struct memoizes result-tagged emitters per repo — `Tagged` is called once per distinct `(repo, result)` pair, not per request.
 
 ```go
-// default request-latency buckets
-var defaultRequestDurationBuckets = tally.MustMakeExponentialDurationBuckets(time.Millisecond, 3, 10) // 1ms .. ~59s
+package controller
+
+// Buckets live at the callsite. Request-level latency is minutes-scale.
+var getChangedTargetsFinishBuckets = tally.MustMakeExponentialDurationBuckets(
+    time.Second, 3, 10, // 1s .. ~5h
+)
+
+type requestOp struct {
+    byResult map[string]*metrics.Emitter
+    op       string
+    buckets  tally.DurationBuckets
+    start    time.Time
+}
 
 type requestMetrics struct {
-    emitter *metrics.Emitter
-    op      string
-    buckets tally.DurationBuckets
-    started tally.Counter
+    base   *metrics.Emitter
+    cached map[string]map[string]*metrics.Emitter // "repo:value" -> result emitters
 }
 
-func newRequestMetrics(e *metrics.Emitter, op string, buckets tally.DurationBuckets) *requestMetrics {
-    if len(buckets) == 0 {
-        buckets = defaultRequestDurationBuckets
+func newRequestMetrics(e *metrics.Emitter) *requestMetrics {
+    return &requestMetrics{base: e, cached: make(map[string]map[string]*metrics.Emitter)}
+}
+
+func (m *requestMetrics) resultEmittersFor(repo string) map[string]*metrics.Emitter {
+    // Memoize per repo — Tagged is called once per distinct (repo, result)
+    // pair, not per request.
+    if re, ok := m.cached[repo]; ok {
+        return re
     }
-    return &requestMetrics{emitter: e, op: op, buckets: buckets, started: e.Counter(op, "started")}
-}
-
-// requestAttempt is one in-progress request.
-type requestAttempt struct {
-    owner *requestMetrics
-    start time.Time
-}
-
-// Begin records that the request started and returns the attempt to Complete.
-func (m *requestMetrics) Begin() *requestAttempt {
-    m.started.Inc(1)
-    return &requestAttempt{owner: m, start: time.Now()}
-}
-
-// Complete records latency into a single histogram tagged with the outcome;
-// success/failure counts are derived from it.
-func (a *requestAttempt) Complete(err error) {
-    result := metrics.ResultSuccess
-    if err != nil {
-        result = metrics.ResultFailure
+    tagged := m.base.Tagged(map[string]string{metrics.TagRepo: repo})
+    re := map[string]*metrics.Emitter{
+        metrics.ResultSuccess:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultSuccess}),
+        metrics.ResultFailure:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultFailure}),
+        metrics.ResultCancelled: tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultCancelled}),
     }
-    a.owner.emitter.Tagged(map[string]string{metrics.TagResult: result}).
-        DurationHistogram(a.owner.op, "latency", a.owner.buckets).
-        RecordDuration(time.Since(a.start))
+    m.cached[repo] = re
+    return re
+}
+
+func (m *requestMetrics) Begin(repo, op string, buckets tally.DurationBuckets) *requestOp {
+    re := m.resultEmittersFor(repo)
+    re[metrics.ResultSuccess].Counter(op, "start").Inc(1)
+    return &requestOp{byResult: re, op: op, buckets: buckets, start: time.Now()}
+}
+
+func (o *requestOp) Complete(err error) {
+    o.byResult[metrics.Outcome(err)].
+        DurationHistogram(o.op, "finish", o.buckets).
+        RecordDuration(time.Since(o.start))
 }
 ```
 
-The handler begins the attempt off a repo-tagged emitter and completes it in a defer:
+The controller builds `requestMetrics` once at construction:
 
 ```go
+type controller struct {
+    metrics *requestMetrics
+    // ...
+}
+
 func newController(p Params) *controller {
     return &controller{
-        emitter:                p.Emitter,
-        requestDurationBuckets: p.RequestDurationBuckets,
+        metrics: newRequestMetrics(p.Emitter),
     }
 }
 
 func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
-    // repo is bounded (allow-listed) and normalized to a stable key.
-    e := c.emitter.Tagged(map[string]string{
-        metrics.TagRepo: common.ToShortRemote(req.GetFirstRevision().GetRemote()),
-    })
-    attempt := newRequestMetrics(e, metrics.OpGetChangedTargets, c.requestDurationBuckets).Begin()
-    defer func() { attempt.Complete(retErr) }()
+    repo := common.ToShortRemote(req.GetFirstRevision().GetRemote())
+    op := c.metrics.Begin(repo, metrics.OpGetChangedTargets, getChangedTargetsFinishBuckets)
+    defer func() { op.Complete(retErr) }()
 
     ctx, cancel := c.linkRequestCtx(stream.Context())
     defer cancel()
@@ -263,15 +326,49 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
 }
 ```
 
+Sub-operations use the same struct with their own buckets:
+
+```go
+// Diffing is seconds-scale — different range from the enclosing operation.
+var compareFinishBuckets = tally.MustMakeExponentialDurationBuckets(
+    10*time.Millisecond, 2, 12, // 10ms .. ~40s
+)
+
+func (c *controller) compareTargetGraphs(repo string, ...) (retErr error) {
+    op := c.metrics.Begin(repo, metrics.OpCompareTargetGraphs, compareFinishBuckets)
+    defer func() { op.Complete(retErr) }()
+    // ...
+}
+```
+
+### Querying
+
+```
+# operation rate
+fetch service:tango name:controller.get_changed_targets.start
+
+# success / failure / cancelled counts
+fetch service:tango name:controller.get_changed_targets.finish | sum by (result)
+
+# P95 latency of successful requests
+fetch service:tango name:controller.get_changed_targets.finish result:success | histogram_percentile(95)
+
+# scoped to a repo
+fetch service:tango name:controller.get_changed_targets.finish result:success repo:my-monorepo | histogram_percentile(95)
+
+# custom value metric — target counts distribution
+fetch service:tango name:controller.get_changed_targets.target_counts | histogram_percentile(95)
+```
+
 ## Request-specific tags
 
 Each distinct tag value is a new series, so tag values must be bounded — never request IDs, commit hashes, paths, or raw repo URLs. `repo` is safe only with an explicit cardinality budget and a normalized, allow-listed value; the handler above applies it that way (`ToShortRemote`), and tally's name+tags caching keeps each `(op, repo)` series bound once despite the per-request derivation.
 
 ## Buckets
 
-Buckets must be explicit. There is no universal default spanning RPCs, storage calls, Bazel queries, and multi-hour builds. The package that owns an operation selects its buckets from the expected distribution and its dashboard needs; a shared set is introduced only when operations intentionally share a semantic range.
+Buckets are declared at each callsite and passed to `Begin` (for duration) or directly to `ValueHistogram` (for value metrics). There is no universal default — even within the same scope, buckets can be drastically different: the enclosing `get_target_graph` operation can last minutes, while its diffing sub-operation is merely seconds. A shared set is introduced only when operations intentionally share a semantic range.
 
-The owning package defines a sensible default and keeps it local. Buckets are never promoted into `observability/metrics`
+Buckets are explicitly visible at the callsite: one click in the IDE to see what they are, without walking deeper into an object tree. Buckets are never promoted into `observability/metrics`.
 
 ## No-op behavior
 
