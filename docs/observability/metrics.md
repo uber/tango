@@ -5,7 +5,7 @@ Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins t
 ## What this package owns
 
 - op-as-subscope emission: an instrument bound as `(op, name)` lands under `<scope>.<op>.<name>`
-- a concrete, Tally-backed `Emitter` that binds instruments and copies tags before retaining them
+- a concrete, Tally-backed `Emitter` that binds instruments and delegates tagging to tally
 - explicit no-op construction for deployments that intentionally do not emit
 - a small set of shared vocabulary constants
 
@@ -30,12 +30,9 @@ orchestrator/metrics.go         orchestrator lifecycle: repo memoization, bucket
 package metrics
 
 type Emitter struct {
-    scope    tally.Scope
-    baseTags map[string]string
+    scope tally.Scope
 }
 
-// New creates an emitter for scope. A nil scope is a configuration error;
-// callers that intentionally emit nothing use Nop instead.
 func New(scope tally.Scope) (*Emitter, error) {
     if scope == nil {
         return nil, errors.New("metrics: nil scope")
@@ -43,51 +40,27 @@ func New(scope tally.Scope) (*Emitter, error) {
     return &Emitter{scope: scope}, nil
 }
 
-// Nop returns an explicitly disabled emitter backed by tally.NoopScope.
 func Nop() *Emitter { return &Emitter{scope: tally.NoopScope} }
 
-// Tagged returns a child emitter with additional fixed tags. It copies tags
-// and does not modify its parent.
 func (e *Emitter) Tagged(tags map[string]string) *Emitter {
     if len(tags) == 0 {
         return e
     }
-    merged := make(map[string]string, len(e.baseTags)+len(tags))
-    for k, v := range e.baseTags {
-        merged[k] = v
-    }
-    for k, v := range tags {
-        merged[k] = v
-    }
-    return &Emitter{scope: e.scope, baseTags: merged}
+    return &Emitter{scope: e.scope.Tagged(tags)}
 }
 
-// Counter binds a counter under <scope>.<op>.<name>.
 func (e *Emitter) Counter(op, name string) tally.Counter {
-    return e.opScope(op).Counter(name)
+    return e.scope.SubScope(op).Counter(name)
 }
 
-// DurationHistogram binds a duration histogram using owner-selected buckets.
 func (e *Emitter) DurationHistogram(op, name string, b tally.DurationBuckets) tally.Histogram {
-    return e.opScope(op).Histogram(name, b)
+    return e.scope.SubScope(op).Histogram(name, b)
 }
 
-// ValueHistogram binds a value histogram using owner-selected buckets.
 func (e *Emitter) ValueHistogram(op, name string, b tally.ValueBuckets) tally.Histogram {
-    return e.opScope(op).Histogram(name, b)
-}
-
-// opScope applies the op subscope and any accumulated tags.
-func (e *Emitter) opScope(op string) tally.Scope {
-    s := e.scope.SubScope(op)
-    if len(e.baseTags) > 0 {
-        s = s.Tagged(e.baseTags)
-    }
-    return s
+    return e.scope.SubScope(op).Histogram(name, b)
 }
 ```
-
-Only `New` returns an error, and only to surface a nil scope — a wiring mistake, not a runtime condition. The binding methods take constant `op`/`name` arguments and have no reachable failure path, so they return the instrument directly.
 
 
 Every instrumented operation emits exactly two metrics under the `start`/`finish` convention:
