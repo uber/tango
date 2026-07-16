@@ -99,7 +99,7 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 
 // GetTargetGraph is used to compute the target graph locally.
 // It leases a workspace, checks out the base revision, applies the change requests, and computes the target graph.
-func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (_ storage.GraphReader, retErr error) {
+func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (_ *mapper.GraphChunkReader, retErr error) {
 	scope := b.scope.SubScope("get_target_graph")
 	scope.Counter("calls").Inc(1)
 	defer func() {
@@ -172,7 +172,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
 	if !req.BypassCache {
-		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
+		graphReader, err := mapper.NewGraphChunkReader(ctx, b.storage, treehashPath)
 		if err == nil {
 			logger.Infow("GetTargetGraph: Cache hit on treehash", zap.String("treehash", treehash))
 			return graphReader, nil
@@ -223,7 +223,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("store treehash mapping at %s: %w", treehashCachePath, err)
 	}
-	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
+	graphReader, err := mapper.NewGraphChunkReader(ctx, b.storage, treehashPath)
 	if err != nil {
 		return nil, fmt.Errorf("create graph reader at %s: %w", treehashPath, err)
 	}

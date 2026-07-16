@@ -79,13 +79,11 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 	defer reader.Close()
-	graph, rerr := reader.Read()
+	chunk, rerr := reader.Read()
 	require.NoError(t, rerr)
-	require.NotNil(t, graph)
-	assert.NotNil(t, graph.GetTargets())
-	graph, rerr = reader.Read()
+	assert.NotNil(t, chunk.Targets)
+	_, rerr = reader.Read()
 	assert.Equal(t, io.EOF, rerr)
-	assert.Nil(t, graph)
 }
 
 func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {

@@ -67,7 +67,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	sendStart := time.Now()
 	outputConfig := request.GetOutputConfig()
 	for {
-		graphStreamChunk, err := graphReader.Read()
+		chunk, err := graphReader.Read()
 		if err == io.EOF {
 			sendDuration := time.Since(sendStart)
 			totalDuration := time.Since(start)
@@ -82,7 +82,8 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 		if err != nil {
 			return common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
 		}
-		toSend := applyOptimizedTargetsOutputConfigToChunk(graphStreamChunk, outputConfig)
+		protoResp := mapper.GraphChunkToProto(&chunk)
+		toSend := applyOptimizedTargetsOutputConfigToChunk(protoResp, outputConfig)
 		err = stream.Send(toSend)
 		if err != nil {
 			return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("send graph: %w", err))
@@ -96,7 +97,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 // entries store the full payload and stripping happens at send time, so
 // letting an orchestrator see it could poison the shared cache with
 // stripped graphs.
-func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequest) (*mapper.GraphChunkReader, error) {
 	start := time.Now()
 	logger := c.logger.With(
 		zap.Any("build_description", req.Build),
@@ -123,7 +124,7 @@ func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequ
 			treehashPath := cachekey.GetGraphByTreeHash(req.Build.Remote, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
-			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
+			graphReader, err := mapper.NewGraphChunkReader(ctx, c.storage, treehashPath)
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())

@@ -262,7 +262,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 			}
 			defer graphReader.Close()
 
-			// Read all chunks from the stream
+			// Read all chunks from the stream and convert to proto
 			var chunks []*pb.GetTargetGraphResponse
 			for {
 				chunk, err := graphReader.Read()
@@ -274,7 +274,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 					results <- graphResult{order: idx, err: err}
 					return
 				}
-				chunks = append(chunks, chunk)
+				chunks = append(chunks, mapper.GraphChunkToProto(&chunk))
 			}
 		}(i)
 	}

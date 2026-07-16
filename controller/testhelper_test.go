@@ -15,9 +15,19 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"testing"
 
+	gogio "github.com/gogo/protobuf/io"
+	"github.com/stretchr/testify/require"
 	"github.com/uber-go/tally"
+	"github.com/uber/tango/core/storage"
+	storagemock "github.com/uber/tango/core/storage/storagemock"
+	"github.com/uber/tango/internal/mapper"
+	pb "github.com/uber/tango/tangopb"
+	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
 
@@ -29,4 +39,23 @@ func newTestController(logger *zap.Logger) *controller {
 		totalDurationBuckets: _totalDurationBuckets,
 		appCtx:               context.Background(),
 	}
+}
+
+// newGraphChunkReaderFromProto creates a *mapper.GraphChunkReader backed by
+// in-memory proto responses, for use in controller tests that mock the
+// orchestrator return value.
+func newGraphChunkReaderFromProto(t *testing.T, ctrl *gomock.Controller, responses ...*pb.GetTargetGraphResponse) *mapper.GraphChunkReader {
+	t.Helper()
+	var buf bytes.Buffer
+	w := gogio.NewDelimitedWriter(&buf)
+	for _, r := range responses {
+		require.NoError(t, w.WriteMsg(r))
+	}
+	st := storagemock.NewMockStorage(ctrl)
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
+		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
+	}, nil)
+	reader, err := mapper.NewGraphChunkReader(context.Background(), st, "test-key")
+	require.NoError(t, err)
+	return reader
 }

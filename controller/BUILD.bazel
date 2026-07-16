@@ -45,6 +45,7 @@ go_test(
         "//core/storage",
         "//core/storage/storagemock",
         "//entity",
+        "//internal/mapper",
         "//orchestrator/orchestratormock",
         "//tangopb",
         "//tangopb/tangopbmock",

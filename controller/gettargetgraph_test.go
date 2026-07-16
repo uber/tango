@@ -191,17 +191,12 @@ func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	store := storagemock.NewMockStorage(ctrl)
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("x"))
 	orchestrator := orchestratormock.NewMockOrchestrator(ctrl)
-	// Provide a fake GraphReader that yields one message then EOF
-	graphReader := storagemock.NewMockGraphReader(ctrl)
-	graphReader.EXPECT().Read().DoAndReturn(func() (*pb.GetTargetGraphResponse, error) {
-		return &pb.GetTargetGraphResponse{
+	reader := newGraphChunkReaderFromProto(t, ctrl,
+		&pb.GetTargetGraphResponse{
 			Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
-		}, nil
-	}).Times(1)
-	// Controller may call Read again to observe EOF
-	graphReader.EXPECT().Read().Return(nil, io.EOF).Times(1)
-	graphReader.EXPECT().Close().Return(nil)
-	orchestrator.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(graphReader, nil)
+		},
+	)
+	orchestrator.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(reader, nil)
 	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      store,
@@ -314,13 +309,12 @@ func TestGetTargetGraph_GraphNotFound_FallsThrough(t *testing.T) {
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("graphs/abc")),
 	)
 	orch := orchestratormock.NewMockOrchestrator(ctrl)
-	graphReader := storagemock.NewMockGraphReader(ctrl)
-	graphReader.EXPECT().Read().Return(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
-	}, nil).Times(1)
-	graphReader.EXPECT().Read().Return(nil, io.EOF).Times(1)
-	graphReader.EXPECT().Close().Return(nil)
-	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(graphReader, nil)
+	reader := newGraphChunkReaderFromProto(t, ctrl,
+		&pb.GetTargetGraphResponse{
+			Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
+		},
+	)
+	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(reader, nil)
 	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      store,

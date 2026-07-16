@@ -13,8 +13,8 @@ import (
 	context "context"
 	reflect "reflect"
 
-	storage "github.com/uber/tango/core/storage"
 	entity "github.com/uber/tango/entity"
+	mapper "github.com/uber/tango/internal/mapper"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -43,10 +43,10 @@ func (m *MockOrchestrator) EXPECT() *MockOrchestratorMockRecorder {
 }
 
 // GetTargetGraph mocks base method.
-func (m *MockOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+func (m *MockOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (*mapper.GraphChunkReader, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetTargetGraph", ctx, req)
-	ret0, _ := ret[0].(storage.GraphReader)
+	ret0, _ := ret[0].(*mapper.GraphChunkReader)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

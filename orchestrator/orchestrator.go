@@ -17,12 +17,11 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/uber/tango/core/storage"
-
 	"github.com/uber/tango/entity"
+	"github.com/uber/tango/internal/mapper"
 )
 
 // Orchestrator defines high-level execution interface that "does everything"
 type Orchestrator interface {
-	GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (storage.GraphReader, error)
+	GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (*mapper.GraphChunkReader, error)
 }

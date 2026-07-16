@@ -31,6 +31,7 @@ import (
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	"github.com/uber/tango/entity"
+	"github.com/uber/tango/internal/mapper"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
@@ -1414,21 +1415,6 @@ func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) 
 	assert.True(t, gotDeleted, "DELETED entry at distance 0 must survive max_distance=1")
 }
 
-func newMockGraphReader(ctrl *gomock.Controller, chunks ...*pb.GetTargetGraphResponse) *storagemock.MockGraphReader {
-	r := storagemock.NewMockGraphReader(ctrl)
-	idx := 0
-	r.EXPECT().Read().DoAndReturn(func() (*pb.GetTargetGraphResponse, error) {
-		if idx >= len(chunks) {
-			return nil, io.EOF
-		}
-		c := chunks[idx]
-		idx++
-		return c, nil
-	}).AnyTimes()
-	r.EXPECT().Close().Return(nil).AnyTimes()
-	return r
-}
-
 func changedTargetsRequest() *pb.GetChangedTargetsRequest {
 	return &pb.GetChangedTargetsRequest{
 		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
@@ -1546,8 +1532,8 @@ func TestFetchTargetGraphs(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(_ context.Context, _ entity.GetTargetGraphRequest) (storage.GraphReader, error) {
-				return newMockGraphReader(ctrl, chunk), nil
+			func(_ context.Context, _ entity.GetTargetGraphRequest) (*mapper.GraphChunkReader, error) {
+				return newGraphChunkReaderFromProto(t, ctrl, chunk), nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
@@ -1564,11 +1550,11 @@ func TestFetchTargetGraphs(t *testing.T) {
 		injected := errors.New("orchestrator boom")
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(_ context.Context, p entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+			func(_ context.Context, p entity.GetTargetGraphRequest) (*mapper.GraphChunkReader, error) {
 				if p.Build.BaseSha == "sha1" {
 					return nil, injected
 				}
-				return newMockGraphReader(ctrl, chunk), nil
+				return newGraphChunkReaderFromProto(t, ctrl, chunk), nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
@@ -1585,8 +1571,8 @@ func TestFetchTargetGraphs(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(_ context.Context, _ entity.GetTargetGraphRequest) (storage.GraphReader, error) {
-				return newMockGraphReader(ctrl), nil
+			func(_ context.Context, _ entity.GetTargetGraphRequest) (*mapper.GraphChunkReader, error) {
+				return newGraphChunkReaderFromProto(t, ctrl), nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
@@ -1600,7 +1586,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(_ context.Context, _ entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+			func(_ context.Context, _ entity.GetTargetGraphRequest) (*mapper.GraphChunkReader, error) {
 				panic("boom in orchestrator")
 			}).Times(2)
 
