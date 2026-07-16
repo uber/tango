@@ -112,15 +112,16 @@ func run() error {
 		totalDuration += elapsed
 		fmt.Printf("run %d: targethasher: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(targethasherResult.TargetNames))
 		start = time.Now()
-		response, err := mapper.ResultToGetTargetGraphResponse(
-			ctx, targethasherResult,
-			4_250_000,
-		)
+		graph, err := mapper.ResultToTargetGraph(ctx, targethasherResult)
 		if err != nil {
-			return fmt.Errorf("run %d: converting to GetTargetGraphResponse: %w", i+1, err)
+			return fmt.Errorf("run %d: converting to target graph: %w", i+1, err)
+		}
+		response, err := mapper.TargetGraphToProto(ctx, graph, 4_250_000)
+		if err != nil {
+			return fmt.Errorf("run %d: converting to proto: %w", i+1, err)
 		}
 		elapsed = time.Since(start)
-		fmt.Printf("run %d: ResultToGetTargetGraphResponse: %v  (%d responses)\n", i+1, elapsed.Round(time.Millisecond), len(response))
+		fmt.Printf("run %d: TargetGraphToProto: %v  (%d responses)\n", i+1, elapsed.Round(time.Millisecond), len(response))
 		m := jsonpb.Marshaler{Indent: "  "}
 		for _, r := range response {
 			if err := m.Marshal(os.Stdout, r); err != nil {
