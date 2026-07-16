@@ -13,6 +13,7 @@ go_library(
         "//config",
         "//core/bazel",
         "//core/common",
+        "//core/errors",
         "//core/git",
         "//core/repomanager",
         "//core/storage",
@@ -27,13 +28,18 @@ go_library(
 
 go_test(
     name = "orchestrator_test",
-    srcs = ["native_orchestrator_test.go"],
+    srcs = [
+        "errors_test.go",
+        "native_orchestrator_test.go",
+    ],
     data = glob(["testdata/**"]),
     embed = [":orchestrator"],
     deps = [
         "//config",
+        "//core/errors",
         "//core/git",
         "//core/git/gitmock",
+        "//core/repomanager",
         "//core/repomanager/mock",
         "//core/storage",
         "//core/storage/storagemock",

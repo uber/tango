@@ -16,6 +16,7 @@ package repomanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -212,6 +213,8 @@ func TestLease_CtxCanceled(t *testing.T) {
 	cancel()
 	_, err = rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrPoolTimeout), "expected ErrPoolTimeout sentinel")
+	assert.True(t, errors.Is(err, context.Canceled), "expected underlying context.Canceled")
 
 	require.NoError(t, ws1.Release())
 }

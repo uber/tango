@@ -127,7 +127,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	ws, err := b.repoManager.Lease(ctx, build)
 	if err != nil {
-		return nil, fmt.Errorf("lease workspace: %w", err)
+		return nil, classifyLeaseError(err)
 	}
 	defer func() {
 		err := ws.Release()

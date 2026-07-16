@@ -16,6 +16,7 @@ package repomanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,13 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"go.uber.org/zap"
+)
+
+// Sentinel errors for classification by upper layers.
+var (
+	// ErrPoolTimeout indicates that all worker slots were leased and the
+	// caller's context was cancelled while waiting for one to become available.
+	ErrPoolTimeout = errors.New("worker pool timeout")
 )
 
 // RepoManager manages repository workspaces with a pool of workers per repo.
@@ -145,7 +153,7 @@ func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (
 	select {
 	case slot = <-pool.avail:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, fmt.Errorf("%w: pool for repo %s: %w", ErrPoolTimeout, repo, ctx.Err())
 	}
 
 	// Lazily create the worker clone on first use
