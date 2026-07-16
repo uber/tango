@@ -28,22 +28,19 @@ func TestClassifyLeaseError(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		err          error
-		wantCode     tangoerrors.ErrorCode
-		wantContains string
+		name     string
+		err      error
+		wantCode tangoerrors.ErrorCode
 	}{
 		{
-			name:         "pool timeout is infra retryable",
-			err:          fmt.Errorf("%w: pool for repo org/repo: context deadline exceeded", repomanager.ErrPoolTimeout),
-			wantCode:     tangoerrors.ErrorInfraRetryable,
-			wantContains: "lease workspace",
+			name:     "pool timeout is infra retryable",
+			err:      fmt.Errorf("%w: pool for repo org/repo: context deadline exceeded", repomanager.ErrPoolTimeout),
+			wantCode: tangoerrors.ErrorInfraRetryable,
 		},
 		{
-			name:         "generic error is infra",
-			err:          fmt.Errorf("clone origin: connection refused"),
-			wantCode:     tangoerrors.ErrorInfra,
-			wantContains: "lease workspace",
+			name:     "generic error is infra",
+			err:      fmt.Errorf("clone origin: connection refused"),
+			wantCode: tangoerrors.ErrorInfra,
 		},
 	}
 
@@ -54,7 +51,7 @@ func TestClassifyLeaseError(t *testing.T) {
 			got := classifyLeaseError(tt.err)
 			require.Error(t, got)
 			assert.Equal(t, tt.wantCode, tangoerrors.GetErrorCode(got))
-			assert.Contains(t, got.Error(), tt.wantContains)
+			assert.ErrorIs(t, got, tt.err)
 		})
 	}
 }
