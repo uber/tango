@@ -58,6 +58,36 @@ func TestNewError_RewrappingOverwritesCode(t *testing.T) {
 	assert.Equal(t, ErrorInfra, te.errorCode)
 }
 
+func TestIsClientCancellation(t *testing.T) {
+	t.Run("context cancelled with ErrClientCancelled cause", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(ErrClientCancelled)
+		assert.True(t, IsClientCancellation(ctx))
+	})
+
+	t.Run("context cancelled without cause", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		assert.False(t, IsClientCancellation(ctx))
+	})
+
+	t.Run("context cancelled with different cause", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(stderrs.New("something else"))
+		assert.False(t, IsClientCancellation(ctx))
+	})
+
+	t.Run("context not cancelled", func(t *testing.T) {
+		assert.False(t, IsClientCancellation(context.Background()))
+	})
+
+	t.Run("wrapped ErrClientCancelled cause", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(fmt.Errorf("transport: %w", ErrClientCancelled))
+		assert.True(t, IsClientCancellation(ctx))
+	})
+}
+
 func TestGetErrorCode(t *testing.T) {
 	tests := []struct {
 		name string

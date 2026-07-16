@@ -7,6 +7,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// ErrClientCancelled is the sentinel cause for client-initiated cancellations.
+// Pass it to context.WithCancelCause so downstream code can distinguish a client
+// disconnect from other cancellation sources via IsClientCancellation.
+var ErrClientCancelled = stderrs.New("client cancelled")
+
 // ErrorCode mirrors the proto ErrorCode enum and classifies a TangoError as
 // a user error or an infra error (retryable or not).
 type ErrorCode int
@@ -76,6 +81,13 @@ func newError(err error, code ErrorCode) error {
 		err:       err,
 		errorCode: code,
 	}
+}
+
+// IsClientCancellation reports whether ctx was cancelled with ErrClientCancelled
+// as its cause. Use this to distinguish client-initiated disconnects from
+// server-side or timeout cancellations.
+func IsClientCancellation(ctx context.Context) bool {
+	return stderrs.Is(context.Cause(ctx), ErrClientCancelled)
 }
 
 // GetErrorCode extracts the ErrorCode from err.
