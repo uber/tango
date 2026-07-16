@@ -28,6 +28,7 @@ import (
 	"github.com/uber/tango/internal/cachekey"
 	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/internal/mapper/idmapper"
+	"github.com/uber/tango/internal/streaming"
 	"github.com/uber/tango/internal/targetdiff"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
@@ -447,18 +448,18 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 
 	// Emit changes in chunks to stay within gRPC per-message size limits, followed by chunked metadata.
 	var results []*pb.GetChangedTargetsResponse
-	changedChunks, err := mapper.BySize(changed, c.maxMessageBytes)
+	changedGroups, err := streaming.SplitBySize(changed, c.maxMessageBytes)
 	if err != nil {
 		return nil, err
 	}
-	for _, chunk := range changedChunks {
+	for _, group := range changedGroups {
 		results = append(results, &pb.GetChangedTargetsResponse{
 			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-				ChangedTargets: &pb.ChangedTargets{ChangedTargets: chunk},
+				ChangedTargets: &pb.ChangedTargets{ChangedTargets: group},
 			},
 		})
 	}
-	metaChunks, err := mapper.ChunkMetadata(
+	metaGroups, err := streaming.SplitMetadata(
 		mappers.target.Invert(),
 		mappers.ruleType.Invert(),
 		mappers.tag.Invert(),
@@ -469,10 +470,10 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 	if err != nil {
 		return nil, err
 	}
-	for _, meta := range metaChunks {
+	for _, meta := range metaGroups {
 		results = append(results, &pb.GetChangedTargetsResponse{
 			Item: &pb.GetChangedTargetsResponse_Metadata{
-				Metadata: meta,
+				Metadata: mapper.EntityMetadataToProto(meta),
 			},
 		})
 	}

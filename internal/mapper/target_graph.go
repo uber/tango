@@ -199,7 +199,7 @@ func GraphChunkToProto(chunk *entity.GraphChunk) *tangopb.GetTargetGraphResponse
 	if chunk.Metadata != nil {
 		return &tangopb.GetTargetGraphResponse{
 			Item: &tangopb.GetTargetGraphResponse_Metadata{
-				Metadata: entityMetadataToProto(chunk.Metadata),
+				Metadata: EntityMetadataToProto(chunk.Metadata),
 			},
 		}
 	}
@@ -257,7 +257,7 @@ func protoTargetToIDTarget(t *tangopb.OptimizedTarget) entity.IDTarget {
 	}
 }
 
-func entityMetadataToProto(m *entity.GraphMetadata) *tangopb.Metadata {
+func EntityMetadataToProto(m *entity.GraphMetadata) *tangopb.Metadata {
 	return &tangopb.Metadata{
 		TargetIdMapping:             m.TargetIDMapping,
 		RuleTypeMapping:             m.RuleTypeMapping,
