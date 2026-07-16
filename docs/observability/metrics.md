@@ -1,26 +1,24 @@
 # observability/metrics
 
-Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins the metric path shape (`<scope>.<operation>.<metric>`) and enforces a uniform lifecycle convention: every instrumented operation emits a `start` counter and a `finish` duration histogram tagged with its outcome, so dashboards and alerts share a single query shape across all operations. It owns emission mechanics only — each domain package owns its own `Begin`/`Complete`, buckets, memoization, and any custom value histograms.
+Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins the metric path shape (`<scope>.<operation>.<metric>`) and enforces a uniform lifecycle convention: every instrumented operation emits a `start` counter and a `finish` duration histogram tagged with its outcome, so dashboards and alerts share a single query shape across all operations. It owns emission mechanics only.
 
 ## What this package owns
 
 - op-as-subscope emission: an instrument bound as `(op, name)` lands under `<scope>.<op>.<name>`
 - a concrete, Tally-backed `Emitter` that binds instruments and copies tags before retaining them
 - explicit no-op construction for deployments that intentionally do not emit
-- a small set of shared vocabulary constants — operation names, tag keys, result values, and `Outcome(err)` classification — so every operation tags outcomes the same way
-
-It does not own `Begin`/`Complete`, buckets, memoization, or custom value metrics. Those live in the domain package that implements each operation.
+- a small set of shared vocabulary constants
 
 ## Layout
 
 ```
 observability/metrics/
 ├── emitter.go       concrete Tally-backed emitter
-├── names.go         shared op / tag-key / result-value constants + Outcome()
+├── names.go         shared op / tag-key / result-value constants 
 └── emitter_test.go
 
-controller/metrics.go           request lifecycle: Begin/Complete, repo memoization, buckets
-orchestrator/metrics.go         orchestrator lifecycle: Begin/Complete, repo memoization, buckets
+controller/metrics.go           request lifecycle: repo memoization, buckets
+orchestrator/metrics.go         orchestrator lifecycle: repo memoization, buckets
 ```
 
 
@@ -120,7 +118,7 @@ Custom value metrics like `target_counts` are separate — see [Domain-local met
 
 ## Conventions
 
-Metric names and buckets are domain-local, but the *outcome vocabulary* is shared: an operation that tags `result=success` and one that tags `result=succeeded` will not aggregate together, and a dashboard can't discover that mismatch. So operation names, tag keys, and result values live in `metrics/names.go` and every operation draws from them.
+Metric names and buckets are domain-local, but the *outcome vocabulary* is shared: operation names, tag keys, and result values live in `metrics/names.go` and every operation draws from them.
 
 ```go
 package metrics
@@ -153,7 +151,7 @@ const (
 )
 ```
 
-The `result` tag is the sole outcome signal — there are no separate `succeeded`/`failed` counters. Success, failure, and cancelled counts are derived from the `finish` histogram by summing its buckets grouped by `result`.
+The `result` tag is the sole outcome signal. Success, failure, and cancelled counts are derived from the `finish` histogram by summing its buckets grouped by `result`.
 
 ## Dependency direction
 
@@ -397,9 +395,9 @@ Each distinct tag value is a new series, so tag values must be bounded — never
 
 ## Buckets
 
-Buckets are declared at each callsite and passed to `Begin` (for duration) or directly to `ValueHistogram` (for value metrics). There is no universal default — even within the same scope, buckets can be drastically different: the enclosing `get_target_graph` operation can last minutes, while its diffing sub-operation is merely seconds. A shared set is introduced only when operations intentionally share a semantic range.
+Buckets are declared at each callsite and passed to callers. There is no universal default — even within the same scope, buckets can be drastically different: the enclosing `get_target_graph` operation can last minutes, while its diffing sub-operation is merely seconds. A shared set is introduced only when operations intentionally share a semantic range.
 
-Buckets are explicitly visible at the callsite: one click in the IDE to see what they are, without walking deeper into an object tree. Buckets are never promoted into `observability/metrics`.
+Buckets are explicitly visible at the callsite and are never promoted into `observability/metrics`.
 
 ## No-op behavior
 
