@@ -259,7 +259,7 @@ func TestLease_OriginCloneFails(t *testing.T) {
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
 	_, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "clone origin")
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestLease_WorkerCloneFails(t *testing.T) {
@@ -278,7 +278,7 @@ func TestLease_WorkerCloneFails(t *testing.T) {
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
 	_, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "create worker")
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestLease_DiscoversExistingWorker(t *testing.T) {
