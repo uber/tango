@@ -61,12 +61,12 @@ func (e *Emitter) ValueHistogram(op, name string, b tally.ValueBuckets) tally.Hi
 }
 ```
 
-Every instrumented operation emits exactly two metrics under the `start`/`finish` convention:
+Every instrumented operation emits at least two metrics: `start`/`finish` convention and others
 
 | Metric | Kind | Records |
 |---|---|---|
 | `<scope>.<op>.start` | counter | operations attempted |
-| `<scope>.<op>.finish` | histogram, `result`-tagged | operations completed — latency + outcome |
+| `<scope>.<op>.finish` | histogram, `result`-tagged | operations completed — latency |
 
 Custom value metrics like `target_count` are recorded directly on the emitter alongside the pair — see [Usage](#usage).
 
@@ -138,12 +138,15 @@ const (
 )
 ```
 ```go
-// Outcome maps an error to a result tag value.
+// Outcome maps an error to a result tag value. Only an explicitly cancelled
+// context (client disconnect or shutdown) is `cancelled`; a deadline exceeded
+// is a genuine timeout and counts as `failure` (tagged infra on the
+// failure_type axis).
 func Outcome(err error) string {
     switch {
     case err == nil:
         return ResultSuccess
-    case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+    case errors.Is(err, context.Canceled):
         return ResultCancelled
     default:
         return ResultFailure
