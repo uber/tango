@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "streaming",
+    srcs = ["streaming.go"],
+    importpath = "github.com/uber/tango/internal/streaming",
+    visibility = ["//:__subpackages__"],
+    deps = ["//entity"],
+)
+
+go_test(
+    name = "streaming_test",
+    srcs = ["streaming_test.go"],
+    embed = [":streaming"],
+    deps = [
+        "//tangopb",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

@@ -9,6 +9,7 @@ import (
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper/idmapper"
+	"github.com/uber/tango/internal/streaming"
 	"github.com/uber/tango/tangopb"
 )
 
@@ -141,23 +142,23 @@ func TargetGraphToChunks(ctx context.Context, graph entity.TargetGraph, maxMessa
 		targetIDToName[id] = s
 	}
 
-	// Use proto Size() for accurate chunking, then build entity chunks.
-	targetChunks, err := BySize(protoTargets, maxMessageBytes)
+	// Use proto Size() for accurate splitting, then build entity chunks.
+	targetGroups, err := streaming.SplitBySize(protoTargets, maxMessageBytes)
 	if err != nil {
 		return nil, err
 	}
 
 	var chunks []entity.GraphChunk
 	idx := 0
-	for _, pc := range targetChunks {
+	for _, g := range targetGroups {
 		chunk := entity.GraphChunk{
-			Targets: idTargets[idx : idx+len(pc)],
+			Targets: idTargets[idx : idx+len(g)],
 		}
-		idx += len(pc)
+		idx += len(g)
 		chunks = append(chunks, chunk)
 	}
 
-	metaChunks, err := ChunkMetadata(
+	metaGroups, err := streaming.SplitMetadata(
 		targetIDToName,
 		ruleTypeMapper.Invert(),
 		tagMapper.Invert(),
@@ -168,9 +169,9 @@ func TargetGraphToChunks(ctx context.Context, graph entity.TargetGraph, maxMessa
 	if err != nil {
 		return nil, err
 	}
-	for _, meta := range metaChunks {
+	for _, meta := range metaGroups {
 		chunks = append(chunks, entity.GraphChunk{
-			Metadata: protoMetadataToEntity(meta),
+			Metadata: meta,
 		})
 	}
 
