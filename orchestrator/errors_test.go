@@ -34,7 +34,7 @@ func TestClassifyLeaseError(t *testing.T) {
 	}{
 		{
 			name:     "pool timeout is infra retryable",
-			err:      fmt.Errorf("%w: pool for repo org/repo: context deadline exceeded", repomanager.ErrPoolTimeout),
+			err:      fmt.Errorf("pool for repo org/repo: %w", repomanager.ErrPoolTimeout),
 			wantCode: tangoerrors.ErrorInfraRetryable,
 		},
 		{

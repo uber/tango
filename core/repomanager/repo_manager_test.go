@@ -242,7 +242,6 @@ func TestLease_CtxDeadlineExceeded(t *testing.T) {
 	_, err = rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrPoolTimeout), "deadline exceeded should produce ErrPoolTimeout")
-	assert.True(t, errors.Is(err, context.DeadlineExceeded), "expected underlying context.DeadlineExceeded")
 
 	require.NoError(t, ws1.Release())
 }

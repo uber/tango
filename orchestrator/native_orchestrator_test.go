@@ -248,7 +248,7 @@ func TestNative_GetTargetGraph_LeasePoolTimeout_InfraRetryable(t *testing.T) {
 
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(nil,
-		fmt.Errorf("%w: pool for repo org/repo: %w", repomanager.ErrPoolTimeout, context.DeadlineExceeded))
+		fmt.Errorf("pool for repo org/repo: %w", repomanager.ErrPoolTimeout))
 
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		RepoManager: rm,

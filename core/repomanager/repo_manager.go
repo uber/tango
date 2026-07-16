@@ -155,7 +155,7 @@ func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (
 	case <-ctx.Done():
 		err := ctx.Err()
 		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%w: pool for repo %s: %w", ErrPoolTimeout, repo, err)
+			return nil, fmt.Errorf("pool for repo %s: %w", repo, ErrPoolTimeout)
 		}
 		return nil, fmt.Errorf("pool for repo %s: %w", repo, err)
 	}
