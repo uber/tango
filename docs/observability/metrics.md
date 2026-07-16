@@ -89,23 +89,6 @@ func (e *Emitter) opScope(op string) tally.Scope {
 
 Only `New` returns an error, and only to surface a nil scope — a wiring mistake, not a runtime condition. The binding methods take constant `op`/`name` arguments and have no reachable failure path, so they return the instrument directly.
 
-### Outcome
-
-The metrics package exports `Outcome` so every domain classifies errors the same way. The `start`/`finish` lifecycle convention and its memoization are domain-local — see [Domain-local metrics](#domain-local-metrics).
-
-```go
-// Outcome maps an error to a result tag value.
-func Outcome(err error) string {
-    switch {
-    case err == nil:
-        return ResultSuccess
-    case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-        return ResultCancelled
-    default:
-        return ResultFailure
-    }
-}
-```
 
 Every instrumented operation emits exactly two metrics under the `start`/`finish` convention:
 
@@ -150,7 +133,19 @@ const (
     ResultMiss      = "miss"
 )
 ```
-
+```go
+// Outcome maps an error to a result tag value.
+func Outcome(err error) string {
+    switch {
+    case err == nil:
+        return ResultSuccess
+    case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+        return ResultCancelled
+    default:
+        return ResultFailure
+    }
+}
+```
 The `result` tag is the sole outcome signal. Success, failure, and cancelled counts are derived from the `finish` histogram by summing its buckets grouped by `result`.
 
 ## Dependency direction
