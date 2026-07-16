@@ -20,7 +20,7 @@ observability/metrics/
 └── emitter_test.go
 
 controller/metrics.go           request lifecycle: Begin/Complete, repo memoization, buckets
-graphrunner/metrics.go          graph runner lifecycle: Begin/Complete, buckets, target_counts
+orchestrator/metrics.go         orchestrator lifecycle: Begin/Complete, repo memoization, buckets
 ```
 
 
@@ -167,85 +167,102 @@ infrastructure       -> local metrics      -> observability/metrics -> tally
 
 ## Domain-local metrics
 
-Each domain implements `Begin`/`Complete` on its own metrics struct, which pre-builds result-tagged emitters at construction. Memoization is domain-local — each struct owns its cached emitters and their lifecycle.
+Each domain implements its own metrics struct, which memoizes tagged emitters at construction or lazily per distinct tag value. Memoization is domain-local — each struct owns its cached emitters and their lifecycle.
 
 ```go
-package graphrunner
+package orchestrator
 
 // Buckets live at the callsite, visible without walking an object tree.
-var (
-    graphRunnerFinishBuckets = tally.MustMakeExponentialDurationBuckets(100*time.Millisecond, 2, 20) // 100ms .. ~1.7h
-    targetCountBuckets       = tally.MustMakeExponentialValueBuckets(1, 10, 7)                       // 1 .. 1M
-)
+var orchestratorFinishBuckets = tally.MustMakeExponentialDurationBuckets(time.Second, 2, 20) // 1s .. ~3h
 
-type graphRunnerOp struct {
-    metrics *graphRunnerMetrics
-    start   time.Time
+type orchestratorOp struct {
+    byResult map[string]*metrics.Emitter
+    start    time.Time
 }
 
-type graphRunnerMetrics struct {
-    byResult    map[string]*metrics.Emitter
-    targetCount tally.Histogram
+type orchestratorMetrics struct {
+    base         *metrics.Emitter
+    byRepo       map[string]*metrics.Emitter
+    byRepoResult map[string]map[string]*metrics.Emitter
 }
 
-func newGraphRunnerMetrics(e *metrics.Emitter) *graphRunnerMetrics {
-    // Memoize result-tagged emitters once at construction — Begin/Complete
-    // reuse these instead of calling Tagged per request.
-    return &graphRunnerMetrics{
-        byResult: map[string]*metrics.Emitter{
-            metrics.ResultSuccess:   e.Tagged(map[string]string{metrics.TagResult: metrics.ResultSuccess}),
-            metrics.ResultFailure:   e.Tagged(map[string]string{metrics.TagResult: metrics.ResultFailure}),
-            metrics.ResultCancelled: e.Tagged(map[string]string{metrics.TagResult: metrics.ResultCancelled}),
-        },
-        targetCount: e.ValueHistogram(metrics.OpGraphRunner, "target_counts", targetCountBuckets),
+func newOrchestratorMetrics(e *metrics.Emitter) *orchestratorMetrics {
+    return &orchestratorMetrics{
+        base:         e,
+        byRepo:       make(map[string]*metrics.Emitter),
+        byRepoResult: make(map[string]map[string]*metrics.Emitter),
     }
 }
 
-func (m *graphRunnerMetrics) Begin() *graphRunnerOp {
-    m.byResult[metrics.ResultSuccess].Counter(metrics.OpGraphRunner, "start").Inc(1)
-    return &graphRunnerOp{metrics: m, start: time.Now()}
+func (m *orchestratorMetrics) emitterFor(repo string) *metrics.Emitter {
+    if e, ok := m.byRepo[repo]; ok {
+        return e
+    }
+    e := m.base.Tagged(map[string]string{metrics.TagRepo: repo})
+    m.byRepo[repo] = e
+    return e
 }
 
-func (o *graphRunnerOp) Complete(err error) {
-    o.metrics.byResult[metrics.Outcome(err)].
-        DurationHistogram(metrics.OpGraphRunner, "finish", graphRunnerFinishBuckets).
+func (m *orchestratorMetrics) resultEmittersFor(repo string) map[string]*metrics.Emitter {
+    // Memoize per repo — Tagged is called once per distinct (repo, result)
+    // pair, not per request.
+    if re, ok := m.byRepoResult[repo]; ok {
+        return re
+    }
+    tagged := m.emitterFor(repo)
+    re := map[string]*metrics.Emitter{
+        metrics.ResultSuccess:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultSuccess}),
+        metrics.ResultFailure:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultFailure}),
+        metrics.ResultCancelled: tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultCancelled}),
+    }
+    m.byRepoResult[repo] = re
+    return re
+}
+
+func (m *orchestratorMetrics) Begin(repo string) *orchestratorOp {
+    m.emitterFor(repo).Counter(metrics.OpGetTargetGraph, "start").Inc(1)
+    return &orchestratorOp{byResult: m.resultEmittersFor(repo), start: time.Now()}
+}
+
+func (o *orchestratorOp) Complete(err error) {
+    o.byResult[metrics.Outcome(err)].
+        DurationHistogram(metrics.OpGetTargetGraph, "finish", orchestratorFinishBuckets).
         RecordDuration(time.Since(o.start))
 }
 ```
 
-The struct is built once in the constructor and stored on the runner:
+The struct is built once in the constructor and stored on the orchestrator:
 
 ```go
-type nativeGraphRunner struct {
-    metrics *graphRunnerMetrics
-    // ... bazel, git, config ...
+type nativeOrchestrator struct {
+    metrics *orchestratorMetrics
+    // ... storage, repoManager, config ...
 }
 
-func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
-    return &nativeGraphRunner{
-        metrics: newGraphRunnerMetrics(p.Emitter),
+func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, error) {
+    return &nativeOrchestrator{
+        metrics: newOrchestratorMetrics(p.Emitter),
         // ...
-    }
+    }, nil
 }
 ```
 
 At the callsite:
 
 ```go
-func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace) (_ targethasher.Result, retErr error) {
-    op := g.metrics.Begin()
+func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (_ storage.GraphReader, retErr error) {
+    repo := common.ToShortRemote(req.Build.Remote)
+    op := b.metrics.Begin(repo)
     defer func() { op.Complete(retErr) }()
 
-    // ... bazel query, git file hashes, target hashing ...
-
-    g.metrics.targetCount.RecordValue(float64(len(res.Targets)))
-    return res, nil
+    // ... workspace lease, checkout, apply requests, compute graph ...
+    return graphReader, nil
 }
 ```
 
 ## Request metrics
 
-Request lifecycle follows the same `start`/`finish` convention, with the controller owning its own `Begin`/`Complete`. Outcomes are broken down by `repo`, so the struct memoizes result-tagged emitters per repo — `Tagged` is called once per distinct `(repo, result)` pair, not per request.
+Request lifecycle follows the same `start`/`finish` convention, with the controller owning its own methods. The struct memoizes result-tagged emitters per repo — `Tagged` is called once per distinct `(repo, result)` pair, not per request.
 
 ```go
 package controller
@@ -255,6 +272,46 @@ var getChangedTargetsFinishBuckets = tally.MustMakeExponentialDurationBuckets(
     time.Second, 3, 10, // 1s .. ~5h
 )
 
+type requestMetrics struct {
+    base       *metrics.Emitter
+    byRepo     map[string]*metrics.Emitter              // repo -> repo-tagged emitter (for start)
+    byRepoResult map[string]map[string]*metrics.Emitter  // repo -> result -> result-tagged emitter (for finish)
+}
+
+func newRequestMetrics(e *metrics.Emitter) *requestMetrics {
+    return &requestMetrics{
+        base:         e,
+        byRepo:       make(map[string]*metrics.Emitter),
+        byRepoResult: make(map[string]map[string]*metrics.Emitter),
+    }
+}
+
+func (m *requestMetrics) emitterFor(repo string) *metrics.Emitter {
+    // Memoize per repo — Tagged is called once per distinct repo.
+    if e, ok := m.byRepo[repo]; ok {
+        return e
+    }
+    e := m.base.Tagged(map[string]string{metrics.TagRepo: repo})
+    m.byRepo[repo] = e
+    return e
+}
+
+func (m *requestMetrics) resultEmittersFor(repo string) map[string]*metrics.Emitter {
+    // Memoize per repo — Tagged is called once per distinct (repo, result)
+    // pair, not per request.
+    if re, ok := m.byRepoResult[repo]; ok {
+        return re
+    }
+    tagged := m.emitterFor(repo)
+    re := map[string]*metrics.Emitter{
+        metrics.ResultSuccess:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultSuccess}),
+        metrics.ResultFailure:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultFailure}),
+        metrics.ResultCancelled: tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultCancelled}),
+    }
+    m.byRepoResult[repo] = re
+    return re
+}
+
 type requestOp struct {
     byResult map[string]*metrics.Emitter
     op       string
@@ -262,35 +319,9 @@ type requestOp struct {
     start    time.Time
 }
 
-type requestMetrics struct {
-    base   *metrics.Emitter
-    cached map[string]map[string]*metrics.Emitter // "repo:value" -> result emitters
-}
-
-func newRequestMetrics(e *metrics.Emitter) *requestMetrics {
-    return &requestMetrics{base: e, cached: make(map[string]map[string]*metrics.Emitter)}
-}
-
-func (m *requestMetrics) resultEmittersFor(repo string) map[string]*metrics.Emitter {
-    // Memoize per repo — Tagged is called once per distinct (repo, result)
-    // pair, not per request.
-    if re, ok := m.cached[repo]; ok {
-        return re
-    }
-    tagged := m.base.Tagged(map[string]string{metrics.TagRepo: repo})
-    re := map[string]*metrics.Emitter{
-        metrics.ResultSuccess:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultSuccess}),
-        metrics.ResultFailure:   tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultFailure}),
-        metrics.ResultCancelled: tagged.Tagged(map[string]string{metrics.TagResult: metrics.ResultCancelled}),
-    }
-    m.cached[repo] = re
-    return re
-}
-
 func (m *requestMetrics) Begin(repo, op string, buckets tally.DurationBuckets) *requestOp {
-    re := m.resultEmittersFor(repo)
-    re[metrics.ResultSuccess].Counter(op, "start").Inc(1)
-    return &requestOp{byResult: re, op: op, buckets: buckets, start: time.Now()}
+    m.emitterFor(repo).Counter(op, "start").Inc(1)
+    return &requestOp{byResult: m.resultEmittersFor(repo), op: op, buckets: buckets, start: time.Now()}
 }
 
 func (o *requestOp) Complete(err error) {
@@ -315,7 +346,7 @@ func newController(p Params) *controller {
 }
 
 func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
-    repo := common.ToShortRemote(req.GetFirstRevision().GetRemote())
+    repo := ToShortRemote(req.GetFirstRevision().GetRemote())
     op := c.metrics.Begin(repo, metrics.OpGetChangedTargets, getChangedTargetsFinishBuckets)
     defer func() { op.Complete(retErr) }()
 
