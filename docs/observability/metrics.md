@@ -155,10 +155,6 @@ func Outcome(err error) string {
 ```
 The `result` tag is the sole outcome signal. Success, failure, and cancelled counts are derived from the `finish` histogram by summing its buckets grouped by `result`.
 
-## Dependency direction
-
-The emitter is a fixed dependency for the lifetime of a component, so it lives on that component — passed to constructors and stored in a field.
-
 ## Usage
 
 Each component stores the `*metrics.Emitter` it was constructed with. At the top of an operation, the caller bakes in the `repo` tag once, calls `Begin`, and defers `Complete`.
