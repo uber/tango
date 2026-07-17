@@ -30,7 +30,7 @@ bench:
 		--test_output=all \
 		--test_arg=-test.run=^$$ \
 		--test_arg=-test.bench=. \
-		--test_arg=-test.benchtime=3x \
+		--test_arg=-test.benchtime=20x \
 		--test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) \
 		--test_env=HOME=$$HOME \
 		--test_env=GIT_CONFIG_COUNT=1 \
