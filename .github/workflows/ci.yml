@@ -68,6 +68,19 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      # Persist Bazel's disk cache (see .bazelrc: --disk_cache) across runs. The
+      # integration test drives nested `bazel query` against the repo itself; a
+      # cold cache makes the first GetChangedTargets pay the full analysis cost
+      # and pushes the run against its deadline. Warming it removes that spike
+      # and speeds every run. restore-keys lets a stale cache seed a new one.
+      - name: Cache Bazel disk cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/bazel-disk-cache
+          key: bazel-disk-integration-${{ hashFiles('MODULE.bazel', 'go.mod', '.bazelrc') }}
+          restore-keys: |
+            bazel-disk-integration-
+
       - name: Run integration tests
         run: make test-integration
 

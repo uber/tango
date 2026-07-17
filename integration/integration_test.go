@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	requestTimeout     = 10 * time.Minute
+	requestTimeout     = 20 * time.Minute
 	configTemplateFile = "testdata/tango-config.yaml.tmpl"
 )
 
