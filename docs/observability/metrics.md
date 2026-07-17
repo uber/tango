@@ -28,10 +28,14 @@ Bucket vars are declared as package-level values next to the handlers that use t
 ```go
 package metrics
 
+// Emitter is a concrete, Tally-backed metrics emitter that pins the metric
+// path shape to <scope>.<op>.<name>.
 type Emitter struct {
     scope tally.Scope
 }
 
+// New creates an Emitter backed by the given tally.Scope. A nil scope is
+// treated as a wiring error and returns an error.
 func New(scope tally.Scope) (*Emitter, error) {
     if scope == nil {
         return nil, errors.New("metrics: nil scope")
@@ -39,8 +43,11 @@ func New(scope tally.Scope) (*Emitter, error) {
     return &Emitter{scope: scope}, nil
 }
 
+// Nop returns an Emitter that discards all metrics.
 func Nop() *Emitter { return &Emitter{scope: tally.NoopScope} }
 
+// Tagged returns a child Emitter whose instruments carry the given tags in
+// addition to any already on the scope. It delegates to tally.Scope.Tagged.
 func (e *Emitter) Tagged(tags map[string]string) *Emitter {
     if len(tags) == 0 {
         return e
@@ -48,14 +55,17 @@ func (e *Emitter) Tagged(tags map[string]string) *Emitter {
     return &Emitter{scope: e.scope.Tagged(tags)}
 }
 
+// Counter returns a counter at <scope>.<op>.<name>.
 func (e *Emitter) Counter(op, name string) tally.Counter {
     return e.scope.SubScope(op).Counter(name)
 }
 
+// DurationHistogram returns a duration histogram at <scope>.<op>.<name>.
 func (e *Emitter) DurationHistogram(op, name string, b tally.DurationBuckets) tally.Histogram {
     return e.scope.SubScope(op).Histogram(name, b)
 }
 
+// ValueHistogram returns a value histogram at <scope>.<op>.<name>.
 func (e *Emitter) ValueHistogram(op, name string, b tally.ValueBuckets) tally.Histogram {
     return e.scope.SubScope(op).Histogram(name, b)
 }
