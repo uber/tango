@@ -26,6 +26,7 @@ import (
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
+	"github.com/uber/tango/core/cachekey"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
@@ -33,7 +34,6 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
-	"github.com/uber/tango/internal/cachekey"
 	"go.uber.org/zap"
 )
 

@@ -21,9 +21,9 @@ import (
 	"io"
 	"time"
 
+	"github.com/uber/tango/core/cachekey"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/entity"
-	"github.com/uber/tango/internal/cachekey"
 	"github.com/uber/tango/internal/mapper"
 
 	"github.com/uber/tango/core/storage"

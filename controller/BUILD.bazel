@@ -15,10 +15,10 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//config",
+        "//core/cachekey",
         "//core/common",
         "//core/storage",
         "//entity",
-        "//internal/cachekey",
         "//internal/mapper",
         "//internal/mapper/idmapper",
         "//internal/targetdiff",
