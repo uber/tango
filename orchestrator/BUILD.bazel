@@ -12,6 +12,7 @@ go_library(
     deps = [
         "//config",
         "//core/bazel",
+        "//core/cachekey",
         "//core/common",
         "//core/git",
         "//core/repomanager",
@@ -19,7 +20,6 @@ go_library(
         "//core/workspace",
         "//entity",
         "//graphrunner",
-        "//internal/cachekey",
         "@com_github_uber_go_tally//:tally",
         "@org_uber_go_zap//:zap",
     ],

@@ -33,7 +33,7 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
-	"github.com/uber/tango/internal/cachekey"
+	"github.com/uber/tango/core/cachekey"
 	"go.uber.org/zap"
 )
 

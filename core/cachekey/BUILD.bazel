@@ -3,7 +3,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "cachekey",
     srcs = ["cachekey.go"],
-    importpath = "github.com/uber/tango/internal/cachekey",
+    importpath = "github.com/uber/tango/core/cachekey",
     visibility = ["//visibility:public"],
     deps = [
         "//core/common",
