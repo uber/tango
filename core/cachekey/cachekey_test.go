@@ -68,49 +68,6 @@ func TestGetTreehashCachePath(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
-func TestGetReqURLsHash(t *testing.T) {
-	t.Parallel()
-	md5hex := func(strs ...string) string {
-		h := md5.New()
-		for _, s := range strs {
-			h.Write([]byte(s))
-		}
-		return fmt.Sprintf("%x", h.Sum(nil))
-	}
-	tests := []struct {
-		name string
-		in   []entity.ChangeRequest
-		want string
-	}{
-		{
-			name: "empty",
-			in:   []entity.ChangeRequest{},
-			want: "",
-		},
-		{
-			name: "single",
-			in:   []entity.ChangeRequest{{URL: "github://org/repo/pull/42"}},
-			want: md5hex("github://org/repo/pull/42"),
-		},
-		{
-			name: "multiple",
-			in:   []entity.ChangeRequest{{URL: "a"}, {URL: "b"}},
-			want: md5hex("a", "b"),
-		},
-		{
-			name: "multiple sorted",
-			in:   []entity.ChangeRequest{{URL: "b"}, {URL: "a"}},
-			want: md5hex("a", "b"),
-		},
-	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, getReqURLsHash(tt.in))
-		})
-	}
-}
-
 func TestGetComparedTargetsCachePath(t *testing.T) {
 	t.Parallel()
 	got := GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil)

@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/uber/tango/core/git"
@@ -213,9 +212,4 @@ func (r *repoManager) createWorker(ctx context.Context, originDir, workerDir str
 		return err
 	}
 	return r.git.Clone(ctx, originDir, workerDir, "--local", "-c", "gc.auto=0")
-}
-
-func toShortRemote(remote string) string {
-	strs := strings.Split(remote, ":")
-	return strs[len(strs)-1]
 }
