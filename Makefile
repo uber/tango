@@ -33,7 +33,7 @@ bench:
 		--test_arg=-test.benchtime=1x \
 		--test_arg=-test.count=15 \
 		--test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) \
-		--test_env=HOME=$$HOME \
+		--test_env=HOME=$$HOME
 	@echo "Benchmarks complete!"
 
 # Generate protobuf files using protoc
