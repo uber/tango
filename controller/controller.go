@@ -16,12 +16,12 @@ package controller
 
 import (
 	"context"
-	"time"
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/observability/metrics"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/fx"
@@ -38,18 +38,14 @@ type Params struct {
 	ChunkConfig  config.ChunkConfig `optional:"true"`
 }
 
-// _totalDurationBuckets covers 0–15 minutes in 10-second linear intervals.
-var _totalDurationBuckets = tally.MustMakeLinearDurationBuckets(10*time.Second, 10*time.Second, 90)
-
 type controller struct {
 	logger                 *zap.Logger
 	storage                storage.Storage
 	orchestrator           orchestrator.Orchestrator
-	scope                  tally.Scope
+	emitter                *metrics.Emitter
 	targetChunkSize        int
 	changedTargetChunkSize int
 	metadataMapChunkSize   int
-	totalDurationBuckets   tally.Buckets
 
 	// appCtx is the application lifetime; cancel it on process shutdown.
 	// Used by linkRequestCtx and any fire-and-forget goroutines so they
@@ -64,6 +60,7 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	if scope == nil {
 		scope = tally.NoopScope
 	}
+	emitter, _ := metrics.New(scope.SubScope("controller"))
 	targetChunkSize := p.ChunkConfig.TargetChunkSize
 	if targetChunkSize <= 0 {
 		targetChunkSize = common.DefaultTargetChunkSize
@@ -80,11 +77,10 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 		logger:                 p.Logger,
 		storage:                p.Storage,
 		orchestrator:           p.Orchestrator,
-		scope:                  scope.SubScope("controller"),
+		emitter:                emitter,
 		targetChunkSize:        targetChunkSize,
 		changedTargetChunkSize: changedTargetChunkSize,
 		metadataMapChunkSize:   metadataMapChunkSize,
-		totalDurationBuckets:   _totalDurationBuckets,
 		appCtx:                 appCtx,
 	}
 }

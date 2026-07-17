@@ -21,7 +21,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/cachekey"
 	"github.com/uber/tango/core/common"
 	tangoerrors "github.com/uber/tango/core/errors"
@@ -31,6 +30,7 @@ import (
 	"github.com/uber/tango/internal/mapper/idmapper"
 	"github.com/uber/tango/internal/targetdiff"
 	"github.com/uber/tango/internal/url"
+	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
@@ -49,26 +49,23 @@ type job struct {
 // client disconnects, the stream's context is cancelled and the function
 // returns with context.Canceled.
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
-	scope := c.scope.SubScope("get_changed_targets")
-	scope.Counter("calls").Inc(1)
+	repo := url.ToShortRemote(request.GetFirstRevision().GetRemote())
+	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
+	op := metrics.Begin(e, opGetChangedTargets, slowDurationBuckets)
 	logger := c.logger.WithLazy(
 		zap.Any("first_revision", request.GetFirstRevision()),
 		zap.Any("second_revision", request.GetSecondRevision()),
 	)
 	defer func() {
+		op.Complete(retErr)
 		if retErr != nil {
 			logger.Error("GetChangedTargets failed", tangoerrors.Fields(retErr)...)
-			scope.Counter("failure").Inc(1)
-			emitFailureMetric(scope, retErr)
-			retErr = mapper.ToProtoError(retErr)
-		} else {
-			scope.Counter("success").Inc(1)
+			emitFailureMetric(e, opGetChangedTargets, retErr)
 		}
 	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
 		return tangoerrors.NewUser(err)
 	}
-	scope = scope.Tagged(map[string]string{"repo": url.ToShortRemote(request.GetFirstRevision().GetRemote())})
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
 	start := time.Now()
@@ -85,7 +82,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	// Fast path: stream a previously computed result straight from cache.
 	if !request.GetBypassCache() {
-		served, err := c.serveChangedTargetsFromCache(ctx, scope, logger, request, stream, maxDist, start)
+		served, err := c.serveChangedTargetsFromCache(ctx, e, logger, request, stream, maxDist, start)
 		if err != nil {
 			return fmt.Errorf("serve from cache: %w", err)
 		}
@@ -95,12 +92,12 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	}
 
 	// Fetch both revisions' target graphs concurrently.
-	firstGraph, secondGraph, err := c.fetchTargetGraphs(ctx, scope, logger, request)
+	firstGraph, secondGraph, err := c.fetchTargetGraphs(ctx, e, logger, request)
 	if err != nil {
 		return fmt.Errorf("fetch target graphs: %w", err)
 	}
 
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, scope, logger, firstGraph, secondGraph, maxDist)
+	changedTargetsResponses, err := c.compareTargetGraphs(ctx, e, logger, firstGraph, secondGraph, maxDist)
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -119,15 +116,12 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		return fmt.Errorf("send response: %w", err)
 	}
 	sendDuration := time.Since(sendStart)
-	scope.Timer("send_duration").Record(sendDuration)
+	e.DurationHistogram(opGetChangedTargets, "send_duration", fastDurationBuckets).RecordDuration(sendDuration)
 
-	totalDuration := time.Since(start)
 	logger.Info("GetChangedTargets: Successfully processed request",
 		zap.Duration("send_duration", sendDuration),
-		zap.Duration("total_duration", totalDuration),
+		zap.Duration("total_duration", time.Since(start)),
 	)
-	scope.Timer("total_duration").Record(totalDuration)
-	scope.Histogram("total_duration.histogram", c.totalDurationBuckets).RecordDuration(totalDuration)
 	return nil
 }
 
@@ -141,7 +135,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 // real storage error surfaces here so an infra failure that disables the cache
 // (e.g. a missing-deadline "missing TTL" reject) becomes a visible request failure
 // rather than silent degradation.
-func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tally.Scope, logger *zap.Logger, request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer, maxDist int32, start time.Time) (bool, error) {
+func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer, maxDist int32, start time.Time) (bool, error) {
 	cacheStart := time.Now()
 	treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
 	if err != nil {
@@ -195,17 +189,14 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 	logger.Info("GetChangedTargets: Cache hit, streaming from storage",
 		zap.Duration("cache_read_duration", cacheReadDuration),
 	)
-	scope.Counter("changed_targets_cache_hit").Inc(1)
-	scope.Timer("cache_read_duration").Record(cacheReadDuration)
+	e.Counter(opGetChangedTargets, "cache_hit").Inc(1)
+	e.DurationHistogram(opGetChangedTargets, "cache_read_duration", fastDurationBuckets).RecordDuration(cacheReadDuration)
 	if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
 		return false, fmt.Errorf("send cached response: %w", sendErr)
 	}
-	totalDuration := time.Since(start)
 	logger.Info("GetChangedTargets: Successfully streamed from cache",
-		zap.Duration("total_duration", totalDuration),
+		zap.Duration("total_duration", time.Since(start)),
 	)
-	scope.Timer("total_duration").Record(totalDuration)
-	scope.Histogram("total_duration.histogram", c.totalDurationBuckets).RecordDuration(totalDuration)
 	return true, nil
 }
 
@@ -215,7 +206,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 // Errors caused solely by that induced cancellation are dropped; only the
 // original failure is returned. A client disconnect surfaces as a user-cancelled
 // error.
-func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, logger *zap.Logger, request *pb.GetChangedTargetsRequest) ([]*pb.GetTargetGraphResponse, []*pb.GetTargetGraphResponse, error) {
+func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request *pb.GetChangedTargetsRequest) ([]*pb.GetTargetGraphResponse, []*pb.GetTargetGraphResponse, error) {
 	jobs := make([]*job, 2)
 	for i := 0; i < 2; i++ {
 		// create independent contexts for each job; if one of the jobs fails, the other one should be cancelled to save resources and improve latency
@@ -258,7 +249,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 				ExcludeFilesRegex: request.GetRequestOptions().GetExtraExcludeFilesRegex(),
 				BypassCache:       request.GetBypassCache(),
 			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, entityReq)
+			graphReader, err := c.getGraph(jobs[idx].ctx, e, entityReq)
 			if err != nil || graphReader == nil {
 				results <- graphResult{order: idx, err: err}
 				return
@@ -310,7 +301,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 	logger.Info("GetChangedTargets: Both graphs fetched",
 		zap.Duration("graph_fetch_duration", graphFetchDuration),
 	)
-	scope.Timer("graph_fetch_duration").Record(graphFetchDuration)
+	e.DurationHistogram(opGetChangedTargets, "graph_fetch_duration", slowDurationBuckets).RecordDuration(graphFetchDuration)
 
 	if ctx.Err() != nil {
 		// If the context was cancelled by the upstream, just return the original error without additional augmentation
@@ -381,13 +372,13 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 // are re-mapped into a canonical per-call ID namespace so the response metadata
 // only carries the names actually referenced. See internal/targetdiff for the
 // classification and distance rules.
-func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
-	start := time.Now()
-	compareScope := scope.SubScope("compare_target_graphs")
+func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) (_ []*pb.GetChangedTargetsResponse, retErr error) {
+	op := metrics.Begin(e, opCompareTargetGraphs, slowDurationBuckets)
+	defer func() { op.Complete(retErr) }()
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
 
 	// 1) Decode each stream into a semantic graph keyed by canonical target name.
-	indexStart := time.Now()
+	decodeStart := time.Now()
 	firstTargetsByID, firstMetadata, err := getTargetsAndMetadata(ctx, firstGraph)
 	if err != nil {
 		return nil, err
@@ -412,11 +403,10 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 	}
 	secondTargetsByID = nil
 	secondMetadata = nil
-	indexDuration := time.Since(indexStart)
-	compareScope.Timer("index_duration").Record(indexDuration)
+	e.DurationHistogram(opCompareTargetGraphs, "decode_duration", fastDurationBuckets).RecordDuration(time.Since(decodeStart))
 
 	// 2) Compare the two semantic graphs.
-	computeStart := time.Now()
+	diffStart := time.Now()
 	result, err := targetdiff.Compare(ctx, targetdiff.Request{
 		Before:      before,
 		After:       after,
@@ -428,7 +418,8 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 	// Release the input graphs; only result is needed from here on.
 	before = nil
 	after = nil
-	compareScope.Timer("compute_duration").Record(time.Since(computeStart))
+	e.DurationHistogram(opCompareTargetGraphs, "diff_duration", fastDurationBuckets).RecordDuration(time.Since(diffStart))
+	e.ValueHistogram(opGetChangedTargets, "target_count", changedTargetCountBuckets).RecordValue(float64(len(result.ChangedTargets)))
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -484,14 +475,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 			},
 		})
 	}
-	totalDuration := time.Since(start)
-	compareScope.Timer("total_duration").Record(totalDuration)
-	// This helper owns its own timing/log on the request scope (mirroring
-	// fetchTargetGraphs) rather than leaving it to the caller.
-	logger.Info("GetChangedTargets: Target graphs compared",
-		zap.Duration("compare_duration", totalDuration),
-	)
-	scope.Timer("compare_duration").Record(totalDuration)
+	logger.Info("GetChangedTargets: Target graphs compared")
 	return results, nil
 }
 
