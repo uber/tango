@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils
+package url
 
 import (
+	"crypto/md5"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/uber/tango/entity"
 )
 
 func TestToShortRemote(t *testing.T) {
@@ -44,9 +47,50 @@ func TestToShortRemote(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, ToShortRemote(tt.remote))
+		})
+	}
+}
+
+func TestGetReqURLsHash(t *testing.T) {
+	t.Parallel()
+	md5hex := func(strs ...string) string {
+		h := md5.New()
+		for _, s := range strs {
+			h.Write([]byte(s))
+		}
+		return fmt.Sprintf("%x", h.Sum(nil))
+	}
+	tests := []struct {
+		name string
+		in   []entity.ChangeRequest
+		want string
+	}{
+		{
+			name: "empty",
+			in:   []entity.ChangeRequest{},
+			want: "",
+		},
+		{
+			name: "single",
+			in:   []entity.ChangeRequest{{URL: "github://org/repo/pull/42"}},
+			want: md5hex("github://org/repo/pull/42"),
+		},
+		{
+			name: "multiple",
+			in:   []entity.ChangeRequest{{URL: "a"}, {URL: "b"}},
+			want: md5hex("a", "b"),
+		},
+		{
+			name: "multiple sorted",
+			in:   []entity.ChangeRequest{{URL: "b"}, {URL: "a"}},
+			want: md5hex("a", "b"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, GetReqURLsHash(tt.in))
 		})
 	}
 }

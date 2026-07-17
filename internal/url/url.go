@@ -12,13 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils
+package url
 
-import "strings"
+import (
+	"crypto/md5"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/uber/tango/entity"
+)
 
 // ToShortRemote returns the short remote name given a git ssh remote string.
 // For example, "git@github:uber/tango" will return "uber/tango".
 func ToShortRemote(remote string) string {
 	strs := strings.Split(remote, ":")
 	return strs[len(strs)-1]
+}
+
+// GetReqURLsHash returns a fixed-length MD5 hash of the sorted change request URLs.
+// Each URL's bytes are fed into the digest individually (no separator)
+func GetReqURLsHash(requests []entity.ChangeRequest) string {
+	if len(requests) == 0 {
+		return ""
+	}
+	urls := make([]string, 0, len(requests))
+	for _, req := range requests {
+		urls = append(urls, req.URL)
+	}
+	sort.Strings(urls)
+	h := md5.New()
+	for _, url := range urls {
+		h.Write([]byte(url))
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
