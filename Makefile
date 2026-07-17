@@ -30,13 +30,9 @@ bench:
 		--test_output=all \
 		--test_arg=-test.run=^$$ \
 		--test_arg=-test.bench=. \
-		--test_arg=-test.benchtime=20x \
+		--test_arg=-test.benchtime=15x \
 		--test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) \
 		--test_env=HOME=$$HOME \
-		--test_env=GIT_CONFIG_COUNT=1 \
-		--test_env=GIT_CONFIG_KEY_0=advice.detachedHead \
-		--test_env=GIT_CONFIG_VALUE_0=false \
-		--cache_test_results=no
 	@echo "Benchmarks complete!"
 
 # Generate protobuf files using protoc
