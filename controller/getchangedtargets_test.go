@@ -146,7 +146,7 @@ func TestCompareTargetGraphs(t *testing.T) {
 		},
 	}
 
-	response, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
+	response, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 }
@@ -609,7 +609,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 	cs := res[0].GetChangedTargets()
@@ -681,7 +681,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -754,7 +754,7 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	// Hash-only change on a rule with no own-config change and no reachable
 	// seed: under "trust the hasher" semantics, an orphan CHANGED rule with
 	// no upstream explanation becomes a distance-0 seed itself.
-	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -821,7 +821,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -903,7 +903,7 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -985,7 +985,7 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1186,7 +1186,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1268,7 +1268,7 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1322,7 +1322,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	cs := res[0].GetChangedTargets()
 	require.NotNil(t, cs)
@@ -1410,7 +1410,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		c.storage = st
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, -1, time.Now())
 		require.NoError(t, err)
 		assert.False(t, served, "a cache miss must not be served")
 	})
@@ -1447,7 +1447,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		// No Send expectation: a corrupt blob must not send anything to the client.
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, -1, time.Now())
 		require.NoError(t, err)
 		assert.False(t, served, "a corrupt blob must trigger recompute, not a partial send")
 	})
@@ -1485,7 +1485,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.scope, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, -1, time.Now())
 		require.NoError(t, err)
 		assert.True(t, served, "a clean cache hit must be served")
 	})
@@ -1514,7 +1514,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		first, second, err := c.fetchTargetGraphs(t.Context(), c.scope, c.logger, bypassRequest())
+		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest())
 		require.NoError(t, err)
 		require.Len(t, first, 1)
 		require.Len(t, second, 1)
@@ -1535,7 +1535,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		first, second, err := c.fetchTargetGraphs(t.Context(), c.scope, c.logger, bypassRequest())
+		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest())
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
 		assert.Nil(t, first)
@@ -1553,7 +1553,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		_, _, err := c.fetchTargetGraphs(t.Context(), c.scope, c.logger, bypassRequest())
+		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest())
 		require.Error(t, err)
 	})
 
@@ -1568,7 +1568,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		_, _, err := c.fetchTargetGraphs(t.Context(), c.scope, c.logger, bypassRequest())
+		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest())
 		require.Error(t, err)
 	})
 }
