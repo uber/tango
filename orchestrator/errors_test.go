@@ -15,6 +15,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestClassifyLeaseError(t *testing.T) {
 	}{
 		{
 			name:     "pool timeout is infra retryable",
-			err:      fmt.Errorf("pool for repo org/repo: %w", repomanager.ErrPoolTimeout),
+			err:      fmt.Errorf("%w: %w", repomanager.ErrPoolTimeout, context.DeadlineExceeded),
 			wantCode: tangoerrors.ErrorInfraRetryable,
 		},
 		{
