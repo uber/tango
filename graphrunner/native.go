@@ -24,6 +24,7 @@ import (
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/core/workspace"
+	"github.com/uber/tango/observability/metrics"
 )
 
 type nativeGraphRunner struct {
@@ -31,7 +32,7 @@ type nativeGraphRunner struct {
 	git                git.Interface
 	config             config.RepositoryConfig
 	extraExcludedFiles []string
-	scope              tally.Scope
+	emitter            *metrics.Emitter
 }
 
 type NativeGraphRunnerParams struct {
@@ -48,12 +49,16 @@ func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
 	if scope == nil {
 		scope = tally.NoopScope
 	}
+	emitter, err := metrics.New(scope.SubScope("graph_runner"))
+	if err != nil {
+		emitter = metrics.Nop()
+	}
 	return &nativeGraphRunner{
 		bazel:              p.BazelClient,
 		git:                p.GitClient,
 		config:             p.Config,
 		extraExcludedFiles: p.ExtraExcludedFiles,
-		scope:              scope.SubScope("graph_runner"),
+		emitter:            emitter,
 	}
 }
 
@@ -79,14 +84,14 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 		AdditionalArgs: additionalArgs,
 	})
-	g.scope.Timer("bazel_query_duration").Record(time.Since(bazelStart))
+	g.emitter.DurationHistogram(_opCompute, "bazel_query_duration", _phaseDurationBuckets).RecordDuration(time.Since(bazelStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
 
 	gitStart := time.Now()
 	knownSourceHashes, err := g.git.FileHashes(ctx, "HEAD")
-	g.scope.Timer("git_file_hashes_duration").Record(time.Since(gitStart))
+	g.emitter.DurationHistogram(_opCompute, "git_file_hashes_duration", _phaseDurationBuckets).RecordDuration(time.Since(gitStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
@@ -100,11 +105,11 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 	hashStart := time.Now()
 	res, err := targethasher.FromProto(ctx, queryResult.Result, ws.Path(), hashConfig)
-	g.scope.Timer("target_hash_duration").Record(time.Since(hashStart))
+	g.emitter.DurationHistogram(_opCompute, "target_hash_duration", _phaseDurationBuckets).RecordDuration(time.Since(hashStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
 
-	g.scope.Gauge("target_count").Update(float64(len(res.Targets)))
+	g.emitter.ValueHistogram(_opCompute, "target_count", _targetCountBuckets).RecordValue(float64(len(res.Targets)))
 	return res, nil
 }
