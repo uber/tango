@@ -1,4 +1,4 @@
-.PHONY: build test test-integration benchmark proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
+.PHONY: build test test-integration bench proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -24,7 +24,7 @@ test-integration:
 # Run GetChangedTargets benchmarks against fixed, checked-in commit pairs.
 # Measurement only: not part of `make test` / `make test-integration` and not
 # run in CI, so a slow benchmark never fails the build.
-benchmark:
+bench:
 	@echo "Running benchmarks..."
 	@$(BAZEL) test //integration:integration_test \
 		--test_output=all \
@@ -104,7 +104,7 @@ help:
 	@echo "  make build            - Build all targets"
 	@echo "  make test             - Run all tests"
 	@echo "  make test-integration - Run integration tests (slow)"
-	@echo "  make benchmark        - Run GetChangedTargets benchmarks (measurement only, not in CI)"
+	@echo "  make bench            - Run all benchmark tests"
 	@echo "  make gazelle          - Update BUILD.bazel files"
 	@echo "  make clean            - Clean generated files and binaries"
 	@echo ""
