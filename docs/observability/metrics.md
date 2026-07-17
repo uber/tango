@@ -102,7 +102,7 @@ func (o *Op) Complete(err error) {
 }
 ```
 
-The only tag reused across an operation's metrics is `repo`, so the caller bakes it into the emitter once and hands that emitter to `Begin` and to every custom metric. The operation name differs per metric (it becomes the subscope), and `result` is added by `Complete`.
+The only tag reused across an operation's metrics is `repo`, so the caller bakes it into the emitter once and hands that emitter to `Begin` and to every custom metric. The operation name differs per metric (it becomes the subscope)
 
 ## Conventions
 
@@ -189,26 +189,17 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
 }
 ```
 
-A sub-operation whose outcome is a cache hit or miss records the same `start`/`finish` pair, but sets `result` to `hit`/`miss` directly instead of calling `Complete` (which derives success/failure/cancelled from an error). It reuses the repo-tagged emitter the caller already holds.
+A sub-operation uses `Begin`/`Complete` for the `start`/`finish` duration exactly like the request handlers, reusing the repo-tagged emitter the caller already holds.
 
 ```go
 // opCacheRead is an extension op, declared next to the emit site.
 const opCacheRead = "cache_read"
 
-func (c *controller) readGraphCache(ctx context.Context, e *metrics.Emitter, key string) (storage.GraphReader, bool) {
-    start := time.Now()
-    e.Counter(opCacheRead, "start").Inc(1)
+func (c *controller) readGraphCache(ctx context.Context, e *metrics.Emitter, key string) (_ storage.GraphReader, hit bool, retErr error) {
+    op := metrics.Begin(e, opCacheRead, cacheReadBuckets)
+    defer func() { op.Complete(retErr) }()
 
-    reader, hit := c.lookupGraph(ctx, key)
-
-    result := metrics.ResultMiss
-    if hit {
-        result = metrics.ResultHit
-    }
-    e.Tagged(map[string]string{metrics.TagResult: result}).
-        DurationHistogram(opCacheRead, "finish", cacheReadBuckets).
-        RecordDuration(time.Since(start))
-    return reader, hit
+    return c.lookupGraph(ctx, key)
 }
 ```
 
@@ -229,9 +220,6 @@ fetch service:tango name:controller.get_changed_targets.finish result:success re
 
 # custom value metric — changed-target count distribution
 fetch service:tango name:controller.get_changed_targets.target_count | histogram_percentile(95)
-
-# cache hit rate
-fetch service:tango name:controller.cache_read.finish | sum by (result)
 ```
 
 ## Request-specific tags
