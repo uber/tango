@@ -40,6 +40,7 @@ import (
 	"go.uber.org/yarpc"
 	"go.uber.org/yarpc/api/transport"
 	yarpcgrpc "go.uber.org/yarpc/transport/grpc"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -84,6 +85,11 @@ func writeConfig(t testing.TB, dir, remote, clonePath, workerPath string) string
 
 func startServer(t testing.TB, remote string) string {
 	t.Helper()
+	return startServerWithLogger(t, remote, zaptest.NewLogger(t))
+}
+
+func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
+	t.Helper()
 
 	configDir := t.TempDir()
 	clonePath := t.TempDir()
@@ -91,7 +97,6 @@ func startServer(t testing.TB, remote string) string {
 
 	configPath := writeConfig(t, configDir, remote, clonePath, workerPath)
 
-	zl := zaptest.NewLogger(t)
 	logger := zl.Sugar()
 
 	appCtx, cancel := context.WithCancel(context.Background())

@@ -32,7 +32,11 @@ bench:
 		--test_arg=-test.bench=. \
 		--test_arg=-test.benchtime=3x \
 		--test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) \
-		--test_env=HOME=$$HOME
+		--test_env=HOME=$$HOME \
+		--test_env=GIT_CONFIG_COUNT=1 \
+		--test_env=GIT_CONFIG_KEY_0=advice.detachedHead \
+		--test_env=GIT_CONFIG_VALUE_0=false \
+		--cache_test_results=no
 	@echo "Benchmarks complete!"
 
 # Generate protobuf files using protoc
@@ -104,7 +108,7 @@ help:
 	@echo "  make build            - Build all targets"
 	@echo "  make test             - Run all tests"
 	@echo "  make test-integration - Run integration tests (slow)"
-	@echo "  make bench            - Run all benchmark tests"
+	@echo "  make bench        - Run GetChangedTargets benchs (measurement only, not in CI)"
 	@echo "  make gazelle          - Update BUILD.bazel files"
 	@echo "  make clean            - Clean generated files and binaries"
 	@echo ""
