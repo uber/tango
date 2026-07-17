@@ -29,6 +29,7 @@ import (
 	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/internal/mapper/idmapper"
 	"github.com/uber/tango/internal/targetdiff"
+	"github.com/uber/tango/internal/url"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
@@ -65,7 +66,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	if err := validateGetChangedTargetsRequest(request); err != nil {
 		return common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)
 	}
-	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(request.GetFirstRevision().GetRemote())})
+	scope = scope.Tagged(map[string]string{"repo": url.ToShortRemote(request.GetFirstRevision().GetRemote())})
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
 	start := time.Now()

@@ -21,8 +21,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/entity"
+	"github.com/uber/tango/internal/url"
 )
 
 // GetGraphByTreeHash returns the cache path for the target graph by treehash.
@@ -31,7 +31,7 @@ import (
 // excludeFilesRegex is folded into the key when non-empty (it affects
 // computation). Empty ⇒ legacy path unchanged.
 func GetGraphByTreeHash(remote, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) string {
-	path := filepath.Join(common.ToShortRemote(remote), "graphs", treehash, strategy.String())
+	path := filepath.Join(url.ToShortRemote(remote), "graphs", treehash, strategy.String())
 	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
 		path += "_requests-options-" + hash
 	}
@@ -43,9 +43,9 @@ func GetGraphByTreeHash(remote, treehash string, strategy entity.ComputationStra
 // requests), so neither excludeFilesRegex nor the computation strategy is
 // part of this key.
 func GetTreehashCachePath(buildDescription entity.BuildDescription) string {
-	path := filepath.Join(common.ToShortRemote(buildDescription.Remote), "treehashes", fmt.Sprintf("base-sha-%s", buildDescription.BaseSha))
+	path := filepath.Join(url.ToShortRemote(buildDescription.Remote), "treehashes", fmt.Sprintf("base-sha-%s", buildDescription.BaseSha))
 	if len(buildDescription.ChangeRequests) > 0 {
-		path += "_request-urls-" + getReqURLsHash(buildDescription.ChangeRequests)
+		path += "_request-urls-" + url.GetReqURLsHash(buildDescription.ChangeRequests)
 	}
 	return path
 }
@@ -56,7 +56,7 @@ func GetTreehashCachePath(buildDescription entity.BuildDescription) string {
 // excludeFilesRegex is folded into the key when non-empty (it affects computation).
 // Empty ⇒ legacy path unchanged.
 func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, excludeFilesRegex []string) string {
-	path := filepath.Join(common.ToShortRemote(remote), "compared-targets", treehash1+"_"+treehash2)
+	path := filepath.Join(url.ToShortRemote(remote), "compared-targets", treehash1+"_"+treehash2)
 	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
 		path += "_requests-options-" + hash
 	}

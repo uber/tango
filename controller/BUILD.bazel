@@ -22,6 +22,7 @@ go_library(
         "//internal/mapper",
         "//internal/mapper/idmapper",
         "//internal/targetdiff",
+        "//internal/url",
         "//orchestrator",
         "//tangopb",
         "@com_github_uber_go_tally//:tally",

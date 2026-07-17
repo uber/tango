@@ -25,6 +25,7 @@ import (
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper"
+	"github.com/uber/tango/internal/url"
 
 	"github.com/uber/tango/core/storage"
 	pb "github.com/uber/tango/tangopb"
@@ -54,7 +55,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	if err != nil {
 		return fmt.Errorf("convert get target graph request: %w", err)
 	}
-	scope = scope.Tagged(map[string]string{"repo": common.ToShortRemote(entityReq.Build.Remote)})
+	scope = scope.Tagged(map[string]string{"repo": url.ToShortRemote(entityReq.Build.Remote)})
 	graphReader, err := c.getGraph(ctx, entityReq)
 	if err != nil {
 		return err

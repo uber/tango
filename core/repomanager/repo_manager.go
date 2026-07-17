@@ -26,6 +26,7 @@ import (
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
+	"github.com/uber/tango/internal/url"
 	"go.uber.org/zap"
 )
 
@@ -141,7 +142,7 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 // Lease borrows a worker workspace from the pool.
 // If all workers are leased, it blocks until one is returned or ctx is cancelled.
 func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (workspace.Workspace, error) {
-	repo := toShortRemote(desc.Remote)
+	repo := url.ToShortRemote(desc.Remote)
 	pool := r.poolFor(repo)
 
 	if err := pool.ensureOrigin(ctx, r.git, desc.Remote); err != nil {
