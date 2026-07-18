@@ -38,7 +38,8 @@ gazelle:
 # Run tests with coverage and generate cover.out
 cover: ## Run tests with coverage
 	@echo "Running tests with coverage..."
-	@go test -coverprofile=cover.out -coverpkg=./... ./...
+	@$(BAZEL) coverage --combined_report=lcov //...
+	@cp bazel-out/_coverage/_coverage_report.dat cover.out
 	@echo "Coverage report written to cover.out"
 
 # Clean generated files and binaries
