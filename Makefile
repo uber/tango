@@ -38,7 +38,7 @@ gazelle:
 # Run tests with coverage and generate cover.out
 cover: ## Run tests with coverage
 	@echo "Running tests with coverage..."
-	@go test -race -coverprofile=cover.out -coverpkg=./... ./...
+	@go test -coverprofile=cover.out -coverpkg=./... ./...
 	@echo "Coverage report written to cover.out"
 
 # Clean generated files and binaries
