@@ -40,7 +40,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	)
 	defer func() {
 		if retErr != nil {
-			logger.Error("GetTargetGraph failed", zap.Error(retErr))
+			logger.Error("GetTargetGraph failed", tangoerrors.Fields(retErr)...)
 			scope.Counter("failure").Inc(1)
 			emitFailureMetric(scope, retErr)
 			retErr = mapper.ToProtoError(retErr)

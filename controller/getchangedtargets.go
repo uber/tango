@@ -57,7 +57,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	)
 	defer func() {
 		if retErr != nil {
-			logger.Error("GetChangedTargets failed", zap.Error(retErr))
+			logger.Error("GetChangedTargets failed", tangoerrors.Fields(retErr)...)
 			scope.Counter("failure").Inc(1)
 			emitFailureMetric(scope, retErr)
 			retErr = mapper.ToProtoError(retErr)
