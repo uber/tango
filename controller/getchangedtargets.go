@@ -24,6 +24,7 @@ import (
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/cachekey"
 	"github.com/uber/tango/core/common"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper"
@@ -59,12 +60,13 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 			logger.Error("GetChangedTargets failed", zap.Error(retErr))
 			scope.Counter("failure").Inc(1)
 			emitFailureMetric(scope, retErr)
+			retErr = mapper.ToProtoError(retErr)
 		} else {
 			scope.Counter("success").Inc(1)
 		}
 	}()
 	if err := validateGetChangedTargetsRequest(request); err != nil {
-		return common.WithReason(common.FailureReasonValidation, common.ErrorTypeUser, err)
+		return tangoerrors.NewUser(err)
 	}
 	scope = scope.Tagged(map[string]string{"repo": url.ToShortRemote(request.GetFirstRevision().GetRemote())})
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
@@ -85,7 +87,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	if !request.GetBypassCache() {
 		served, err := c.serveChangedTargetsFromCache(ctx, scope, logger, request, stream, maxDist, start)
 		if err != nil {
-			return err
+			return fmt.Errorf("serve from cache: %w", err)
 		}
 		if served {
 			return nil
@@ -95,7 +97,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// Fetch both revisions' target graphs concurrently.
 	firstGraph, secondGraph, err := c.fetchTargetGraphs(ctx, scope, logger, request)
 	if err != nil {
-		return err
+		return fmt.Errorf("fetch target graphs: %w", err)
 	}
 
 	changedTargetsResponses, err := c.compareTargetGraphs(ctx, scope, logger, firstGraph, secondGraph, maxDist)
@@ -104,9 +106,9 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	secondGraph = nil
 	if err != nil {
 		if ctx.Err() != nil {
-			return common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+			err = ctx.Err()
 		}
-		return common.WithReason(failureReasonCompare, common.ErrorTypeInfra, fmt.Errorf("failed to compare target graphs: %w", err))
+		return fmt.Errorf("compare target graphs: %w", err)
 	}
 
 	// Cache the computed result concurrently so it doesn't block the stream send.
@@ -114,7 +116,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	sendStart := time.Now()
 	if err := sendTrimmedChangedTargets(stream, changedTargetsResponses, maxDist, request.GetOutputConfig()); err != nil {
-		return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send response: %w", err))
+		return fmt.Errorf("send response: %w", err)
 	}
 	sendDuration := time.Since(sendStart)
 	scope.Timer("send_duration").Record(sendDuration)
@@ -143,7 +145,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 	cacheStart := time.Now()
 	treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
 	if err != nil {
-		return false, common.WithReason(failureReasonTreehashRead, common.ErrorTypeInfra, err)
+		return false, fmt.Errorf("read revision treehash: %w", err)
 	}
 	if treehash1 == "" || treehash2 == "" {
 		return false, nil
@@ -168,7 +170,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 		if err := ctx.Err(); err != nil {
 			cachedReader.Close()
 			// Client gave up while we were draining the cache. Surface as a user-cancelled error.
-			return false, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)
+			return false, fmt.Errorf("cache reader: %w", err)
 		}
 		var resp *pb.GetChangedTargetsResponse
 		resp, readErr = cachedReader.Read()
@@ -196,7 +198,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 	scope.Counter("changed_targets_cache_hit").Inc(1)
 	scope.Timer("cache_read_duration").Record(cacheReadDuration)
 	if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
-		return false, common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("failed to send cached response: %w", sendErr))
+		return false, fmt.Errorf("send cached response: %w", sendErr)
 	}
 	totalDuration := time.Since(start)
 	logger.Info("GetChangedTargets: Successfully streamed from cache",
@@ -312,7 +314,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 
 	if ctx.Err() != nil {
 		// If the context was cancelled by the upstream, just return the original error without additional augmentation
-		return nil, nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+		return nil, nil, ctx.Err()
 	}
 
 	// Process errors, only aggregating the ones that are original ones and not a result of the other job being cancelled

@@ -77,6 +77,31 @@ jobs:
           echo "=== Integration test logs ==="
           find . -name "test.log" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No test logs found"
 
+  coverage:
+    name: Coverage
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests with coverage
+        run: make cover
+
+      - name: Upload coverage to codecov.io
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        with:
+          file: cover.out
+          verbose: true
+
   dependencies:
     name: Dependencies
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
@@ -221,6 +246,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build-and-test
+      - integration
+      - coverage
       - dependencies
       - lint
       - workflow-security

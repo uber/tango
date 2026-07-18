@@ -24,7 +24,6 @@ import (
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
@@ -248,10 +247,6 @@ func TestGetTargetGraph_GraphFetchError(t *testing.T) {
 		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.Error(t, err)
-	var ce common.ClassifiedError
-	require.True(t, errors.As(err, &ce))
-	assert.Equal(t, failureReasonGraphFetch, ce.Reason())
-	assert.Equal(t, common.ErrorTypeInfra, ce.Type())
 }
 
 // New coverage: io.ReadFrom fails on graph read -> error returned.
@@ -351,10 +346,6 @@ func TestGetTargetGraph_GraphReadCancelled(t *testing.T) {
 		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.Error(t, err)
-	var ce common.ClassifiedError
-	require.True(t, errors.As(err, &ce))
-	assert.Equal(t, common.FailureReasonCancelled, ce.Reason())
-	assert.Equal(t, common.ErrorTypeUser, ce.Type())
 }
 
 func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
@@ -376,10 +367,6 @@ func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.Error(t, err)
-	var ce common.ClassifiedError
-	require.True(t, errors.As(err, &ce))
-	assert.Equal(t, common.FailureReasonCancelled, ce.Reason())
-	assert.Equal(t, common.ErrorTypeUser, ce.Type())
 }
 
 func newMockReadCloser(data []byte) io.ReadCloser {

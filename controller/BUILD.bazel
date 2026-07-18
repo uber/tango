@@ -17,6 +17,7 @@ go_library(
         "//config",
         "//core/cachekey",
         "//core/common",
+        "//core/errors",
         "//core/storage",
         "//entity",
         "//internal/mapper",

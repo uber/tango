@@ -11,3 +11,6 @@ tools/gopackagesdriver.sh
 
 # Built binaries
 bin/
+
+# Coverage output
+cover.out

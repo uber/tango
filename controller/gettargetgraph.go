@@ -16,13 +16,12 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/uber/tango/core/cachekey"
-	"github.com/uber/tango/core/common"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/internal/url"
@@ -44,6 +43,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 			logger.Error("GetTargetGraph failed", zap.Error(retErr))
 			scope.Counter("failure").Inc(1)
 			emitFailureMetric(scope, retErr)
+			retErr = mapper.ToProtoError(retErr)
 		} else {
 			scope.Counter("success").Inc(1)
 		}
@@ -53,12 +53,12 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	defer cancelLink()
 	entityReq, err := mapper.ProtoToGetTargetGraphRequest(request)
 	if err != nil {
-		return fmt.Errorf("convert get target graph request: %w", err)
+		return tangoerrors.NewUser(fmt.Errorf("convert get target graph request: %w", err))
 	}
 	scope = scope.Tagged(map[string]string{"repo": url.ToShortRemote(entityReq.Build.Remote)})
 	graphReader, err := c.getGraph(ctx, entityReq)
 	if err != nil {
-		return err
+		return fmt.Errorf("get graph: %w", err)
 	}
 	if graphReader == nil {
 		// Nothing to stream
@@ -81,12 +81,12 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 			return nil
 		}
 		if err != nil {
-			return common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
+			return fmt.Errorf("graph reader read: %w", err)
 		}
 		toSend := applyOptimizedTargetsOutputConfigToChunk(graphStreamChunk, outputConfig)
 		err = stream.Send(toSend)
 		if err != nil {
-			return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("send graph: %w", err))
+			return fmt.Errorf("send graph: %w", err)
 		}
 	}
 }
@@ -112,13 +112,13 @@ func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequ
 				logger.Debug("getGraph: treehash not found", zap.Error(err))
 			} else {
 				// Other errors (network, infra issues) should be retried
-				return nil, err
+				return nil, fmt.Errorf("get treehash: %w", err)
 			}
 		} else {
 			defer treehashResponse.ReadCloser.Close()
 			treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("read treehash: %w", err)
 			}
 			logger.Info("getGraph: treehash found")
 			treehashPath := cachekey.GetGraphByTreeHash(req.Build.Remote, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
@@ -127,10 +127,10 @@ func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequ
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
 			if err != nil {
 				if ctx.Err() != nil {
-					return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+					err = ctx.Err()
 				}
 				if !storage.IsNotFound(err) {
-					return nil, common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
+					return nil, fmt.Errorf("graph reader: %w", err)
 				}
 				logger.Warn("getGraph: graph not found at treehash path", zap.Error(err))
 			} else {
@@ -152,13 +152,9 @@ func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequ
 	graphReader, err := c.orchestrator.GetTargetGraph(ctx, req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, ctx.Err())
+			err = ctx.Err()
 		}
-		var ce common.ClassifiedError
-		if errors.As(err, &ce) {
-			return nil, err
-		}
-		return nil, common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
+		return nil, fmt.Errorf("get target graph: %w", err)
 	}
 	logger.Info("getGraph: computed target graph",
 		zap.Duration("compute_duration", time.Since(computeStart)),
