@@ -63,24 +63,6 @@ func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, excludeFil
 	return path
 }
 
-// getReqURLsHash returns a fixed-length MD5 hash of the sorted change request URLs.
-// Each URL's bytes are fed into the digest individually (no separator)
-func getReqURLsHash(requests []entity.ChangeRequest) string {
-	if len(requests) == 0 {
-		return ""
-	}
-	urls := make([]string, 0, len(requests))
-	for _, req := range requests {
-		urls = append(urls, req.URL)
-	}
-	sort.Strings(urls)
-	h := md5.New()
-	for _, url := range urls {
-		h.Write([]byte(url))
-	}
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
 // hashExcludeFilesRegex returns "" when excludeFilesRegex is empty (preserves
 // legacy paths), otherwise the md5 hex digest of the sorted list. As new
 // fields affecting computation are added, fold them into the digest here.
