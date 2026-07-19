@@ -16,6 +16,7 @@ package repomanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -212,6 +213,36 @@ func TestLease_CtxCanceled(t *testing.T) {
 	cancel()
 	_, err = rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
+	assert.False(t, errors.Is(err, ErrPoolTimeout), "cancelled context should not produce ErrPoolTimeout")
+	assert.True(t, errors.Is(err, context.Canceled), "expected underlying context.Canceled")
+
+	require.NoError(t, ws1.Release())
+}
+
+func TestLease_CtxDeadlineExceeded(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+	g := gitmock.NewMockInterface(ctrl)
+
+	root := t.TempDir()
+	remote := "git@github.com:org/repo"
+	originDir := filepath.Join(root, "org/repo")
+	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+
+	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
+	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(nil)
+
+	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
+
+	ws1, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	_, err = rm.Lease(ctx, entity.BuildDescription{Remote: remote})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrPoolTimeout), "deadline exceeded should produce ErrPoolTimeout")
+	assert.True(t, errors.Is(err, context.DeadlineExceeded), "expected underlying context.DeadlineExceeded")
 
 	require.NoError(t, ws1.Release())
 }
@@ -228,7 +259,7 @@ func TestLease_OriginCloneFails(t *testing.T) {
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
 	_, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "clone origin")
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestLease_WorkerCloneFails(t *testing.T) {
@@ -247,7 +278,7 @@ func TestLease_WorkerCloneFails(t *testing.T) {
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop().Sugar(), RepoManagerClonePath: root, WorkerRootPath: filepath.Join(root, ".workers"), PoolSize: 1})
 	_, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "create worker")
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestLease_DiscoversExistingWorker(t *testing.T) {

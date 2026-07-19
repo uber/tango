@@ -13,3 +13,19 @@
 // limitations under the License.
 
 package orchestrator
+
+import (
+	"errors"
+	"fmt"
+
+	tangoerrors "github.com/uber/tango/core/errors"
+	"github.com/uber/tango/core/repomanager"
+)
+
+func classifyLeaseError(err error) error {
+	wrappedErr := fmt.Errorf("lease workspace: %w", err)
+	if errors.Is(err, repomanager.ErrPoolTimeout) {
+		return tangoerrors.NewInfraRetryable(wrappedErr)
+	}
+	return tangoerrors.NewInfra(wrappedErr)
+}

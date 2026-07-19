@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "idmapper",
+    srcs = ["idmapper.go"],
+    importpath = "github.com/uber/tango/internal/mapper/idmapper",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "idmapper_test",
+    srcs = ["idmapper_test.go"],
+    embed = [":idmapper"],
+    deps = ["@com_github_stretchr_testify//assert"],
+)

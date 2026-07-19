@@ -17,10 +17,10 @@ package common
 import (
 	"context"
 	"encoding/hex"
-	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/uber/tango/core/targethasher"
+	"github.com/uber/tango/internal/mapper/idmapper"
 	"github.com/uber/tango/tangopb"
 )
 
@@ -42,13 +42,6 @@ const (
 	DefaultMetadataMapChunkSize = 50_000
 )
 
-// ToShortRemote returns the short remote name given a git ssh remote string.
-// For example, "git@github:uber/tango" will return "uber/tango".
-func ToShortRemote(remote string) string {
-	strs := strings.Split(remote, ":")
-	return strs[len(strs)-1]
-}
-
 // cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
 // Picked to keep overhead negligible while still surfacing cancellation in <100ms
 // for typical target rates.
@@ -67,10 +60,10 @@ func ResultToGetTargetGraphResponse(ctx context.Context, result targethasher.Res
 		targetNamesMapping[name] = int32(i + 1)
 	}
 
-	ruleTypeMapper := NewNameIDMapper()
-	tagMapper := NewNameIDMapper()
-	attrNameMapper := NewNameIDMapper()
-	attrStrValMapper := NewNameIDMapper()
+	ruleTypeMapper := idmapper.NewMapper()
+	tagMapper := idmapper.NewMapper()
+	attrNameMapper := idmapper.NewMapper()
+	attrStrValMapper := idmapper.NewMapper()
 
 	// Build the optimized targets slice
 	optimizedTargets := make([]*tangopb.OptimizedTarget, 0, len(result.Targets))

@@ -9,6 +9,7 @@ go_library(
         "//core/git",
         "//core/workspace",
         "//entity",
+        "//internal/url",
         "@org_uber_go_zap//:zap",
     ],
 )

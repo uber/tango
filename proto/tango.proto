@@ -7,6 +7,18 @@ option java_multiple_files = true;
 option java_outer_classname = "TangoProto";
 option java_package = "com.uber.tango";
 
+enum ErrorCode {
+    ERROR_INFRA = 0;
+    ERROR_CANCELLED = 1;
+    ERROR_USER = 2;
+    ERROR_INFRA_RETRYABLE = 3;
+}
+
+message TangoError {
+    ErrorCode code = 1;
+    string message = 2;
+}
+
 // Request represents a single change request with a URL and optional commit SHA.
 message Request {
     // The URL of the change request (e.g., a GitHub pull request URL or Phabricator diff URL)

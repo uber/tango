@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package common
+package idmapper
 
 import (
 	"fmt"
@@ -21,8 +21,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNameIDMapper_AssignsSequentialAndStableIDs(t *testing.T) {
-	mapper := NewNameIDMapper()
+func TestMapper_AssignsSequentialAndStableIDs(t *testing.T) {
+	mapper := NewMapper()
 
 	idA := mapper.ID("a")
 	assert.Equal(t, int32(1), idA, "first id must be 1; 0 is reserved as proto3 unspecified")
@@ -36,8 +36,8 @@ func TestNameIDMapper_AssignsSequentialAndStableIDs(t *testing.T) {
 	assert.Equal(t, int32(3), idC)
 }
 
-func TestNameIDMapper_Invert(t *testing.T) {
-	mapper := NewNameIDMapper()
+func TestMapper_Invert(t *testing.T) {
+	mapper := NewMapper()
 	names := []string{"x", "y", "z"}
 	for _, n := range names {
 		mapper.ID(n)
@@ -58,8 +58,8 @@ func TestNameIDMapper_Invert(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestNameIDMapper_NeverAssignsZero(t *testing.T) {
-	mapper := NewNameIDMapper()
+func TestMapper_NeverAssignsZero(t *testing.T) {
+	mapper := NewMapper()
 	for i := 0; i < 1000; i++ {
 		id := mapper.ID(fmt.Sprintf("name-%d", i))
 		assert.NotEqual(t, int32(0), id)

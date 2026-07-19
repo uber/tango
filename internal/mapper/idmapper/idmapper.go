@@ -12,28 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package common
+// Package idmapper provides the ID-mapping primitives used to build the tangopb
+// wire format's int32-ID-keyed maps.
+package idmapper
 
-// NameIDMapper assigns stable int32 IDs to string names on demand.
+// Mapper assigns stable int32 IDs to string names on demand.
 // IDs are assigned sequentially starting from 1. Zero is reserved as the
 // proto3 "unset" sentinel so consumers using encoding/json (which honors
 // `omitempty` on int32 fields) or any client that treats GetId() == 0 as
 // missing never silently lose real entries.
-type NameIDMapper struct {
+type Mapper struct {
 	nameToID map[string]int32
 	nextID   int32
 }
 
-// NewNameIdMapper creates a new NameIdMapper.
-func NewNameIDMapper() *NameIDMapper {
-	return &NameIDMapper{
+// NewMapper creates a new Mapper.
+func NewMapper() *Mapper {
+	return &Mapper{
 		nameToID: make(map[string]int32),
 		nextID:   1,
 	}
 }
 
 // ID returns the existing ID for the provided name or assigns a new one.
-func (a *NameIDMapper) ID(name string) int32 {
+func (a *Mapper) ID(name string) int32 {
 	if id, ok := a.nameToID[name]; ok {
 		return id
 	}
@@ -44,7 +46,7 @@ func (a *NameIDMapper) ID(name string) int32 {
 }
 
 // Invert returns an id->name map built from the current name->id map.
-func (a *NameIDMapper) Invert() map[int32]string {
+func (a *Mapper) Invert() map[int32]string {
 	out := make(map[int32]string, len(a.nameToID))
 	for name, id := range a.nameToID {
 		out[id] = name

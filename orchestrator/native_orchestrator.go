@@ -26,6 +26,7 @@ import (
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
+	"github.com/uber/tango/core/cachekey"
 	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
@@ -33,7 +34,6 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
-	"github.com/uber/tango/internal/cachekey"
 	"go.uber.org/zap"
 )
 
@@ -127,7 +127,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	ws, err := b.repoManager.Lease(ctx, build)
 	if err != nil {
-		return nil, fmt.Errorf("lease workspace: %w", err)
+		return nil, classifyLeaseError(err)
 	}
 	defer func() {
 		err := ws.Release()

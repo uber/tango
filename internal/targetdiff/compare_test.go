@@ -91,6 +91,48 @@ func TestCompare_doesNotTraverseUnchangedTargets(t *testing.T) {
 	assert.Equal(t, "source", result.ChangedTargets[0].After.Name)
 }
 
+func TestCompare_shortestDistanceWins(t *testing.T) {
+	// A transitive consumer reachable from two seeds via paths of different
+	// lengths must take the shorter distance. Rules that directly depend on a
+	// changed source file are themselves seeds (distance 0); only rules with no
+	// changed source dependency are transitive consumers.
+	//   s1 (source) <- l1 <- l2 <- l3
+	//   s2 (source) <- la <-------- l3
+	// Seeds: s1, s2, l1, la (=0). Transitive: l2=1, l3=min(2 via l2, 1 via la)=1.
+	graph := func(suffix string) Graph {
+		return Graph{
+			"s1": {Name: "s1", Hash: "s1-" + suffix, RuleType: "source file"},
+			"s2": {Name: "s2", Hash: "s2-" + suffix, RuleType: "source file"},
+			"l1": {Name: "l1", Hash: "l1-" + suffix, RuleType: "rule", Dependencies: []string{"s1"}},
+			"la": {Name: "la", Hash: "la-" + suffix, RuleType: "rule", Dependencies: []string{"s2"}},
+			"l2": {Name: "l2", Hash: "l2-" + suffix, RuleType: "rule", Dependencies: []string{"l1"}},
+			"l3": {Name: "l3", Hash: "l3-" + suffix, RuleType: "rule", Dependencies: []string{"l2", "la"}},
+		}
+	}
+
+	result, err := Compare(t.Context(), Request{Before: graph("old"), After: graph("new"), MaxDistance: -1})
+	require.NoError(t, err)
+	byName := changesByName(result)
+	assert.Equal(t, int32(0), byName["l1"].Distance)
+	assert.Equal(t, int32(0), byName["la"].Distance)
+	assert.Equal(t, int32(1), byName["l2"].Distance)
+	assert.Equal(t, int32(1), byName["l3"].Distance, "l3 reaches seed la at distance 1, shorter than 2 via l1→l2")
+}
+
+func TestCompare_newTargetSeededUnderMaxDistance(t *testing.T) {
+	// A NEW target is a seed and keeps distance 0 even when a max distance is set.
+	before := Graph{}
+	after := Graph{
+		"new": {Name: "new", Hash: "new"},
+	}
+
+	result, err := Compare(t.Context(), Request{Before: before, After: after, MaxDistance: 1})
+	require.NoError(t, err)
+	byName := changesByName(result)
+	require.Contains(t, byName, "new")
+	assert.Equal(t, int32(0), byName["new"].Distance)
+}
+
 func changesByName(result Result) map[string]*ChangedTarget {
 	changes := make(map[string]*ChangedTarget, len(result.ChangedTargets))
 	for _, changed := range result.ChangedTargets {
