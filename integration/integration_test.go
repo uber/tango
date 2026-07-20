@@ -40,6 +40,7 @@ import (
 	"go.uber.org/yarpc"
 	"go.uber.org/yarpc/api/transport"
 	yarpcgrpc "go.uber.org/yarpc/transport/grpc"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -48,14 +49,14 @@ const (
 	configTemplateFile = "testdata/tango-config.yaml.tmpl"
 )
 
-func repoRemote(t *testing.T) string {
+func repoRemote(t testing.TB) string {
 	t.Helper()
 	remote := os.Getenv("TANGO_REPO_REMOTE")
 	require.NotEmpty(t, remote, "TANGO_REPO_REMOTE must be set (pass --test_env=TANGO_REPO_REMOTE=... to bazel test)")
 	return remote
 }
 
-func writeConfig(t *testing.T, dir, remote, clonePath, workerPath string) string {
+func writeConfig(t testing.TB, dir, remote, clonePath, workerPath string) string {
 	t.Helper()
 
 	tmpl, err := template.ParseFiles(configTemplateFile)
@@ -82,7 +83,12 @@ func writeConfig(t *testing.T, dir, remote, clonePath, workerPath string) string
 	return configPath
 }
 
-func startServer(t *testing.T, remote string) string {
+func startServer(t testing.TB, remote string) string {
+	t.Helper()
+	return startServerWithLogger(t, remote, zaptest.NewLogger(t))
+}
+
+func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 	t.Helper()
 
 	configDir := t.TempDir()
@@ -91,7 +97,6 @@ func startServer(t *testing.T, remote string) string {
 
 	configPath := writeConfig(t, configDir, remote, clonePath, workerPath)
 
-	zl := zaptest.NewLogger(t)
 	logger := zl.Sugar()
 
 	appCtx, cancel := context.WithCancel(context.Background())
@@ -142,7 +147,7 @@ func startServer(t *testing.T, remote string) string {
 	return listener.Addr().String()
 }
 
-func newClient(t *testing.T, addr string) pb.TangoYARPCClient {
+func newClient(t testing.TB, addr string) pb.TangoYARPCClient {
 	t.Helper()
 
 	grpcTransport := yarpcgrpc.NewTransport()
@@ -251,7 +256,7 @@ type parsedChangedTargets struct {
 	Distances map[string]int32
 }
 
-func getChangedTargets(t *testing.T, client pb.TangoYARPCClient, remote, firstSHA, secondSHA string) parsedChangedTargets {
+func getChangedTargets(t testing.TB, client pb.TangoYARPCClient, remote, firstSHA, secondSHA string) parsedChangedTargets {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)

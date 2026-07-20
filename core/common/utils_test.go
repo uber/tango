@@ -25,37 +25,6 @@ import (
 	pb "github.com/uber/tango/tangopb"
 )
 
-func TestToShortRemote(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		remote string
-		want   string
-	}{
-		{
-			name:   "ssh remote with host",
-			remote: "git@github:uber/tango",
-			want:   "uber/tango",
-		},
-		{
-			name:   "already short",
-			remote: "uber/tango",
-			want:   "uber/tango",
-		},
-		{
-			name:   "with nested path",
-			remote: "git@github:org/project/sub",
-			want:   "org/project/sub",
-		},
-	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, ToShortRemote(tt.remote))
-		})
-	}
-}
-
 func TestChunkTargets(t *testing.T) {
 	t.Parallel()
 

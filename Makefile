@@ -1,4 +1,4 @@
-.PHONY: build test test-integration proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
+.PHONY: build cover test test-integration bench proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -21,6 +21,20 @@ test-integration:
 	@$(BAZEL) test //integration:integration_test --test_output=errors --test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) --test_env=HOME=$$HOME
 	@echo "Integration tests passed!"
 
+# Run GetChangedTargets benchmarks against fixed, checked-in commit pairs.
+# Measurement only: not part of `make test` / `make test-integration` and not
+# run in CI, so a slow benchmark never fails the build.
+bench:
+	@echo "Running benchmarks..."
+	@$(BAZEL) test //integration:integration_test \
+		--test_output=all \
+		--test_arg=-test.run=^$$ \
+		--test_arg=-test.bench=. \
+		--test_arg=-test.benchtime=15x \
+		--test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) \
+		--test_env=HOME=$$HOME
+	@echo "Benchmarks complete!"
+
 # Generate protobuf files using protoc
 proto:
 	@echo "Generating protobuf files with protoc..."
@@ -34,6 +48,13 @@ gazelle:
 	@echo "Running Gazelle to update BUILD files..."
 	@$(BAZEL) run //:gazelle
 	@echo "BUILD files updated!"
+
+# Run tests with coverage and generate cover.out
+cover: ## Run tests with coverage
+	@echo "Running tests with coverage..."
+	@$(BAZEL) coverage --combined_report=lcov //...
+	@cp bazel-out/_coverage/_coverage_report.dat cover.out
+	@echo "Coverage report written to cover.out"
 
 # Clean generated files and binaries
 clean:
@@ -90,6 +111,7 @@ help:
 	@echo "  make build            - Build all targets"
 	@echo "  make test             - Run all tests"
 	@echo "  make test-integration - Run integration tests (slow)"
+	@echo "  make bench        - Run GetChangedTargets benchs (measurement only, not in CI)"
 	@echo "  make gazelle          - Update BUILD.bazel files"
 	@echo "  make clean            - Clean generated files and binaries"
 	@echo ""

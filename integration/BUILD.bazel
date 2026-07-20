@@ -4,7 +4,10 @@ go_test(
     name = "integration_test",
     size = "large",
     timeout = "long",
-    srcs = ["integration_test.go"],
+    srcs = [
+        "benchmark_test.go",
+        "integration_test.go",
+    ],
     data = glob(["testdata/**"]),
     tags = [
         "integration",
@@ -23,6 +26,8 @@ go_test(
         "@org_uber_go_yarpc//:yarpc",
         "@org_uber_go_yarpc//api/transport",
         "@org_uber_go_yarpc//transport/grpc",
+        "@org_uber_go_zap//:zap",
+        "@org_uber_go_zap//zapcore",
         "@org_uber_go_zap//zaptest",
     ],
 )
