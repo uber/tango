@@ -17,22 +17,20 @@ package storage
 import (
 	"context"
 
-	pb "github.com/uber/tango/tangopb"
+	"github.com/uber/tango/entity"
 )
 
+// GraphReader streams entity.GetTargetGraphResponse values from a stored
+// target graph.
 type GraphReader interface {
-	// Read reads the next GetTargetGraphResponse message from the storage.
-	Read() (*pb.GetTargetGraphResponse, error)
-	// Close releases any underlying resources if supported by the implementation.
-	// Implementations that don't hold resources may return nil.
+	Read() (entity.GetTargetGraphResponse, error)
 	Close() error
 }
 
-// NewGraphReader returns a GraphReader that, when read, will fetch the stored graph at key
+// NewGraphReader opens the stored target graph at key and returns a
+// GraphReader that yields entity.GetTargetGraphResponse values.
 func NewGraphReader(ctx context.Context, st Storage, key string) (GraphReader, error) {
-	r, err := newReader[pb.GetTargetGraphResponse](ctx, st, key, 512<<20, func(m *pb.GetTargetGraphResponse) bool { // 512MB/message limit
-		return m.GetItem() == nil
-	})
+	r, err := newReader[entity.GetTargetGraphResponse](ctx, st, key)
 	if err != nil {
 		return nil, err
 	}

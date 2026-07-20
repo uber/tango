@@ -35,6 +35,7 @@ import (
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
 	"github.com/uber/tango/internal/url"
+	"github.com/uber/tango/mapper"
 	"github.com/uber/tango/observability/metrics"
 	"go.uber.org/zap"
 )
@@ -212,15 +213,16 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	responses, err := common.ResultToGetTargetGraphResponse(ctx, result,
-		b.config.Service.Chunking.TargetChunkSize,
-		b.config.Service.Chunking.MetadataMapChunkSize,
-	)
+	targets, meta, err := mapper.ResultToTargetGraph(ctx, result)
 	if err != nil {
-		return nil, fmt.Errorf("convert target graph to response: %w", err)
+		return nil, fmt.Errorf("convert target graph: %w", err)
+	}
+	chunks, err := mapper.ChunkTargetGraph(targets, meta, b.config.Service.MaxMessageBytes)
+	if err != nil {
+		return nil, fmt.Errorf("chunk target graph: %w", err)
 	}
 	cacheWriteStart := time.Now()
-	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, responses)
+	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, chunks)
 	if err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
 	}

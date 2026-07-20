@@ -21,11 +21,13 @@ import (
 	"io"
 	"testing"
 
-	gogio "github.com/gogo/protobuf/io"
+	"encoding/json"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
+	"github.com/uber/tango/entity"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
@@ -120,10 +122,7 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).Return(nil)
 	store := storagemock.NewMockStorage(ctrl)
 	var buf bytes.Buffer
-	err := gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
-	})
-	require.NoError(t, err)
+	require.NoError(t, json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
 
 	gomock.InOrder(
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-xyz"))}, nil),
@@ -133,7 +132,7 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 		Logger:  zaptest.NewLogger(t),
 		Storage: store,
 	})
-	err = c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
@@ -190,16 +189,7 @@ func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	store := storagemock.NewMockStorage(ctrl)
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("x"))
 	orchestrator := orchestratormock.NewMockOrchestrator(ctrl)
-	// Provide a fake GraphReader that yields one message then EOF
-	graphReader := storagemock.NewMockGraphReader(ctrl)
-	graphReader.EXPECT().Read().DoAndReturn(func() (*pb.GetTargetGraphResponse, error) {
-		return &pb.GetTargetGraphResponse{
-			Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
-		}, nil
-	}).Times(1)
-	// Controller may call Read again to observe EOF
-	graphReader.EXPECT().Read().Return(nil, io.EOF).Times(1)
-	graphReader.EXPECT().Close().Return(nil)
+	graphReader := newGraphReader(t, entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
 	orchestrator.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(graphReader, nil)
 	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
@@ -277,10 +267,7 @@ func TestGetTargetGraph_StreamSendError(t *testing.T) {
 	storagemock := storagemock.NewMockStorage(ctrl)
 
 	var buf bytes.Buffer
-	err := gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
-	})
-	require.NoError(t, err)
+	require.NoError(t, json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
 
 	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send fail"))
 	gomock.InOrder(
@@ -291,7 +278,7 @@ func TestGetTargetGraph_StreamSendError(t *testing.T) {
 		Logger:  zaptest.NewLogger(t),
 		Storage: storagemock,
 	})
-	err = c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	assert.Error(t, err)
@@ -309,12 +296,7 @@ func TestGetTargetGraph_GraphNotFound_FallsThrough(t *testing.T) {
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("graphs/abc")),
 	)
 	orch := orchestratormock.NewMockOrchestrator(ctrl)
-	graphReader := storagemock.NewMockGraphReader(ctrl)
-	graphReader.EXPECT().Read().Return(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
-	}, nil).Times(1)
-	graphReader.EXPECT().Read().Return(nil, io.EOF).Times(1)
-	graphReader.EXPECT().Close().Return(nil)
+	graphReader := newGraphReader(t, entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
 	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(graphReader, nil)
 	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),

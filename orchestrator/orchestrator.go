@@ -18,7 +18,6 @@ import (
 	"context"
 
 	"github.com/uber/tango/core/storage"
-
 	"github.com/uber/tango/entity"
 )
 

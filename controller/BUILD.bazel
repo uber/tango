@@ -15,7 +15,6 @@ go_library(
     importpath = "github.com/uber/tango/controller",
     visibility = ["//visibility:public"],
     deps = [
-        "//config",
         "//core/cachekey",
         "//core/common",
         "//core/errors",
@@ -23,6 +22,7 @@ go_library(
         "//entity",
         "//internal/mapper",
         "//internal/mapper/idmapper",
+        "//internal/streaming",
         "//internal/targetdiff",
         "//internal/url",
         "//observability/metrics",
@@ -47,7 +47,6 @@ go_test(
     ],
     embed = [":controller"],
     deps = [
-        "//core/common",
         "//core/storage",
         "//core/storage/storagemock",
         "//entity",
@@ -55,7 +54,6 @@ go_test(
         "//orchestrator/orchestratormock",
         "//tangopb",
         "//tangopb/tangopbmock",
-        "@com_github_gogo_protobuf//io",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@com_github_uber_go_tally//:tally",

@@ -16,19 +16,31 @@ package controller
 
 import (
 	"context"
+	"testing"
 
-	"github.com/uber/tango/core/common"
+	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/entity"
 	"github.com/uber/tango/observability/metrics"
 	"go.uber.org/zap"
 )
 
 func newTestController(logger *zap.Logger) *controller {
 	return &controller{
-		logger:                 logger,
-		emitter:                metrics.Nop(),
-		targetChunkSize:        common.DefaultTargetChunkSize,
-		changedTargetChunkSize: common.DefaultChangedTargetChunkSize,
-		metadataMapChunkSize:   common.DefaultMetadataMapChunkSize,
-		appCtx:                 context.Background(),
+		logger:          logger,
+		emitter:         metrics.Nop(),
+		maxMessageBytes: _defaultMaxMessageBytes,
+		appCtx:          context.Background(),
 	}
+}
+
+// newGraphReader builds a storage.GraphReader from entity chunks
+// by writing JSON to in-memory storage and reading back.
+func newGraphReader(t *testing.T, chunks ...entity.GetTargetGraphResponse) storage.GraphReader {
+	t.Helper()
+	st := storage.NewMemoryStorage()
+	require.NoError(t, storage.WriteGraphStream(context.Background(), st, "test-graph", chunks))
+	reader, err := storage.NewGraphReader(context.Background(), st, "test-graph")
+	require.NoError(t, err)
+	return reader
 }
