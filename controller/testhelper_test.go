@@ -29,7 +29,7 @@ func newTestController(logger *zap.Logger) *controller {
 	return &controller{
 		logger:               logger,
 		scope:                tally.NoopScope,
-		maxMessageBytes:      _defaultMaxMessageBytes,
+		maxMessageBytes:      4_250_000,
 		totalDurationBuckets: _totalDurationBuckets,
 		appCtx:               context.Background(),
 	}

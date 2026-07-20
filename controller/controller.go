@@ -39,8 +39,6 @@ type Params struct {
 // _totalDurationBuckets covers 0–15 minutes in 10-second linear intervals.
 var _totalDurationBuckets = tally.MustMakeLinearDurationBuckets(10*time.Second, 10*time.Second, 90)
 
-const _defaultMaxMessageBytes = 4_250_000
-
 type controller struct {
 	logger               *zap.Logger
 	storage              storage.Storage
@@ -64,7 +62,8 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	}
 	maxMessageBytes := p.MaxMessageBytes
 	if maxMessageBytes <= 0 {
-		maxMessageBytes = _defaultMaxMessageBytes
+		// TODO: provide via config.Parse instead of hardcoding
+		maxMessageBytes = 4_250_000
 	}
 	return &controller{
 		logger:               p.Logger,
