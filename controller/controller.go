@@ -19,8 +19,6 @@ import (
 	"time"
 
 	"github.com/uber-go/tally"
-	"github.com/uber/tango/config"
-	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
@@ -31,25 +29,25 @@ import (
 // Params are the parameters for the controller.
 type Params struct {
 	fx.In
-	Logger       *zap.Logger
-	Storage      storage.Storage
-	Orchestrator orchestrator.Orchestrator
-	Scope        tally.Scope        `optional:"true"`
-	ChunkConfig  config.ChunkConfig `optional:"true"`
+	Logger          *zap.Logger
+	Storage         storage.Storage
+	Orchestrator    orchestrator.Orchestrator
+	Scope           tally.Scope `optional:"true"`
+	MaxMessageBytes int         `optional:"true"`
 }
 
 // _totalDurationBuckets covers 0–15 minutes in 10-second linear intervals.
 var _totalDurationBuckets = tally.MustMakeLinearDurationBuckets(10*time.Second, 10*time.Second, 90)
 
+const _defaultMaxMessageBytes = 4_250_000
+
 type controller struct {
-	logger                 *zap.Logger
-	storage                storage.Storage
-	orchestrator           orchestrator.Orchestrator
-	scope                  tally.Scope
-	targetChunkSize        int
-	changedTargetChunkSize int
-	metadataMapChunkSize   int
-	totalDurationBuckets   tally.Buckets
+	logger               *zap.Logger
+	storage              storage.Storage
+	orchestrator         orchestrator.Orchestrator
+	scope                tally.Scope
+	maxMessageBytes      int
+	totalDurationBuckets tally.Buckets
 
 	// appCtx is the application lifetime; cancel it on process shutdown.
 	// Used by linkRequestCtx and any fire-and-forget goroutines so they
@@ -64,28 +62,18 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	if scope == nil {
 		scope = tally.NoopScope
 	}
-	targetChunkSize := p.ChunkConfig.TargetChunkSize
-	if targetChunkSize <= 0 {
-		targetChunkSize = common.DefaultTargetChunkSize
-	}
-	changedTargetChunkSize := p.ChunkConfig.ChangedTargetChunkSize
-	if changedTargetChunkSize <= 0 {
-		changedTargetChunkSize = common.DefaultChangedTargetChunkSize
-	}
-	metadataMapChunkSize := p.ChunkConfig.MetadataMapChunkSize
-	if metadataMapChunkSize <= 0 {
-		metadataMapChunkSize = common.DefaultMetadataMapChunkSize
+	maxMessageBytes := p.MaxMessageBytes
+	if maxMessageBytes <= 0 {
+		maxMessageBytes = _defaultMaxMessageBytes
 	}
 	return &controller{
-		logger:                 p.Logger,
-		storage:                p.Storage,
-		orchestrator:           p.Orchestrator,
-		scope:                  scope.SubScope("controller"),
-		targetChunkSize:        targetChunkSize,
-		changedTargetChunkSize: changedTargetChunkSize,
-		metadataMapChunkSize:   metadataMapChunkSize,
-		totalDurationBuckets:   _totalDurationBuckets,
-		appCtx:                 appCtx,
+		logger:               p.Logger,
+		storage:              p.Storage,
+		orchestrator:         p.Orchestrator,
+		scope:                scope.SubScope("controller"),
+		maxMessageBytes:      maxMessageBytes,
+		totalDurationBuckets: _totalDurationBuckets,
+		appCtx:               appCtx,
 	}
 }
 
@@ -98,12 +86,7 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 // The returned cancel function MUST be deferred; it releases the
 // context.AfterFunc handle so we do not leak a watcher past the request.
 func (c *controller) linkRequestCtx(reqCtx context.Context) (context.Context, context.CancelFunc) {
-	// Derive a per-request ctx whose cancel only affects this ctx and its
-	// children — it never propagates up to reqCtx.
 	ctx, cancel := context.WithCancel(reqCtx)
-	// Register a one-shot watcher that cancels the derived ctx if appCtx fires.
-	// AfterFunc only observes appCtx; it never cancels it. stop() deregisters
-	// the watcher so the closure is not retained past the request.
 	stop := context.AfterFunc(c.appCtx, cancel)
 	return ctx, func() {
 		stop()

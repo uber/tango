@@ -10,7 +10,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core/storage",
-        "//tangopb",
+        "//entity",
         "@org_uber_go_mock//gomock",
     ],
 )

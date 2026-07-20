@@ -29,6 +29,7 @@ import (
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/internal/mapper/idmapper"
+	"github.com/uber/tango/internal/streaming"
 	"github.com/uber/tango/internal/targetdiff"
 	"github.com/uber/tango/internal/url"
 	pb "github.com/uber/tango/tangopb"
@@ -37,12 +38,12 @@ import (
 
 // job represents a single goroutine of getting a target graph
 type job struct {
-	graphStreamChunks []*pb.GetTargetGraphResponse
-	err               error
-	cancelled         bool
-	completed         bool
-	ctx               context.Context
-	cancel            context.CancelFunc
+	graphChunks []entity.GetTargetGraphResponse
+	err         error
+	cancelled   bool
+	completed   bool
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 // GetChangedTargets returns the changed targets between two revisions. If the
@@ -164,7 +165,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 	// Buffer all responses before sending any. A concurrent goroutine write may have
 	// left a partial blob in storage; buffering lets us detect corruption and fall
 	// through to recompute before we've sent anything to the client.
-	var cached []*pb.GetChangedTargetsResponse
+	var cached []entity.GetChangedTargetsResponse
 	var readErr error
 	for {
 		if err := ctx.Err(); err != nil {
@@ -172,7 +173,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 			// Client gave up while we were draining the cache. Surface as a user-cancelled error.
 			return false, fmt.Errorf("cache reader: %w", err)
 		}
-		var resp *pb.GetChangedTargetsResponse
+		var resp entity.GetChangedTargetsResponse
 		resp, readErr = cachedReader.Read()
 		if readErr == io.EOF {
 			readErr = nil
@@ -215,7 +216,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, scope tal
 // Errors caused solely by that induced cancellation are dropped; only the
 // original failure is returned. A client disconnect surfaces as a user-cancelled
 // error.
-func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, logger *zap.Logger, request *pb.GetChangedTargetsRequest) ([]*pb.GetTargetGraphResponse, []*pb.GetTargetGraphResponse, error) {
+func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, logger *zap.Logger, request *pb.GetChangedTargetsRequest) ([]entity.GetTargetGraphResponse, []entity.GetTargetGraphResponse, error) {
 	jobs := make([]*job, 2)
 	for i := 0; i < 2; i++ {
 		// create independent contexts for each job; if one of the jobs fails, the other one should be cancelled to save resources and improve latency
@@ -228,7 +229,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 	type graphResult struct {
 		// order is 0 or 1, 0 is the base (first) revision, 1 is the target (second) revision
 		order  int
-		chunks []*pb.GetTargetGraphResponse
+		chunks []entity.GetTargetGraphResponse
 		err    error
 	}
 	results := make(chan graphResult, len(jobs))
@@ -265,8 +266,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 			}
 			defer graphReader.Close()
 
-			// Read all chunks from the stream
-			var chunks []*pb.GetTargetGraphResponse
+			var chunks []entity.GetTargetGraphResponse
 			for {
 				chunk, err := graphReader.Read()
 				if err == io.EOF {
@@ -285,7 +285,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 	// Wait for both results to complete, either successfully or with an error.
 	for range jobs {
 		res := <-results
-		jobs[res.order].graphStreamChunks = res.chunks
+		jobs[res.order].graphChunks = res.chunks
 		jobs[res.order].completed = true
 		jobs[res.order].err = res.err
 		if res.chunks == nil && res.err == nil {
@@ -332,11 +332,11 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 		return nil, nil, err
 	}
 
-	firstGraph := jobs[0].graphStreamChunks
-	secondGraph := jobs[1].graphStreamChunks
+	firstGraph := jobs[0].graphChunks
+	secondGraph := jobs[1].graphChunks
 	// Drop job references so the GC can reclaim them once the comparison is done.
-	jobs[0].graphStreamChunks = nil
-	jobs[1].graphStreamChunks = nil
+	jobs[0].graphChunks = nil
+	jobs[1].graphChunks = nil
 	return firstGraph, secondGraph, nil
 }
 
@@ -344,7 +344,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, scope tally.Scope, l
 // a fire-and-forget goroutine so it does not block the stream send. The responses
 // is only read (never mutated) by the goroutine and the foreground send, so
 // concurrent access is safe; the caller must not mutate it. This is best effort.
-func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetChangedTargetsRequest, responses []*pb.GetChangedTargetsResponse) {
+func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetChangedTargetsRequest, responses []entity.GetChangedTargetsResponse) {
 	go func() {
 		// Use c.appCtx directly: the cache write is fire-and-forget and must
 		// outlive the request (so a client disconnect doesn't abort it) but
@@ -381,7 +381,7 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 // are re-mapped into a canonical per-call ID namespace so the response metadata
 // only carries the names actually referenced. See internal/targetdiff for the
 // classification and distance rules.
-func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope, logger *zap.Logger, firstGraph, secondGraph []*pb.GetTargetGraphResponse, maxDist int32) ([]*pb.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse, maxDist int32) ([]entity.GetChangedTargetsResponse, error) {
 	start := time.Now()
 	compareScope := scope.SubScope("compare_target_graphs")
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
@@ -438,9 +438,9 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 	// only assign IDs to names they actually see, so the emitted metadata is
 	// pruned to what the changed targets reference.
 	mappers := newCanonicalMappers()
-	changed := make([]*pb.ChangedTarget, 0, len(result.ChangedTargets))
+	changed := make([]entity.ChangedTarget, 0, len(result.ChangedTargets))
 	for _, ct := range result.ChangedTargets {
-		changed = append(changed, &pb.ChangedTarget{
+		changed = append(changed, entity.ChangedTarget{
 			ChangeType: toChangeType(ct.ChangeType),
 			OldTarget:  mappers.transpose(ct.Before),
 			NewTarget:  mappers.transpose(ct.After),
@@ -449,39 +449,36 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 	}
 
 	// Emit changes in chunks to stay within gRPC per-message size limits, followed by chunked metadata.
-	var results []*pb.GetChangedTargetsResponse
-	for i := 0; i < len(changed); i += c.changedTargetChunkSize {
-		end := i + c.changedTargetChunkSize
-		if end > len(changed) {
-			end = len(changed)
-		}
-		results = append(results, &pb.GetChangedTargetsResponse{
-			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-				ChangedTargets: &pb.ChangedTargets{
-					ChangedTargets: changed[i:end],
-				},
-			},
-		})
+	// Entity ChangedTarget doesn't implement Sizer, so convert to proto for size measurement
+	// (same pattern as ChunkTargetGraph) and map groups back by index.
+	tempResp := mapper.ChangedTargetsResponseToProto(&entity.GetChangedTargetsResponse{ChangedTargets: changed})
+	protoChanged := tempResp.GetItem().(*pb.GetChangedTargetsResponse_ChangedTargets).ChangedTargets.GetChangedTargets()
+	var results []entity.GetChangedTargetsResponse
+	changedGroups, err := streaming.SplitBySize(protoChanged, c.maxMessageBytes)
+	if err != nil {
+		return nil, err
 	}
-	if len(results) == 0 {
-		results = append(results, &pb.GetChangedTargetsResponse{
-			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-				ChangedTargets: &pb.ChangedTargets{},
-			},
+	idx := 0
+	for _, group := range changedGroups {
+		results = append(results, entity.GetChangedTargetsResponse{
+			ChangedTargets: changed[idx : idx+len(group)],
 		})
+		idx += len(group)
 	}
-	for _, meta := range common.ChunkMetadata(
+	metaGroups, err := streaming.SplitMetadata(
 		mappers.target.Invert(),
 		mappers.ruleType.Invert(),
 		mappers.tag.Invert(),
 		mappers.attrName.Invert(),
 		mappers.attrVal.Invert(),
-		c.metadataMapChunkSize,
-	) {
-		results = append(results, &pb.GetChangedTargetsResponse{
-			Item: &pb.GetChangedTargetsResponse_Metadata{
-				Metadata: meta,
-			},
+		c.maxMessageBytes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for _, meta := range metaGroups {
+		results = append(results, entity.GetChangedTargetsResponse{
+			Metadata: meta,
 		})
 	}
 	totalDuration := time.Since(start)
@@ -501,10 +498,10 @@ const cancelCheckInterval = 4096
 // getTargetsAndMetadata builds ID->target maps and merges metadata from a target graph stream.
 // Metadata may arrive in multiple chunks (e.g. when target_id_mapping exceeds the gRPC message
 // size limit); all chunks are merged into a single Metadata so callers can use it uniformly.
-func getTargetsAndMetadata(ctx context.Context, graph []*pb.GetTargetGraphResponse) (map[int32]*pb.OptimizedTarget, *pb.Metadata, error) {
-	targets := make(map[int32]*pb.OptimizedTarget)
-	merged := &pb.Metadata{
-		TargetIdMapping:             make(map[int32]string),
+func getTargetsAndMetadata(ctx context.Context, graph []entity.GetTargetGraphResponse) (map[int32]*entity.OptimizedTarget, *entity.Metadata, error) {
+	targets := make(map[int32]*entity.OptimizedTarget)
+	merged := &entity.Metadata{
+		TargetIDMapping:             make(map[int32]string),
 		RuleTypeMapping:             make(map[int32]string),
 		TagMapping:                  make(map[int32]string),
 		AttributeNameMapping:        make(map[int32]string),
@@ -514,26 +511,24 @@ func getTargetsAndMetadata(ctx context.Context, graph []*pb.GetTargetGraphRespon
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
 		}
-		switch item := chunk.GetItem().(type) {
-		case *pb.GetTargetGraphResponse_Targets:
-			for _, t := range item.Targets.GetTargets() {
-				targets[t.GetId()] = t
+		for i := range chunk.Targets {
+			t := &chunk.Targets[i]
+			targets[t.ID] = t
+		}
+		if m := chunk.Metadata; m != nil {
+			for k, v := range m.TargetIDMapping {
+				merged.TargetIDMapping[k] = v
 			}
-		case *pb.GetTargetGraphResponse_Metadata:
-			m := item.Metadata
-			for k, v := range m.GetTargetIdMapping() {
-				merged.TargetIdMapping[k] = v
-			}
-			for k, v := range m.GetRuleTypeMapping() {
+			for k, v := range m.RuleTypeMapping {
 				merged.RuleTypeMapping[k] = v
 			}
-			for k, v := range m.GetTagMapping() {
+			for k, v := range m.TagMapping {
 				merged.TagMapping[k] = v
 			}
-			for k, v := range m.GetAttributeNameMapping() {
+			for k, v := range m.AttributeNameMapping {
 				merged.AttributeNameMapping[k] = v
 			}
-			for k, v := range m.GetAttributeStringValueMapping() {
+			for k, v := range m.AttributeStringValueMapping {
 				merged.AttributeStringValueMapping[k] = v
 			}
 		}
@@ -544,12 +539,12 @@ func getTargetsAndMetadata(ctx context.Context, graph []*pb.GetTargetGraphRespon
 // toDiffGraph resolves a stream's int32 IDs into a semantic targetdiff.Graph
 // keyed by canonical target name. Targets with no name mapping are skipped;
 // dependency, tag, and attribute IDs that don't resolve are dropped.
-func toDiffGraph(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarget, meta *pb.Metadata) (targetdiff.Graph, error) {
-	targetIDMap := meta.GetTargetIdMapping()
-	ruleTypeMap := meta.GetRuleTypeMapping()
-	tagMap := meta.GetTagMapping()
-	attrNameMap := meta.GetAttributeNameMapping()
-	attrValMap := meta.GetAttributeStringValueMapping()
+func toDiffGraph(ctx context.Context, targetsByID map[int32]*entity.OptimizedTarget, meta *entity.Metadata) (targetdiff.Graph, error) {
+	targetIDMap := meta.TargetIDMapping
+	ruleTypeMap := meta.RuleTypeMapping
+	tagMap := meta.TagMapping
+	attrNameMap := meta.AttributeNameMapping
+	attrValMap := meta.AttributeStringValueMapping
 
 	graph := make(targetdiff.Graph, len(targetsByID))
 	i := 0
@@ -564,12 +559,12 @@ func toDiffGraph(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarget,
 		}
 		target := &targetdiff.Target{
 			Name:     name,
-			Hash:     t.GetHash(),
-			RuleType: ruleTypeMap[t.GetRuleType()],
-			Root:     t.GetRoot(),
-			External: t.GetExternal(),
+			Hash:     t.Hash,
+			RuleType: ruleTypeMap[t.RuleType],
+			Root:     t.Root,
+			External: t.External,
 		}
-		if deps := t.GetDirectDependencies(); len(deps) > 0 {
+		if deps := t.DirectDependencies; len(deps) > 0 {
 			target.Dependencies = make([]string, 0, len(deps))
 			for _, depID := range deps {
 				if depName := targetIDMap[depID]; depName != "" {
@@ -577,7 +572,7 @@ func toDiffGraph(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarget,
 				}
 			}
 		}
-		if tags := t.GetTags(); len(tags) > 0 {
+		if tags := t.Tags; len(tags) > 0 {
 			target.Tags = make([]string, 0, len(tags))
 			for _, tagID := range tags {
 				if tagName := tagMap[tagID]; tagName != "" {
@@ -585,7 +580,7 @@ func toDiffGraph(ctx context.Context, targetsByID map[int32]*pb.OptimizedTarget,
 				}
 			}
 		}
-		if attrs := t.GetAttributes(); len(attrs) > 0 {
+		if attrs := t.Attributes; len(attrs) > 0 {
 			target.Attributes = make(map[string]string, len(attrs))
 			for nameID, valID := range attrs {
 				if attrName := attrNameMap[nameID]; attrName != "" {
@@ -621,14 +616,14 @@ func newCanonicalMappers() *canonicalMappers {
 	}
 }
 
-// transpose converts a semantic targetdiff.Target into a wire OptimizedTarget,
+// transpose converts a semantic targetdiff.Target into an entity OptimizedTarget,
 // assigning canonical IDs to every name it references. Returns nil for a nil src.
-func (m *canonicalMappers) transpose(src *targetdiff.Target) *pb.OptimizedTarget {
+func (m *canonicalMappers) transpose(src *targetdiff.Target) *entity.OptimizedTarget {
 	if src == nil {
 		return nil
 	}
-	dst := &pb.OptimizedTarget{
-		Id:       m.target.ID(src.Name),
+	dst := &entity.OptimizedTarget{
+		ID:       m.target.ID(src.Name),
 		Hash:     src.Hash,
 		Root:     src.Root,
 		External: src.External,
@@ -660,31 +655,32 @@ func (m *canonicalMappers) transpose(src *targetdiff.Target) *pb.OptimizedTarget
 	return dst
 }
 
-// toChangeType maps a targetdiff.ChangeType to its wire equivalent.
-func toChangeType(ct targetdiff.ChangeType) pb.ChangeType {
+// toChangeType maps a targetdiff.ChangeType to its wire equivalent as an int32.
+func toChangeType(ct targetdiff.ChangeType) int32 {
 	switch ct {
 	case targetdiff.ChangeTypeNew:
-		return pb.CHANGE_TYPE_NEW
+		return int32(pb.CHANGE_TYPE_NEW)
 	case targetdiff.ChangeTypeDeleted:
-		return pb.CHANGE_TYPE_DELETED
+		return int32(pb.CHANGE_TYPE_DELETED)
 	case targetdiff.ChangeTypeChanged:
-		return pb.CHANGE_TYPE_CHANGED
+		return int32(pb.CHANGE_TYPE_CHANGED)
 	default:
-		return pb.CHANGE_TYPE_INVALID
+		return int32(pb.CHANGE_TYPE_INVALID)
 	}
 }
 
 // sendTrimmedChangedTargets streams responses to the client, filtering changed targets to those
 // within maxDist from any distance-0 seed when maxDist >= 0, stripping per-target
 // hash/tags/attributes per outputConfig's include_* flags, and pruning metadata mappings
-// whose IDs are no longer referenced. Filtering and sending are combined into a single pass
-// to avoid an intermediate allocation.
-func sendTrimmedChangedTargets(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []*pb.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) error {
+// whose IDs are no longer referenced. Each entity response is converted to proto at the
+// stream.Send boundary.
+func sendTrimmedChangedTargets(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []entity.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) error {
 	stripFields := optimizedTargetNeedsStripping(outputConfig)
 	pruneMeta := metadataNeedsPruning(outputConfig)
-	for _, resp := range responses {
-		toSend := resp
-		switch item := resp.GetItem().(type) {
+	for i := range responses {
+		protoResp := mapper.ChangedTargetsResponseToProto(&responses[i])
+		toSend := protoResp
+		switch item := protoResp.GetItem().(type) {
 		case *pb.GetChangedTargetsResponse_ChangedTargets:
 			if maxDist >= 0 || stripFields {
 				kept := item.ChangedTargets.GetChangedTargets()
