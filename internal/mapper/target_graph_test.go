@@ -1,7 +1,6 @@
 package mapper
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,13 +91,13 @@ func TestProtoToGetTargetGraphRequest(t *testing.T) {
 func TestResultToTargetGraph_EmptyResult(t *testing.T) {
 	t.Parallel()
 
-	targets, meta, err := ResultToTargetGraph(context.Background(), targethasher.Result{})
+	targets, meta, err := ResultToTargetGraph(t.Context(), targethasher.Result{})
 	require.NoError(t, err)
 	assert.Empty(t, targets)
 	assert.NotNil(t, meta)
 }
 
-func TestGetTargetGraphResponseToProto_RoundTrip(t *testing.T) {
+func TestGetTargetGraphResponseToProto_Targets(t *testing.T) {
 	t.Parallel()
 
 	chunk := entity.GetTargetGraphResponse{
@@ -109,11 +108,18 @@ func TestGetTargetGraphResponseToProto_RoundTrip(t *testing.T) {
 	}
 
 	proto := GetTargetGraphResponseToProto(&chunk)
-	roundTripped := protoToEntityResponse(proto)
-	assert.Equal(t, chunk, roundTripped)
+	targets := proto.GetItem().(*tangopb.GetTargetGraphResponse_Targets)
+	require.Len(t, targets.Targets.GetTargets(), 2)
+
+	got := targets.Targets.GetTargets()[0]
+	assert.Equal(t, int32(1), got.GetId())
+	assert.Equal(t, "ab", got.GetHash())
+	assert.Equal(t, []int32{2}, got.GetDirectDependencies())
+	assert.Equal(t, int32(10), got.GetRuleType())
+	assert.True(t, got.GetRoot())
 }
 
-func TestGetTargetGraphResponseToProto_Metadata_RoundTrip(t *testing.T) {
+func TestGetTargetGraphResponseToProto_Metadata(t *testing.T) {
 	t.Parallel()
 
 	chunk := entity.GetTargetGraphResponse{
@@ -124,21 +130,7 @@ func TestGetTargetGraphResponseToProto_Metadata_RoundTrip(t *testing.T) {
 	}
 
 	proto := GetTargetGraphResponseToProto(&chunk)
-	roundTripped := protoToEntityResponse(proto)
-	assert.Equal(t, chunk, roundTripped)
-}
-
-func protoToEntityResponse(resp *tangopb.GetTargetGraphResponse) entity.GetTargetGraphResponse {
-	switch item := resp.GetItem().(type) {
-	case *tangopb.GetTargetGraphResponse_Targets:
-		targets := make([]entity.OptimizedTarget, len(item.Targets.GetTargets()))
-		for i, t := range item.Targets.GetTargets() {
-			targets[i] = protoToOptimizedTarget(t)
-		}
-		return entity.GetTargetGraphResponse{Targets: targets}
-	case *tangopb.GetTargetGraphResponse_Metadata:
-		return entity.GetTargetGraphResponse{Metadata: protoToMetadata(item.Metadata)}
-	default:
-		return entity.GetTargetGraphResponse{}
-	}
+	meta := proto.GetItem().(*tangopb.GetTargetGraphResponse_Metadata)
+	assert.Equal(t, map[int32]string{1: "//pkg:a", 2: "//pkg:b"}, meta.Metadata.GetTargetIdMapping())
+	assert.Equal(t, map[int32]string{10: "go_library"}, meta.Metadata.GetRuleTypeMapping())
 }

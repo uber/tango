@@ -161,25 +161,3 @@ func optimizedTargetToProto(t *entity.OptimizedTarget) *tangopb.OptimizedTarget 
 	}
 }
 
-func protoToOptimizedTarget(t *tangopb.OptimizedTarget) entity.OptimizedTarget {
-	return entity.OptimizedTarget{
-		ID:                 t.GetId(),
-		Hash:               t.GetHash(),
-		DirectDependencies: t.GetDirectDependencies(),
-		RuleType:           t.GetRuleType(),
-		Tags:               t.GetTags(),
-		Root:               t.GetRoot(),
-		External:           t.GetExternal(),
-		Attributes:         t.GetAttributes(),
-	}
-}
-
-func protoToMetadata(m *tangopb.Metadata) *entity.Metadata {
-	return &entity.Metadata{
-		TargetIDMapping:             m.GetTargetIdMapping(),
-		RuleTypeMapping:             m.GetRuleTypeMapping(),
-		TagMapping:                  m.GetTagMapping(),
-		AttributeNameMapping:        m.GetAttributeNameMapping(),
-		AttributeStringValueMapping: m.GetAttributeStringValueMapping(),
-	}
-}
