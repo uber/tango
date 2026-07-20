@@ -29,7 +29,7 @@ func newTestController(logger *zap.Logger) *controller {
 	return &controller{
 		logger:          logger,
 		emitter:         metrics.Nop(),
-		maxMessageBytes: _defaultMaxMessageBytes,
+		maxMessageBytes: 4_250_000,
 		appCtx:          context.Background(),
 	}
 }

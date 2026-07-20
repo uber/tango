@@ -36,7 +36,6 @@ type Params struct {
 	MaxMessageBytes int         `optional:"true"`
 }
 
-const _defaultMaxMessageBytes = 4_250_000
 
 type controller struct {
 	logger          *zap.Logger
@@ -57,7 +56,8 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	emitter := metrics.New(p.Scope).SubScope("controller")
 	maxMessageBytes := p.MaxMessageBytes
 	if maxMessageBytes <= 0 {
-		maxMessageBytes = _defaultMaxMessageBytes
+		// TODO: provide via config.Parse instead of hardcoding
+		maxMessageBytes = 4_250_000
 	}
 	return &controller{
 		logger:          p.Logger,
