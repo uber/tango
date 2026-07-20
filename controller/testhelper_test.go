@@ -40,8 +40,8 @@ func newTestController(logger *zap.Logger) *controller {
 func newGraphReader(t *testing.T, chunks ...entity.GetTargetGraphResponse) storage.GraphReader {
 	t.Helper()
 	st := storage.NewMemoryStorage()
-	require.NoError(t, storage.WriteGraphStream(context.Background(), st, "test-graph", chunks))
-	reader, err := storage.NewGraphReader(context.Background(), st, "test-graph")
+	require.NoError(t, storage.WriteGraphStream(t.Context(), st, "test-graph", chunks))
+	reader, err := storage.NewGraphReader(t.Context(), st, "test-graph")
 	require.NoError(t, err)
 	return reader
 }
