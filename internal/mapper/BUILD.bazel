@@ -15,7 +15,6 @@ go_library(
         "//core/targethasher",
         "//entity",
         "//internal/mapper/idmapper",
-        "//internal/streaming",
         "//tangopb",
         "@com_github_bazelbuild_buildtools//build_proto",
         "@org_uber_go_yarpc//encoding/protobuf",

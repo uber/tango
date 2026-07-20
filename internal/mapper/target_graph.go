@@ -9,7 +9,6 @@ import (
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper/idmapper"
-	"github.com/uber/tango/internal/streaming"
 	"github.com/uber/tango/tangopb"
 )
 
@@ -115,46 +114,6 @@ func ResultToTargetGraph(ctx context.Context, result targethasher.Result) ([]ent
 	}
 
 	return targets, meta, nil
-}
-
-// ChunkTargetGraph splits targets and metadata into wire-safe
-// entity.GetTargetGraphResponse chunks bounded by maxMessageBytes.
-func ChunkTargetGraph(targets []entity.OptimizedTarget, meta *entity.Metadata, maxMessageBytes int) ([]entity.GetTargetGraphResponse, error) {
-	protoTargets := make([]*tangopb.OptimizedTarget, len(targets))
-	for i := range targets {
-		protoTargets[i] = optimizedTargetToProto(&targets[i])
-	}
-
-	targetGroups, err := streaming.SplitBySize(protoTargets, maxMessageBytes)
-	if err != nil {
-		return nil, err
-	}
-
-	var chunks []entity.GetTargetGraphResponse
-	idx := 0
-	for _, g := range targetGroups {
-		chunks = append(chunks, entity.GetTargetGraphResponse{
-			Targets: targets[idx : idx+len(g)],
-		})
-		idx += len(g)
-	}
-
-	metaGroups, err := streaming.SplitMetadata(
-		meta.TargetIDMapping,
-		meta.RuleTypeMapping,
-		meta.TagMapping,
-		meta.AttributeNameMapping,
-		meta.AttributeStringValueMapping,
-		maxMessageBytes,
-	)
-	if err != nil {
-		return nil, err
-	}
-	for _, m := range metaGroups {
-		chunks = append(chunks, entity.GetTargetGraphResponse{Metadata: m})
-	}
-
-	return chunks, nil
 }
 
 // GetTargetGraphResponseToProto converts an entity.GetTargetGraphResponse to

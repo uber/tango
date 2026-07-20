@@ -2,7 +2,6 @@ package mapper
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -97,60 +96,6 @@ func TestResultToTargetGraph_EmptyResult(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, targets)
 	assert.NotNil(t, meta)
-}
-
-func TestChunkTargetGraph(t *testing.T) {
-	t.Parallel()
-
-	numTargets := 50
-	result := targethasher.Result{
-		TargetNames: make([]string, numTargets),
-		Targets:     make(map[string]*targethasher.Target, numTargets),
-	}
-	for i := 0; i < numTargets; i++ {
-		name := fmt.Sprintf("//pkg:target%d", i)
-		result.TargetNames[i] = name
-		result.Targets[name] = &targethasher.Target{Name: name, Hash: []byte{0}, RuleType: "go_library"}
-	}
-
-	targets, meta, err := ResultToTargetGraph(context.Background(), result)
-	require.NoError(t, err)
-
-	// Get baseline proto size per target for budget calculation.
-	baseline, err := ChunkTargetGraph(targets, meta, 1<<30)
-	require.NoError(t, err)
-	protoResp := GetTargetGraphResponseToProto(&baseline[0])
-	protoTargets := protoResp.GetItem().(*tangopb.GetTargetGraphResponse_Targets)
-	targetBytes := protoTargets.Targets.Targets[0].Size()
-	require.NotZero(t, targetBytes)
-
-	tests := []struct {
-		name             string
-		maxMessageBytes  int
-		wantTargetChunks int
-	}{
-		{name: "25 per chunk", maxMessageBytes: targetBytes * 25, wantTargetChunks: 2},
-		{name: "10 per chunk", maxMessageBytes: targetBytes * 10, wantTargetChunks: 5},
-		{name: "all in one chunk", maxMessageBytes: targetBytes * 100, wantTargetChunks: 1},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			chunks, err := ChunkTargetGraph(targets, meta, tt.maxMessageBytes)
-			require.NoError(t, err)
-
-			var targetChunks, totalTargets int
-			for _, c := range chunks {
-				if len(c.Targets) > 0 || c.Metadata == nil {
-					targetChunks++
-					totalTargets += len(c.Targets)
-				}
-			}
-			assert.Equal(t, tt.wantTargetChunks, targetChunks)
-			assert.Equal(t, numTargets, totalTargets)
-		})
-	}
 }
 
 func TestGetTargetGraphResponseToProto_RoundTrip(t *testing.T) {
