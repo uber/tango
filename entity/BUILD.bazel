@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "entity",
@@ -12,4 +12,11 @@ go_library(
     ],
     importpath = "github.com/uber/tango/entity",
     visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "entity_test",
+    srcs = ["optimized_target_test.go"],
+    embed = [":entity"],
+    deps = ["@com_github_stretchr_testify//assert"],
 )

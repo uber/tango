@@ -13,9 +13,9 @@ import (
 func TestSplitBySize(t *testing.T) {
 	t.Parallel()
 
-	targets := make([]*pb.OptimizedTarget, 25)
+	targets := make([]*entity.OptimizedTarget, 25)
 	for i := range targets {
-		targets[i] = &pb.OptimizedTarget{Id: int32(i + 1)}
+		targets[i] = &entity.OptimizedTarget{ID: int32(i + 1)}
 	}
 	maxBytes := targets[0].Size() * 10
 
@@ -29,7 +29,7 @@ func TestSplitBySize(t *testing.T) {
 	var total int
 	for _, g := range groups {
 		for _, target := range g {
-			assert.Equal(t, int32(total+1), target.Id)
+			assert.Equal(t, int32(total+1), target.ID)
 			total++
 		}
 	}
@@ -39,21 +39,21 @@ func TestSplitBySize(t *testing.T) {
 func TestSplitBySize_SingleOversizedItemShipsAlone(t *testing.T) {
 	t.Parallel()
 
-	oversized := &pb.OptimizedTarget{Id: 1, Hash: strings.Repeat("a", 1000)}
-	small := &pb.OptimizedTarget{Id: 2}
+	oversized := &entity.OptimizedTarget{ID: 1, Hash: strings.Repeat("a", 1000)}
+	small := &entity.OptimizedTarget{ID: 2}
 	maxBytes := small.Size()
 
-	groups, err := SplitBySize([]*pb.OptimizedTarget{oversized, small}, maxBytes)
+	groups, err := SplitBySize([]*entity.OptimizedTarget{oversized, small}, maxBytes)
 	require.NoError(t, err)
 	require.Len(t, groups, 2)
-	assert.Equal(t, []*pb.OptimizedTarget{oversized}, groups[0])
-	assert.Equal(t, []*pb.OptimizedTarget{small}, groups[1])
+	assert.Equal(t, []*entity.OptimizedTarget{oversized}, groups[0])
+	assert.Equal(t, []*entity.OptimizedTarget{small}, groups[1])
 }
 
 func TestSplitBySize_EmptyInputReturnsOneEmptyGroup(t *testing.T) {
 	t.Parallel()
 
-	groups, err := SplitBySize([]*pb.OptimizedTarget{}, 100)
+	groups, err := SplitBySize([]*entity.OptimizedTarget{}, 100)
 	require.NoError(t, err)
 	require.Len(t, groups, 1)
 	assert.Empty(t, groups[0])
@@ -127,16 +127,16 @@ func TestSplitTargetGraph(t *testing.T) {
 		RuleTypeMapping: map[int32]string{1: "go_library"},
 	}
 
-	protoSize := optimizedTargetToProto(&targets[0]).Size()
+	targetSize := targets[0].Size()
 
 	tests := []struct {
 		name             string
 		maxMessageBytes  int
 		wantTargetChunks int
 	}{
-		{name: "25 per chunk", maxMessageBytes: protoSize * 25, wantTargetChunks: 2},
-		{name: "10 per chunk", maxMessageBytes: protoSize * 10, wantTargetChunks: 5},
-		{name: "all in one", maxMessageBytes: protoSize * 100, wantTargetChunks: 1},
+		{name: "25 per chunk", maxMessageBytes: targetSize * 25, wantTargetChunks: 2},
+		{name: "10 per chunk", maxMessageBytes: targetSize * 10, wantTargetChunks: 5},
+		{name: "all in one", maxMessageBytes: targetSize * 100, wantTargetChunks: 1},
 	}
 
 	for _, tt := range tests {

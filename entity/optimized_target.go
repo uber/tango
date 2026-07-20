@@ -14,6 +14,55 @@ type OptimizedTarget struct {
 	Attributes         map[int32]int32 `json:"attributes"`
 }
 
+// Size returns an estimate of the protobuf wire size for this target.
+// Used by streaming splitters to stay within gRPC message size limits.
+func (t *OptimizedTarget) Size() int {
+	n := 0
+	if t.ID != 0 {
+		n += 1 + varintSize(uint64(t.ID))
+	}
+	if len(t.Hash) > 0 {
+		n += 1 + varintSize(uint64(len(t.Hash))) + len(t.Hash)
+	}
+	if len(t.DirectDependencies) > 0 {
+		dataSize := 0
+		for _, d := range t.DirectDependencies {
+			dataSize += varintSize(uint64(d))
+		}
+		n += 1 + varintSize(uint64(dataSize)) + dataSize
+	}
+	if t.RuleType != 0 {
+		n += 1 + varintSize(uint64(t.RuleType))
+	}
+	if len(t.Tags) > 0 {
+		dataSize := 0
+		for _, tag := range t.Tags {
+			dataSize += varintSize(uint64(tag))
+		}
+		n += 1 + varintSize(uint64(dataSize)) + dataSize
+	}
+	if t.Root {
+		n += 1 + 1
+	}
+	if t.External {
+		n += 1 + 1
+	}
+	for k, v := range t.Attributes {
+		entrySize := 1 + varintSize(uint64(k)) + 1 + varintSize(uint64(v))
+		n += 1 + varintSize(uint64(entrySize)) + entrySize
+	}
+	return n
+}
+
+func varintSize(x uint64) int {
+	n := 1
+	for x >= 0x80 {
+		x >>= 7
+		n++
+	}
+	return n
+}
+
 // Metadata holds the ID-to-string mappings that accompany a set of
 // OptimizedTarget entries. Consumers merge metadata across chunks before
 // resolving IDs.

@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/uber/tango/entity"
-	"github.com/uber/tango/tangopb"
 )
 
 // Sizer is satisfied by any type that reports its serialized byte length.
@@ -130,12 +129,12 @@ func varintSize(x uint64) int {
 // SplitTargetGraph splits targets and metadata into wire-safe
 // entity.GetTargetGraphResponse chunks bounded by maxMessageBytes.
 func SplitTargetGraph(targets []entity.OptimizedTarget, meta *entity.Metadata, maxMessageBytes int) ([]entity.GetTargetGraphResponse, error) {
-	protoTargets := make([]*tangopb.OptimizedTarget, len(targets))
+	sizers := make([]*entity.OptimizedTarget, len(targets))
 	for i := range targets {
-		protoTargets[i] = optimizedTargetToProto(&targets[i])
+		sizers[i] = &targets[i]
 	}
 
-	targetGroups, err := SplitBySize(protoTargets, maxMessageBytes)
+	targetGroups, err := SplitBySize(sizers, maxMessageBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -165,17 +164,4 @@ func SplitTargetGraph(targets []entity.OptimizedTarget, meta *entity.Metadata, m
 	}
 
 	return chunks, nil
-}
-
-func optimizedTargetToProto(t *entity.OptimizedTarget) *tangopb.OptimizedTarget {
-	return &tangopb.OptimizedTarget{
-		Id:                 t.ID,
-		Hash:               t.Hash,
-		DirectDependencies: t.DirectDependencies,
-		RuleType:           t.RuleType,
-		Tags:               t.Tags,
-		Root:               t.Root,
-		External:           t.External,
-		Attributes:         t.Attributes,
-	}
 }
