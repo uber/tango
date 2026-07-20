@@ -4,13 +4,18 @@ go_library(
     name = "mapper",
     srcs = [
         "build_description.go",
+        "changed_targets.go",
         "target_graph.go",
     ],
     importpath = "github.com/uber/tango/internal/mapper",
     visibility = ["//visibility:public"],
     deps = [
+        "//core/targethasher",
         "//entity",
+        "//internal/mapper/idmapper",
+        "//internal/streaming",
         "//tangopb",
+        "@com_github_bazelbuild_buildtools//build_proto",
     ],
 )
 
@@ -22,6 +27,7 @@ go_test(
     ],
     embed = [":mapper"],
     deps = [
+        "//core/targethasher",
         "//entity",
         "//tangopb",
         "@com_github_stretchr_testify//assert",
