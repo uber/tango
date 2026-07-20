@@ -70,6 +70,9 @@ func Parse(configFilePath string) (*Config, error) {
 	if config.Service.WorkerPoolSize <= 0 {
 		return nil, fmt.Errorf("service.worker_pool_size must be > 0, got %d", config.Service.WorkerPoolSize)
 	}
+	if config.Service.MaxMessageBytes <= 0 {
+		config.Service.MaxMessageBytes = defaultMaxMessageBytes
+	}
 	config.repositoryByRemote = make(map[string]*RepositoryConfig, len(config.Repository))
 	for i := range config.Repository {
 		remote := config.Repository[i].Remote

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Uber Technologies, Inc.
+// Copyright (c) 2025 Uber Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,28 +17,20 @@ package storage
 import (
 	"context"
 
-	pb "github.com/uber/tango/tangopb"
+	"github.com/uber/tango/entity"
 )
 
-// ChangedTargetsReader reads GetChangedTargetsResponse messages from storage.
+// ChangedTargetsReader reads entity.GetChangedTargetsResponse values from storage.
 type ChangedTargetsReader interface {
-	Read() (*pb.GetChangedTargetsResponse, error)
+	Read() (entity.GetChangedTargetsResponse, error)
 	Close() error
 }
 
 // NewChangedTargetsReader returns a ChangedTargetsReader that reads from storage at key.
 func NewChangedTargetsReader(ctx context.Context, st Storage, key string) (ChangedTargetsReader, error) {
-	r, err := newReader[pb.GetChangedTargetsResponse](ctx, st, key, 32<<20, func(m *pb.GetChangedTargetsResponse) bool {
-		return m.GetItem() == nil
-	})
+	r, err := newReader[entity.GetChangedTargetsResponse](ctx, st, key)
 	if err != nil {
 		return nil, err
 	}
 	return r, nil
-}
-
-// WriteChangedTargetsStream writes a list of GetChangedTargetsResponse messages to storage.
-// The messages are written as length-delimited protobuf, allowing streaming reads.
-func WriteChangedTargetsStream(ctx context.Context, st Storage, key string, responses []*pb.GetChangedTargetsResponse) error {
-	return writeStream[pb.GetChangedTargetsResponse](ctx, st, key, responses)
 }

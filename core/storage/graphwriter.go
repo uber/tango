@@ -16,36 +16,40 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 
-	gogio "github.com/gogo/protobuf/io"
-	pb "github.com/uber/tango/tangopb"
+	"github.com/uber/tango/entity"
 )
 
-// writeStream marshals msgs as length-delimited protobuf and streams them to
-// storage under key. It uses an io.Pipe so the serialized payload is never
-// buffered in full a second time: a writer goroutine encodes into the pipe
-// while Put consumes from it.
-//
-// The writer goroutine checks ctx before each message so a cancellation
-// unwinds the encode loop promptly instead of waiting for Put to notice and
-// stop reading; the context error is propagated to the reader. If Put returns
-// before draining the pipe, the reader is closed to unblock the writer. The
-// goroutine is joined before returning, and its error is returned when Put
-// succeeds.
-func writeStream[T any, PT protoMessage[T]](ctx context.Context, st Storage, key string, msgs []PT) error {
+// WriteGraphStream writes entity.GetTargetGraphResponse values to storage
+// as newline-delimited JSON, allowing streaming reads via NewGraphReader.
+func WriteGraphStream(ctx context.Context, st Storage, key string, chunks []entity.GetTargetGraphResponse) error {
+	return writeStream(ctx, st, key, chunks)
+}
+
+// WriteChangedTargetsStream writes entity.GetChangedTargetsResponse values to storage
+// as newline-delimited JSON, allowing streaming reads via NewChangedTargetsReader.
+func WriteChangedTargetsStream(ctx context.Context, st Storage, key string, responses []entity.GetChangedTargetsResponse) error {
+	return writeStream(ctx, st, key, responses)
+}
+
+// writeStream JSON-encodes values and streams them to storage under key.
+// It uses an io.Pipe so the serialized payload is never buffered in full:
+// a writer goroutine encodes into the pipe while Put consumes from it.
+func writeStream[T any](ctx context.Context, st Storage, key string, values []T) error {
 	pr, pw := io.Pipe()
 	writerErr := make(chan error, 1)
 	go func() {
-		w := gogio.NewDelimitedWriter(pw) // varint-length-delimited
+		enc := json.NewEncoder(pw)
 		var err error
-		for _, m := range msgs {
+		for i := range values {
 			if err = ctx.Err(); err != nil {
 				break
 			}
-			if err = w.WriteMsg(m); err != nil {
-				err = fmt.Errorf("write delimited: %w", err)
+			if err = enc.Encode(&values[i]); err != nil {
+				err = fmt.Errorf("encode value: %w", err)
 				break
 			}
 		}
@@ -53,18 +57,10 @@ func writeStream[T any, PT protoMessage[T]](ctx context.Context, st Storage, key
 		writerErr <- err
 	}()
 	putErr := st.Put(ctx, UploadRequest{Key: key, Reader: pr})
-	// Unblock the writer goroutine if Put stopped reading early.
 	pr.CloseWithError(putErr)
 	writeErr := <-writerErr
 	if putErr != nil {
 		return putErr
 	}
 	return writeErr
-}
-
-// WriteGraphStream writes a list of GetTargetGraphResponse messages to the storage.
-// The messages are written as length-delimited protobuf, allowing streaming reads.
-// Typically this includes multiple OptimizedTargets chunks followed by Metadata.
-func WriteGraphStream(ctx context.Context, st Storage, key string, responses []*pb.GetTargetGraphResponse) error {
-	return writeStream[pb.GetTargetGraphResponse](ctx, st, key, responses)
 }

@@ -13,11 +13,7 @@ go_library(
     ],
     importpath = "github.com/uber/tango/core/storage",
     visibility = ["//visibility:public"],
-    deps = [
-        "//tangopb",
-        "@com_github_gogo_protobuf//io",
-        "@com_github_gogo_protobuf//proto",
-    ],
+    deps = ["//entity"],
 )
 
 go_test(

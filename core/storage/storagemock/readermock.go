@@ -12,7 +12,7 @@ package storagemock
 import (
 	reflect "reflect"
 
-	tangopb "github.com/uber/tango/tangopb"
+	entity "github.com/uber/tango/entity"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -55,10 +55,10 @@ func (mr *MockGraphReaderMockRecorder) Close() *gomock.Call {
 }
 
 // Read mocks base method.
-func (m *MockGraphReader) Read() (*tangopb.GetTargetGraphResponse, error) {
+func (m *MockGraphReader) Read() (entity.GetTargetGraphResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Read")
-	ret0, _ := ret[0].(*tangopb.GetTargetGraphResponse)
+	ret0, _ := ret[0].(entity.GetTargetGraphResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

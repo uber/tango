@@ -21,7 +21,8 @@ import (
 	"io"
 	"testing"
 
-	gogio "github.com/gogo/protobuf/io"
+	"encoding/json"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/config"
@@ -34,7 +35,6 @@ import (
 	workspacemock "github.com/uber/tango/core/workspace/workspacemock"
 	"github.com/uber/tango/entity"
 	graphmock "github.com/uber/tango/graphrunner/mock"
-	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 )
@@ -45,10 +45,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 
 	st := storagemock.NewMockStorage(ctrl)
 	var buf bytes.Buffer
-	err := gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
-	})
-	require.NoError(t, err)
+	require.NoError(t, json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
 	// Single fetch by remote/treehash for the graph
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
@@ -79,13 +76,11 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 	defer reader.Close()
-	graph, rerr := reader.Read()
+	chunk, rerr := reader.Read()
 	require.NoError(t, rerr)
-	require.NotNil(t, graph)
-	assert.NotNil(t, graph.GetTargets())
-	graph, rerr = reader.Read()
+	require.NotNil(t, chunk.Targets)
+	_, rerr = reader.Read()
 	assert.Equal(t, io.EOF, rerr)
-	assert.Nil(t, graph)
 }
 
 func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
@@ -101,9 +96,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	}).MinTimes(2)
 	// After compute, second read returns a valid delimited stream with one message
 	var buf bytes.Buffer
-	_ = gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
-	})
+	_ = json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
 	}, nil)
@@ -136,9 +129,9 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 	defer reader.Close()
-	graph, rerr := reader.Read()
+	chunk, rerr := reader.Read()
 	require.NoError(t, rerr)
-	require.NotNil(t, graph)
+	require.NotNil(t, chunk.Targets)
 }
 
 func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
@@ -172,10 +165,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	defer ctrl.Finish()
 	st := storagemock.NewMockStorage(ctrl)
 	var buf bytes.Buffer
-	err := gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
-	})
-	require.NoError(t, err)
+	require.NoError(t, json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
 
 	// git mock must handle Apply sequence from workspace.NewRequest for PR 123
 	g := gitmock.NewMockInterface(ctrl)
@@ -210,9 +200,9 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 	defer reader.Close()
-	graph, rerr := reader.Read()
+	chunk, rerr := reader.Read()
 	require.NoError(t, rerr)
-	require.NotNil(t, graph)
+	require.NotNil(t, chunk.Targets)
 }
 
 func TestNewNativeOrchestrator_usesProvidedConfig(t *testing.T) {

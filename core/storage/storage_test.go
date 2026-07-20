@@ -24,15 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var errMarshal = errors.New("marshal failed")
-
-type marshalErrorMessage struct{}
-
-func (*marshalErrorMessage) Reset()         {}
-func (*marshalErrorMessage) String() string { return "" }
-func (*marshalErrorMessage) ProtoMessage()  {}
-func (*marshalErrorMessage) Marshal() ([]byte, error) {
-	return nil, errMarshal
+type marshalErrorValue struct {
+	Value chan int // channels cannot be JSON-marshaled
 }
 
 type discardStorage struct{}
@@ -48,14 +41,14 @@ func (discardStorage) Exists(context.Context, string) (bool, error) { return fal
 func (discardStorage) List(context.Context, string) ([]string, error) { return nil, nil }
 
 func TestWriteStreamReturnsWriterError(t *testing.T) {
-	err := writeStream[marshalErrorMessage](
+	err := writeStream(
 		context.Background(),
 		discardStorage{},
 		"key",
-		[]*marshalErrorMessage{{}},
+		[]marshalErrorValue{{Value: make(chan int)}},
 	)
 
-	require.ErrorIs(t, err, errMarshal)
+	require.Error(t, err)
 }
 
 func TestMemoryStorage_List(t *testing.T) {
