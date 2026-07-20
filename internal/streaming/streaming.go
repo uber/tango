@@ -129,24 +129,23 @@ func varintSize(x uint64) int {
 // SplitTargetGraph splits targets and metadata into wire-safe
 // entity.GetTargetGraphResponse chunks bounded by maxMessageBytes.
 func SplitTargetGraph(targets []entity.OptimizedTarget, meta *entity.Metadata, maxMessageBytes int) ([]entity.GetTargetGraphResponse, error) {
-	sizers := make([]*entity.OptimizedTarget, len(targets))
-	for i := range targets {
-		sizers[i] = &targets[i]
-	}
-
-	targetGroups, err := SplitBySize(sizers, maxMessageBytes)
-	if err != nil {
-		return nil, err
-	}
-
 	var chunks []entity.GetTargetGraphResponse
-	idx := 0
-	for _, g := range targetGroups {
-		chunks = append(chunks, entity.GetTargetGraphResponse{
-			Targets: targets[idx : idx+len(g)],
-		})
-		idx += len(g)
+	start := 0
+	currentBytes := 0
+	for i := range targets {
+		itemBytes := targets[i].Size()
+		if i > start && currentBytes+itemBytes > maxMessageBytes {
+			chunks = append(chunks, entity.GetTargetGraphResponse{
+				Targets: targets[start:i],
+			})
+			start = i
+			currentBytes = 0
+		}
+		currentBytes += itemBytes
 	}
+	chunks = append(chunks, entity.GetTargetGraphResponse{
+		Targets: targets[start:],
+	})
 
 	metaGroups, err := SplitMetadata(
 		meta.TargetIDMapping,
