@@ -2,7 +2,7 @@ package entity
 
 // ChangedTarget represents a target that differs between two revisions.
 type ChangedTarget struct {
-	ChangeType int32            `json:"change_type"`
+	ChangeType ChangeType       `json:"change_type"`
 	OldTarget  *OptimizedTarget `json:"old_target,omitempty"`
 	NewTarget  *OptimizedTarget `json:"new_target,omitempty"`
 	Distance   int32            `json:"distance"`

@@ -4,6 +4,7 @@ go_library(
     name = "entity",
     srcs = [
         "build_description.go",
+        "change_type.go",
         "changed_targets.go",
         "computation_strategy.go",
         "optimized_target.go",
