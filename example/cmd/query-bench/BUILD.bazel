@@ -9,6 +9,7 @@ go_library(
         "//core/bazel",
         "//core/targethasher",
         "//internal/mapper",
+        "//internal/streaming",
         "//mapper",
         "@com_github_gogo_protobuf//jsonpb",
         "@org_uber_go_zap//:zap",
