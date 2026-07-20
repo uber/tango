@@ -17,6 +17,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/common"
@@ -136,18 +136,10 @@ func TestValidateGetChangedTargetsRequest(t *testing.T) {
 func TestCompareTargetGraphs(t *testing.T) {
 	c := newTestController(zap.NewNop())
 
-	firstGraph := &pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Metadata{
-			Metadata: &pb.Metadata{},
-		},
-	}
-	secondGraph := &pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Metadata{
-			Metadata: &pb.Metadata{},
-		},
-	}
+	firstGraph := entity.GetTargetGraphResponse{Metadata: &entity.Metadata{}}
+	secondGraph := entity.GetTargetGraphResponse{Metadata: &entity.Metadata{}}
 
-	response, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), []*pb.GetTargetGraphResponse{firstGraph}, []*pb.GetTargetGraphResponse{secondGraph}, -1)
+	response, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), []entity.GetTargetGraphResponse{firstGraph}, []entity.GetTargetGraphResponse{secondGraph}, -1)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 }
@@ -167,21 +159,12 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(t.Context())
 
-	// Build a cached response with one ChangedTargets message and one Metadata message.
-	cachedChanged := &pb.GetChangedTargetsResponse{
-		Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-			ChangedTargets: &pb.ChangedTargets{},
-		},
-	}
-	cachedMeta := &pb.GetChangedTargetsResponse{
-		Item: &pb.GetChangedTargetsResponse_Metadata{
-			Metadata: &pb.Metadata{},
-		},
-	}
+	// Build a cached response with one ChangedTargets message and one Metadata message,
+	// JSON-encoded (the storage layer uses newline-delimited JSON).
 	var buf bytes.Buffer
-	w := gogio.NewDelimitedWriter(&buf)
-	w.WriteMsg(cachedChanged)
-	w.WriteMsg(cachedMeta)
+	enc := json.NewEncoder(&buf)
+	enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}})
+	enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
 	cachedBytes := buf.Bytes()
 
 	storagemock := storagemock.NewMockStorage(ctrl)
@@ -297,17 +280,18 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	storagemock := storagemock.NewMockStorage(ctrl)
 
 	var buf bytes.Buffer
-	gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{Targets: &pb.OptimizedTargets{}},
-	})
+	json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{})
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 		if strings.Contains(req.Key, "compared-targets") {
 			return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
 		}
-		if strings.Contains(req.Key, "th") {
+		if strings.Contains(req.Key, "treehashes") {
+			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("th")))}, nil
+		}
+		if strings.Contains(req.Key, "graphs") {
 			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil
 		}
-		return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("th")))}, nil
+		return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
 	}).AnyTimes()
 
 	// Put is launched in a goroutine — use a channel to wait for it before the test ends.
@@ -354,46 +338,34 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 
 	// Build first revision graph (2 chunks: Targets + Metadata)
 	var buf1 bytes.Buffer
-	w1 := gogio.NewDelimitedWriter(&buf1)
-	w1.WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{
-			Targets: &pb.OptimizedTargets{
-				Targets: []*pb.OptimizedTarget{
-					{Id: 1, Hash: "h1", RuleType: 100},
-					{Id: 2, Hash: "h2-old", RuleType: 300},
-				},
-			},
+	enc1 := json.NewEncoder(&buf1)
+	enc1.Encode(entity.GetTargetGraphResponse{
+		Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: "h1", RuleType: 100},
+			{ID: 2, Hash: "h2-old", RuleType: 300},
 		},
 	})
-	w1.WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Metadata{
-			Metadata: &pb.Metadata{
-				TargetIdMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
-				RuleTypeMapping: map[int32]string{100: "go_library", 300: "source file"},
-			},
+	enc1.Encode(entity.GetTargetGraphResponse{
+		Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
+			RuleTypeMapping: map[int32]string{100: "go_library", 300: "source file"},
 		},
 	})
 	graph1Bytes := buf1.Bytes()
 
 	// Build second revision graph - target2 has different hash
 	var buf2 bytes.Buffer
-	w2 := gogio.NewDelimitedWriter(&buf2)
-	w2.WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{
-			Targets: &pb.OptimizedTargets{
-				Targets: []*pb.OptimizedTarget{
-					{Id: 1, Hash: "h1", RuleType: 100},
-					{Id: 2, Hash: "h2-new", RuleType: 300}, // changed hash
-				},
-			},
+	enc2 := json.NewEncoder(&buf2)
+	enc2.Encode(entity.GetTargetGraphResponse{
+		Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: "h1", RuleType: 100},
+			{ID: 2, Hash: "h2-new", RuleType: 300}, // changed hash
 		},
 	})
-	w2.WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Metadata{
-			Metadata: &pb.Metadata{
-				TargetIdMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
-				RuleTypeMapping: map[int32]string{100: "go_library", 300: "source file"},
-			},
+	enc2.Encode(entity.GetTargetGraphResponse{
+		Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
+			RuleTypeMapping: map[int32]string{100: "go_library", 300: "source file"},
 		},
 	})
 	graph2Bytes := buf2.Bytes()
@@ -478,20 +450,14 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	// goroutine runs. Both revisions share the same target so there are no
 	// diffs to send beyond the metadata chunk.
 	var graphBuf bytes.Buffer
-	w := gogio.NewDelimitedWriter(&graphBuf)
-	w.WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Targets{
-			Targets: &pb.OptimizedTargets{
-				Targets: []*pb.OptimizedTarget{{Id: 1, Hash: "h1", RuleType: 100}},
-			},
-		},
+	enc := json.NewEncoder(&graphBuf)
+	enc.Encode(entity.GetTargetGraphResponse{
+		Targets: []entity.OptimizedTarget{{ID: 1, Hash: "h1", RuleType: 100}},
 	})
-	w.WriteMsg(&pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Metadata{
-			Metadata: &pb.Metadata{
-				TargetIdMapping: map[int32]string{1: "//app:t1"},
-				RuleTypeMapping: map[int32]string{100: "go_library"},
-			},
+	enc.Encode(entity.GetTargetGraphResponse{
+		Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{1: "//app:t1"},
+			RuleTypeMapping: map[int32]string{100: "go_library"},
 		},
 	})
 	graphBytes := graphBuf.Bytes()
@@ -579,180 +545,151 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 	c := newTestController(zaptest.NewLogger(t))
 
-	first := []*pb.GetTargetGraphResponse{
+	first := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping:             map[int32]string{},
-					RuleTypeMapping:             map[int32]string{},
-					TagMapping:                  map[int32]string{},
-					AttributeNameMapping:        map[int32]string{},
-					AttributeStringValueMapping: map[int32]string{},
-				},
+			Metadata: &entity.Metadata{
+				TargetIDMapping:             map[int32]string{},
+				RuleTypeMapping:             map[int32]string{},
+				TagMapping:                  map[int32]string{},
+				AttributeNameMapping:        map[int32]string{},
+				AttributeStringValueMapping: map[int32]string{},
 			},
 		},
 	}
-	second := []*pb.GetTargetGraphResponse{
+	second := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{Id: 10, Hash: "h2", RuleType: 1},
-					},
-				},
+			Targets: []entity.OptimizedTarget{
+				{ID: 10, Hash: "h2", RuleType: 1},
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping:             map[int32]string{10: "//app:new"},
-					RuleTypeMapping:             map[int32]string{1: "rule"},
-					TagMapping:                  map[int32]string{},
-					AttributeNameMapping:        map[int32]string{},
-					AttributeStringValueMapping: map[int32]string{},
-				},
+			Metadata: &entity.Metadata{
+				TargetIDMapping:             map[int32]string{10: "//app:new"},
+				RuleTypeMapping:             map[int32]string{1: "rule"},
+				TagMapping:                  map[int32]string{},
+				AttributeNameMapping:        map[int32]string{},
+				AttributeStringValueMapping: map[int32]string{},
 			},
 		},
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
-	cs := res[0].GetChangedTargets()
+	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
-	require.Len(t, cs.GetChangedTargets(), 1)
-	ct := cs.GetChangedTargets()[0]
-	require.Equal(t, pb.CHANGE_TYPE_NEW, ct.GetChangeType())
+	require.Len(t, cs, 1)
+	ct := cs[0]
+	require.Equal(t, int32(pb.CHANGE_TYPE_NEW), ct.ChangeType)
 	// ID used in target should match canonical metadata mapping
-	meta := res[1].GetMetadata()
+	meta := res[1].Metadata
 	require.NotNil(t, meta)
-	newID := ct.GetNewTarget().GetId()
-	require.Equal(t, "//app:new", meta.GetTargetIdMapping()[newID])
+	newID := ct.NewTarget.ID
+	require.Equal(t, "//app:new", meta.TargetIDMapping[newID])
 }
 
 func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: source file A (id 1, hash h1), lib L (id 2, hash h1, dep -> A)
-	first := []*pb.GetTargetGraphResponse{
+	first := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{Id: 1, Hash: "h1", RuleType: 100},                                 // "source file"
-						{Id: 2, Hash: "h1", RuleType: 200, DirectDependencies: []int32{1}}, // "rule"
-					},
-				},
+			Targets: []entity.OptimizedTarget{
+				{ID: 1, Hash: "h1", RuleType: 100},                                 // "source file"
+				{ID: 2, Hash: "h1", RuleType: 200, DirectDependencies: []int32{1}}, // "rule"
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{
-						1: "//app:A",
-						2: "//app:L",
-					},
-					RuleTypeMapping: map[int32]string{
-						100: "source file",
-						200: "rule",
-					},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{
+					1: "//app:A",
+					2: "//app:L",
+				},
+				RuleTypeMapping: map[int32]string{
+					100: "source file",
+					200: "rule",
 				},
 			},
 		},
 	}
 	// New: both change hashes; same structure
-	second := []*pb.GetTargetGraphResponse{
+	second := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{Id: 11, Hash: "h2", RuleType: 101},                                  // "source file"
-						{Id: 22, Hash: "h2", RuleType: 201, DirectDependencies: []int32{11}}, // "rule"
-					},
-				},
+			Targets: []entity.OptimizedTarget{
+				{ID: 11, Hash: "h2", RuleType: 101},                                  // "source file"
+				{ID: 22, Hash: "h2", RuleType: 201, DirectDependencies: []int32{11}}, // "rule"
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{
-						11: "//app:A",
-						22: "//app:L",
-					},
-					RuleTypeMapping: map[int32]string{
-						101: "source file",
-						201: "rule",
-					},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{
+					11: "//app:A",
+					22: "//app:L",
+				},
+				RuleTypeMapping: map[int32]string{
+					101: "source file",
+					201: "rule",
 				},
 			},
 		},
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
-	cs := res[0].GetChangedTargets()
+	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
 	// Expect 2 changed: A (source-file seed, distance 0) and L (rule whose own src changed, distance 0)
-	require.Len(t, cs.GetChangedTargets(), 2)
-	var aCT, lCT *pb.ChangedTarget
-	for _, ct := range cs.GetChangedTargets() {
-		name := res[1].GetMetadata().GetTargetIdMapping()[ct.GetNewTarget().GetId()]
+	require.Len(t, cs, 2)
+	var aCT, lCT *entity.ChangedTarget
+	for i := range cs {
+		if cs[i].NewTarget == nil {
+			continue
+		}
+		name := res[1].Metadata.TargetIDMapping[cs[i].NewTarget.ID]
 		if name == "//app:A" {
-			aCT = ct
+			aCT = &cs[i]
 		}
 		if name == "//app:L" {
-			lCT = ct
+			lCT = &cs[i]
 		}
 	}
 	require.NotNil(t, aCT)
 	require.NotNil(t, lCT)
-	require.Equal(t, pb.CHANGE_TYPE_CHANGED, aCT.GetChangeType())
-	require.Equal(t, pb.CHANGE_TYPE_CHANGED, lCT.GetChangeType())
-	assert.Equal(t, int32(0), aCT.GetDistance(), "source-file A with hash change is a seed (distance 0)")
-	assert.Equal(t, int32(0), lCT.GetDistance(), "rule L whose own source A changed is a seed (distance 0)")
+	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), aCT.ChangeType)
+	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), lCT.ChangeType)
+	assert.Equal(t, int32(0), aCT.Distance, "source-file A with hash change is a seed (distance 0)")
+	assert.Equal(t, int32(0), lCT.Distance, "rule L whose own source A changed is a seed (distance 0)")
 	// Old and new IDs must match for each changed target under canonical metadata
-	require.Equal(t, aCT.GetOldTarget().GetId(), aCT.GetNewTarget().GetId())
-	require.Equal(t, lCT.GetOldTarget().GetId(), lCT.GetNewTarget().GetId())
+	require.Equal(t, aCT.OldTarget.ID, aCT.NewTarget.ID)
+	require.Equal(t, lCT.OldTarget.ID, lCT.NewTarget.ID)
 }
 
 func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T (id 1, rule), no deps
-	first := []*pb.GetTargetGraphResponse{
+	first := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{Id: 1, Hash: "h1", RuleType: 200},
-					},
-				},
+			Targets: []entity.OptimizedTarget{
+				{ID: 1, Hash: "h1", RuleType: 200},
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{1: "//app:T"},
-					RuleTypeMapping: map[int32]string{100: "source file", 200: "rule"},
-				},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{1: "//app:T"},
+				RuleTypeMapping: map[int32]string{100: "source file", 200: "rule"},
 			},
 		},
 	}
 	// New: T hash changed, still no deps
-	second := []*pb.GetTargetGraphResponse{
+	second := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{Id: 2, Hash: "h2", RuleType: 201},
-					},
-				},
+			Targets: []entity.OptimizedTarget{
+				{ID: 2, Hash: "h2", RuleType: 201},
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{2: "//app:T"},
-					RuleTypeMapping: map[int32]string{101: "source file", 201: "rule"},
-				},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{2: "//app:T"},
+				RuleTypeMapping: map[int32]string{101: "source file", 201: "rule"},
 			},
 		},
 	}
@@ -761,262 +698,224 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	// no upstream explanation becomes a distance-0 seed itself.
 	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
-	cs := res[0].GetChangedTargets()
+	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
-	require.Len(t, cs.GetChangedTargets(), 1)
-	got := cs.GetChangedTargets()[0]
-	require.Equal(t, pb.CHANGE_TYPE_CHANGED, got.GetChangeType())
-	assert.Equal(t, int32(0), got.GetDistance(), "orphan hash change is seeded by trust-the-hasher")
+	require.Len(t, cs, 1)
+	got := cs[0]
+	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), got.ChangeType)
+	assert.Equal(t, int32(0), got.Distance, "orphan hash change is seeded by trust-the-hasher")
 }
 
 func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T (id 1, rule) with deps on A
-	first := []*pb.GetTargetGraphResponse{
+	first := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{Id: 1, Hash: "h1", RuleType: 200, DirectDependencies: []int32{10}},
-						{Id: 10, Hash: "h1", RuleType: 200}, // Dependency A
-					},
-				},
+			Targets: []entity.OptimizedTarget{
+				{ID: 1, Hash: "h1", RuleType: 200, DirectDependencies: []int32{10}},
+				{ID: 10, Hash: "h1", RuleType: 200}, // Dependency A
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{
-						1:  "//app:T",
-						10: "//app:A",
-					},
-					RuleTypeMapping: map[int32]string{
-						100: "source file",
-						200: "rule",
-					},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{
+					1:  "//app:T",
+					10: "//app:A",
+				},
+				RuleTypeMapping: map[int32]string{
+					100: "source file",
+					200: "rule",
 				},
 			},
 		},
 	}
 	// New: T now depends on B instead of A (hash changed due to dep change)
-	second := []*pb.GetTargetGraphResponse{
+	second := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{Id: 2, Hash: "h2", RuleType: 201, DirectDependencies: []int32{20}},
-						{Id: 20, Hash: "h1", RuleType: 201}, // Dependency B
-					},
-				},
+			Targets: []entity.OptimizedTarget{
+				{ID: 2, Hash: "h2", RuleType: 201, DirectDependencies: []int32{20}},
+				{ID: 20, Hash: "h1", RuleType: 201}, // Dependency B
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{
-						2:  "//app:T",
-						20: "//app:B",
-					},
-					RuleTypeMapping: map[int32]string{
-						101: "source file",
-						201: "rule",
-					},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{
+					2:  "//app:T",
+					20: "//app:B",
+				},
+				RuleTypeMapping: map[int32]string{
+					101: "source file",
+					201: "rule",
 				},
 			},
 		},
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
-	cs := res[0].GetChangedTargets()
+	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
 
 	// Find target T in the changed targets
-	var targetT *pb.ChangedTarget
-	for _, ct := range cs.GetChangedTargets() {
-		name := res[1].GetMetadata().GetTargetIdMapping()[ct.GetNewTarget().GetId()]
+	var targetT *entity.ChangedTarget
+	for i := range cs {
+		if cs[i].NewTarget == nil {
+			continue
+		}
+		name := res[1].Metadata.TargetIDMapping[cs[i].NewTarget.ID]
 		if name == "//app:T" {
-			targetT = ct
+			targetT = &cs[i]
 			break
 		}
 	}
 	require.NotNil(t, targetT)
-	require.Equal(t, pb.CHANGE_TYPE_CHANGED, targetT.GetChangeType(), "Target with changed dependencies should be marked as CHANGED")
-	assert.Equal(t, int32(0), targetT.GetDistance(), "Target whose dep-name set changed is a seed (distance 0)")
+	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), targetT.ChangeType, "Target with changed dependencies should be marked as CHANGED")
+	assert.Equal(t, int32(0), targetT.Distance, "Target whose dep-name set changed is a seed (distance 0)")
 }
 
 func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T with attribute "key1" -> "value1"
-	first := []*pb.GetTargetGraphResponse{
+	first := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{
-							Id:         1,
-							Hash:       "h1",
-							RuleType:   200,
-							Attributes: map[int32]int32{1: 10}, // attr name 1 -> attr value 10
-						},
-					},
+			Targets: []entity.OptimizedTarget{
+				{
+					ID:         1,
+					Hash:       "h1",
+					RuleType:   200,
+					Attributes: map[int32]int32{1: 10}, // attr name 1 -> attr value 10
 				},
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{1: "//app:T"},
-					RuleTypeMapping: map[int32]string{
-						100: "source file",
-						200: "rule",
-					},
-					AttributeNameMapping:        map[int32]string{1: "key1"},
-					AttributeStringValueMapping: map[int32]string{10: "value1"},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{1: "//app:T"},
+				RuleTypeMapping: map[int32]string{
+					100: "source file",
+					200: "rule",
 				},
+				AttributeNameMapping:        map[int32]string{1: "key1"},
+				AttributeStringValueMapping: map[int32]string{10: "value1"},
 			},
 		},
 	}
 	// New: T with attribute "key1" -> "value2" (changed value)
-	second := []*pb.GetTargetGraphResponse{
+	second := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{
-							Id:         2,
-							Hash:       "h2",
-							RuleType:   201,
-							Attributes: map[int32]int32{2: 20}, // attr name 2 -> attr value 20
-						},
-					},
+			Targets: []entity.OptimizedTarget{
+				{
+					ID:         2,
+					Hash:       "h2",
+					RuleType:   201,
+					Attributes: map[int32]int32{2: 20}, // attr name 2 -> attr value 20
 				},
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{2: "//app:T"},
-					RuleTypeMapping: map[int32]string{
-						101: "source file",
-						201: "rule",
-					},
-					AttributeNameMapping:        map[int32]string{2: "key1"},
-					AttributeStringValueMapping: map[int32]string{20: "value2"},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{2: "//app:T"},
+				RuleTypeMapping: map[int32]string{
+					101: "source file",
+					201: "rule",
 				},
+				AttributeNameMapping:        map[int32]string{2: "key1"},
+				AttributeStringValueMapping: map[int32]string{20: "value2"},
 			},
 		},
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
-	cs := res[0].GetChangedTargets()
+	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
-	require.Len(t, cs.GetChangedTargets(), 1)
-	got := cs.GetChangedTargets()[0]
-	require.Equal(t, pb.CHANGE_TYPE_CHANGED, got.GetChangeType(), "Target with changed attributes should be marked as CHANGED")
-	assert.Equal(t, int32(0), got.GetDistance(), "Target with own-config (attrs) change is a seed (distance 0)")
+	require.Len(t, cs, 1)
+	got := cs[0]
+	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), got.ChangeType, "Target with changed attributes should be marked as CHANGED")
+	assert.Equal(t, int32(0), got.Distance, "Target with own-config (attrs) change is a seed (distance 0)")
 }
 
 func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T with one attribute
-	first := []*pb.GetTargetGraphResponse{
+	first := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{
-							Id:         1,
-							Hash:       "h1",
-							RuleType:   200,
-							Attributes: map[int32]int32{1: 10},
-						},
-					},
+			Targets: []entity.OptimizedTarget{
+				{
+					ID:         1,
+					Hash:       "h1",
+					RuleType:   200,
+					Attributes: map[int32]int32{1: 10},
 				},
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{1: "//app:T"},
-					RuleTypeMapping: map[int32]string{
-						100: "source file",
-						200: "rule",
-					},
-					AttributeNameMapping:        map[int32]string{1: "key1"},
-					AttributeStringValueMapping: map[int32]string{10: "value1"},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{1: "//app:T"},
+				RuleTypeMapping: map[int32]string{
+					100: "source file",
+					200: "rule",
 				},
+				AttributeNameMapping:        map[int32]string{1: "key1"},
+				AttributeStringValueMapping: map[int32]string{10: "value1"},
 			},
 		},
 	}
 	// New: T with two attributes (added key2)
-	second := []*pb.GetTargetGraphResponse{
+	second := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{
-							Id:       2,
-							Hash:     "h2",
-							RuleType: 201,
-							Attributes: map[int32]int32{
-								2: 20, // key1 -> value1
-								3: 30, // key2 -> value2 (NEW)
-							},
-						},
+			Targets: []entity.OptimizedTarget{
+				{
+					ID:       2,
+					Hash:     "h2",
+					RuleType: 201,
+					Attributes: map[int32]int32{
+						2: 20, // key1 -> value1
+						3: 30, // key2 -> value2 (NEW)
 					},
 				},
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{2: "//app:T"},
-					RuleTypeMapping: map[int32]string{
-						101: "source file",
-						201: "rule",
-					},
-					AttributeNameMapping: map[int32]string{
-						2: "key1",
-						3: "key2",
-					},
-					AttributeStringValueMapping: map[int32]string{
-						20: "value1",
-						30: "value2",
-					},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{2: "//app:T"},
+				RuleTypeMapping: map[int32]string{
+					101: "source file",
+					201: "rule",
+				},
+				AttributeNameMapping: map[int32]string{
+					2: "key1",
+					3: "key2",
+				},
+				AttributeStringValueMapping: map[int32]string{
+					20: "value1",
+					30: "value2",
 				},
 			},
 		},
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
-	cs := res[0].GetChangedTargets()
+	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
-	require.Len(t, cs.GetChangedTargets(), 1)
-	got := cs.GetChangedTargets()[0]
-	require.Equal(t, pb.CHANGE_TYPE_CHANGED, got.GetChangeType(), "Target with new attribute added should be marked as CHANGED")
-	assert.Equal(t, int32(0), got.GetDistance(), "Target with own-config (attrs) change is a seed (distance 0)")
+	require.Len(t, cs, 1)
+	got := cs[0]
+	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), got.ChangeType, "Target with new attribute added should be marked as CHANGED")
+	assert.Equal(t, int32(0), got.Distance, "Target with own-config (attrs) change is a seed (distance 0)")
 }
 
 func TestSendTrimmedChangedTargets_MetadataAlwaysForwarded(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-	meta := &pb.Metadata{TargetIdMapping: map[int32]string{1: "//app:T"}}
-	responses := []*pb.GetChangedTargetsResponse{
+	responses := []entity.GetChangedTargetsResponse{
 		{
-			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-				ChangedTargets: &pb.ChangedTargets{
-					ChangedTargets: []*pb.ChangedTarget{
-						{Distance: 5, ChangeType: pb.CHANGE_TYPE_CHANGED},
-					},
-				},
+			ChangedTargets: []entity.ChangedTarget{
+				{Distance: 5, ChangeType: int32(pb.CHANGE_TYPE_CHANGED)},
 			},
 		},
 		{
-			Item: &pb.GetChangedTargetsResponse_Metadata{Metadata: meta},
+			Metadata: &entity.Metadata{TargetIDMapping: map[int32]string{1: "//app:T"}},
 		},
 	}
 
@@ -1032,18 +931,16 @@ func TestSendTrimmedChangedTargets_MetadataAlwaysForwarded(t *testing.T) {
 	// First response: target filtered out (distance 5 > maxDist 1)
 	assert.Empty(t, sent[0].GetChangedTargets().GetChangedTargets())
 	// Second response: metadata always forwarded
-	assert.Equal(t, meta, sent[1].GetMetadata())
+	assert.NotNil(t, sent[1].GetMetadata())
 }
 
 func TestSendTrimmedChangedTargets_SendError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-	responses := []*pb.GetChangedTargetsResponse{
+	responses := []entity.GetChangedTargetsResponse{
 		{
-			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-				ChangedTargets: &pb.ChangedTargets{},
-			},
+			ChangedTargets: []entity.ChangedTarget{},
 		},
 	}
 
@@ -1059,23 +956,15 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	stream.EXPECT().Context().Return(t.Context())
 
 	// Cached response: two targets at distances 0 and 2, plus metadata.
-	cachedChanged := &pb.GetChangedTargetsResponse{
-		Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-			ChangedTargets: &pb.ChangedTargets{
-				ChangedTargets: []*pb.ChangedTarget{
-					{Distance: 0, ChangeType: pb.CHANGE_TYPE_CHANGED},
-					{Distance: 2, ChangeType: pb.CHANGE_TYPE_CHANGED},
-				},
-			},
-		},
-	}
-	cachedMeta := &pb.GetChangedTargetsResponse{
-		Item: &pb.GetChangedTargetsResponse_Metadata{Metadata: &pb.Metadata{}},
-	}
 	var buf bytes.Buffer
-	w := gogio.NewDelimitedWriter(&buf)
-	w.WriteMsg(cachedChanged)
-	w.WriteMsg(cachedMeta)
+	enc := json.NewEncoder(&buf)
+	enc.Encode(entity.GetChangedTargetsResponse{
+		ChangedTargets: []entity.ChangedTarget{
+			{Distance: 0, ChangeType: int32(pb.CHANGE_TYPE_CHANGED)},
+			{Distance: 2, ChangeType: int32(pb.CHANGE_TYPE_CHANGED)},
+		},
+	})
+	enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
 	cachedBytes := buf.Bytes()
 
 	storagemock := storagemock.NewMockStorage(ctrl)
@@ -1121,93 +1010,84 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T (rule) with deps on source file A (id 10) and attributes
-	first := []*pb.GetTargetGraphResponse{
+	first := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{
-							Id:                 1,
-							Hash:               "h1",
-							RuleType:           200,
-							DirectDependencies: []int32{10},
-							Attributes:         map[int32]int32{1: 10},
-						},
-						{Id: 10, Hash: "h1", RuleType: 100}, // source file A
-					},
+			Targets: []entity.OptimizedTarget{
+				{
+					ID:                 1,
+					Hash:               "h1",
+					RuleType:           200,
+					DirectDependencies: []int32{10},
+					Attributes:         map[int32]int32{1: 10},
 				},
+				{ID: 10, Hash: "h1", RuleType: 100}, // source file A
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{
-						1:  "//app:T",
-						10: "//app:A",
-					},
-					RuleTypeMapping: map[int32]string{
-						100: "source file",
-						200: "rule",
-					},
-					AttributeNameMapping:        map[int32]string{1: "key1"},
-					AttributeStringValueMapping: map[int32]string{10: "value1"},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{
+					1:  "//app:T",
+					10: "//app:A",
 				},
+				RuleTypeMapping: map[int32]string{
+					100: "source file",
+					200: "rule",
+				},
+				AttributeNameMapping:        map[int32]string{1: "key1"},
+				AttributeStringValueMapping: map[int32]string{10: "value1"},
 			},
 		},
 	}
 	// New: source file A's hash changed (a seed); T's own config (deps, attrs)
 	// is unchanged but its hash differs because of A.
-	second := []*pb.GetTargetGraphResponse{
+	second := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{
-							Id:                 2,
-							Hash:               "h2", // Changed
-							RuleType:           201,
-							DirectDependencies: []int32{20},            // Same dep name (//app:A)
-							Attributes:         map[int32]int32{2: 20}, // Same attribute
-						},
-						{Id: 20, Hash: "h2", RuleType: 101}, // source file A, hash changed
-					},
+			Targets: []entity.OptimizedTarget{
+				{
+					ID:                 2,
+					Hash:               "h2", // Changed
+					RuleType:           201,
+					DirectDependencies: []int32{20},            // Same dep name (//app:A)
+					Attributes:         map[int32]int32{2: 20}, // Same attribute
 				},
+				{ID: 20, Hash: "h2", RuleType: 101}, // source file A, hash changed
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{
-						2:  "//app:T",
-						20: "//app:A",
-					},
-					RuleTypeMapping: map[int32]string{
-						101: "source file",
-						201: "rule",
-					},
-					AttributeNameMapping:        map[int32]string{2: "key1"},
-					AttributeStringValueMapping: map[int32]string{20: "value1"},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{
+					2:  "//app:T",
+					20: "//app:A",
 				},
+				RuleTypeMapping: map[int32]string{
+					101: "source file",
+					201: "rule",
+				},
+				AttributeNameMapping:        map[int32]string{2: "key1"},
+				AttributeStringValueMapping: map[int32]string{20: "value1"},
 			},
 		},
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
-	cs := res[0].GetChangedTargets()
+	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
 
 	// Find target T
-	var targetT *pb.ChangedTarget
-	for _, ct := range cs.GetChangedTargets() {
-		name := res[1].GetMetadata().GetTargetIdMapping()[ct.GetNewTarget().GetId()]
+	var targetT *entity.ChangedTarget
+	for i := range cs {
+		if cs[i].NewTarget == nil {
+			continue
+		}
+		name := res[1].Metadata.TargetIDMapping[cs[i].NewTarget.ID]
 		if name == "//app:T" {
-			targetT = ct
+			targetT = &cs[i]
 			break
 		}
 	}
 	require.NotNil(t, targetT)
-	require.Equal(t, pb.CHANGE_TYPE_CHANGED, targetT.GetChangeType(), "Target with only hash change (not deps/attrs) is CHANGED")
-	assert.Equal(t, int32(0), targetT.GetDistance(), "T owns changed source file A so is a seed (distance 0)")
+	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), targetT.ChangeType, "Target with only hash change (not deps/attrs) is CHANGED")
+	assert.Equal(t, int32(0), targetT.Distance, "T owns changed source file A so is a seed (distance 0)")
 }
 
 func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
@@ -1217,128 +1097,109 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 	// Rule T (id 3) depends on L (sibling rule), NOT directly on A.
 	// When A changes, L should be distance 0 (owns its changed src),
 	// but T should be distance 1 (depends on changed rule, not its own src).
-	first := []*pb.GetTargetGraphResponse{
+	first := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{Id: 1, Hash: "h1", RuleType: 100},                                 // source file A
-						{Id: 2, Hash: "h1", RuleType: 200, DirectDependencies: []int32{1}}, // rule L -> A
-						{Id: 3, Hash: "h1", RuleType: 200, DirectDependencies: []int32{2}}, // rule T -> L
-					},
-				},
+			Targets: []entity.OptimizedTarget{
+				{ID: 1, Hash: "h1", RuleType: 100},                                 // source file A
+				{ID: 2, Hash: "h1", RuleType: 200, DirectDependencies: []int32{1}}, // rule L -> A
+				{ID: 3, Hash: "h1", RuleType: 200, DirectDependencies: []int32{2}}, // rule T -> L
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{
-						1: "//pkg:A",
-						2: "//pkg:L",
-						3: "//pkg:T",
-					},
-					RuleTypeMapping: map[int32]string{
-						100: "source file",
-						200: "rule",
-					},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{
+					1: "//pkg:A",
+					2: "//pkg:L",
+					3: "//pkg:T",
+				},
+				RuleTypeMapping: map[int32]string{
+					100: "source file",
+					200: "rule",
 				},
 			},
 		},
 	}
-	second := []*pb.GetTargetGraphResponse{
+	second := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{Id: 11, Hash: "h2", RuleType: 101},                                  // source file A changed
-						{Id: 22, Hash: "h2", RuleType: 201, DirectDependencies: []int32{11}}, // rule L -> A
-						{Id: 33, Hash: "h2", RuleType: 201, DirectDependencies: []int32{22}}, // rule T -> L
-					},
-				},
+			Targets: []entity.OptimizedTarget{
+				{ID: 11, Hash: "h2", RuleType: 101},                                  // source file A changed
+				{ID: 22, Hash: "h2", RuleType: 201, DirectDependencies: []int32{11}}, // rule L -> A
+				{ID: 33, Hash: "h2", RuleType: 201, DirectDependencies: []int32{22}}, // rule T -> L
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{
-						11: "//pkg:A",
-						22: "//pkg:L",
-						33: "//pkg:T",
-					},
-					RuleTypeMapping: map[int32]string{
-						101: "source file",
-						201: "rule",
-					},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{
+					11: "//pkg:A",
+					22: "//pkg:L",
+					33: "//pkg:T",
+				},
+				RuleTypeMapping: map[int32]string{
+					101: "source file",
+					201: "rule",
 				},
 			},
 		},
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
-	cs := res[0].GetChangedTargets()
+	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
-	require.Len(t, cs.GetChangedTargets(), 3)
+	require.Len(t, cs, 3)
 
-	byName := make(map[string]*pb.ChangedTarget)
-	for _, ct := range cs.GetChangedTargets() {
-		name := res[1].GetMetadata().GetTargetIdMapping()[ct.GetNewTarget().GetId()]
-		byName[name] = ct
+	byName := make(map[string]*entity.ChangedTarget)
+	for i := range cs {
+		if cs[i].NewTarget == nil {
+			continue
+		}
+		name := res[1].Metadata.TargetIDMapping[cs[i].NewTarget.ID]
+		byName[name] = &cs[i]
 	}
-	assert.Equal(t, int32(0), byName["//pkg:A"].GetDistance(), "source file A is a seed")
-	assert.Equal(t, int32(0), byName["//pkg:L"].GetDistance(), "rule L owns changed source A → seed")
-	assert.Equal(t, int32(1), byName["//pkg:T"].GetDistance(), "rule T depends on sibling rule L, not its own src → distance 1")
+	assert.Equal(t, int32(0), byName["//pkg:A"].Distance, "source file A is a seed")
+	assert.Equal(t, int32(0), byName["//pkg:L"].Distance, "rule L owns changed source A → seed")
+	assert.Equal(t, int32(1), byName["//pkg:T"].Distance, "rule T depends on sibling rule L, not its own src → distance 1")
 }
 
 func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 	c := newTestController(zaptest.NewLogger(t))
 
 	// Old: T (rule) exists; New: T is gone.
-	first := []*pb.GetTargetGraphResponse{
+	first := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{
-					Targets: []*pb.OptimizedTarget{
-						{Id: 1, Hash: "h1", RuleType: 200},
-					},
-				},
+			Targets: []entity.OptimizedTarget{
+				{ID: 1, Hash: "h1", RuleType: 200},
 			},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{1: "//app:T"},
-					RuleTypeMapping: map[int32]string{100: "source file", 200: "rule"},
-				},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{1: "//app:T"},
+				RuleTypeMapping: map[int32]string{100: "source file", 200: "rule"},
 			},
 		},
 	}
-	second := []*pb.GetTargetGraphResponse{
+	second := []entity.GetTargetGraphResponse{
 		{
-			Item: &pb.GetTargetGraphResponse_Targets{
-				Targets: &pb.OptimizedTargets{Targets: []*pb.OptimizedTarget{}},
-			},
+			Targets: []entity.OptimizedTarget{},
 		},
 		{
-			Item: &pb.GetTargetGraphResponse_Metadata{
-				Metadata: &pb.Metadata{
-					TargetIdMapping: map[int32]string{},
-					RuleTypeMapping: map[int32]string{101: "source file", 201: "rule"},
-				},
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{},
+				RuleTypeMapping: map[int32]string{101: "source file", 201: "rule"},
 			},
 		},
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.scope, zap.NewNop(), first, second, -1)
 	require.NoError(t, err)
-	cs := res[0].GetChangedTargets()
+	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
-	require.Len(t, cs.GetChangedTargets(), 1)
-	got := cs.GetChangedTargets()[0]
-	require.Equal(t, pb.CHANGE_TYPE_DELETED, got.GetChangeType())
-	require.NotNil(t, got.GetOldTarget(), "DELETED entry must carry OldTarget")
-	assert.Nil(t, got.GetNewTarget(), "DELETED entry must not carry NewTarget")
-	assert.Equal(t, int32(0), got.GetDistance(), "DELETED targets are seeds (distance 0)")
+	require.Len(t, cs, 1)
+	got := cs[0]
+	require.Equal(t, int32(pb.CHANGE_TYPE_DELETED), got.ChangeType)
+	require.NotNil(t, got.OldTarget, "DELETED entry must carry OldTarget")
+	assert.Nil(t, got.NewTarget, "DELETED entry must not carry NewTarget")
+	assert.Equal(t, int32(0), got.Distance, "DELETED targets are seeds (distance 0)")
 	// Old id is remapped into the canonical id space; metadata must resolve back to the deleted name.
-	assert.Equal(t, "//app:T", res[1].GetMetadata().GetTargetIdMapping()[got.GetOldTarget().GetId()])
+	assert.Equal(t, "//app:T", res[1].Metadata.TargetIDMapping[got.OldTarget.ID])
 }
 
 func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) {
@@ -1346,16 +1207,12 @@ func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) 
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
 	// DELETED entries are seeds (distance 0) and must survive max_distance=1.
-	responses := []*pb.GetChangedTargetsResponse{
+	responses := []entity.GetChangedTargetsResponse{
 		{
-			Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-				ChangedTargets: &pb.ChangedTargets{
-					ChangedTargets: []*pb.ChangedTarget{
-						{Distance: 0, ChangeType: pb.CHANGE_TYPE_DELETED},
-						{Distance: 1, ChangeType: pb.CHANGE_TYPE_CHANGED},
-						{Distance: 5, ChangeType: pb.CHANGE_TYPE_CHANGED},
-					},
-				},
+			ChangedTargets: []entity.ChangedTarget{
+				{Distance: 0, ChangeType: int32(pb.CHANGE_TYPE_DELETED)},
+				{Distance: 1, ChangeType: int32(pb.CHANGE_TYPE_CHANGED)},
+				{Distance: 5, ChangeType: int32(pb.CHANGE_TYPE_CHANGED)},
 			},
 		},
 	}
@@ -1378,21 +1235,6 @@ func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) 
 		}
 	}
 	assert.True(t, gotDeleted, "DELETED entry at distance 0 must survive max_distance=1")
-}
-
-func newMockGraphReader(ctrl *gomock.Controller, chunks ...*pb.GetTargetGraphResponse) *storagemock.MockGraphReader {
-	r := storagemock.NewMockGraphReader(ctrl)
-	idx := 0
-	r.EXPECT().Read().DoAndReturn(func() (*pb.GetTargetGraphResponse, error) {
-		if idx >= len(chunks) {
-			return nil, io.EOF
-		}
-		c := chunks[idx]
-		idx++
-		return c, nil
-	}).AnyTimes()
-	r.EXPECT().Close().Return(nil).AnyTimes()
-	return r
 }
 
 func changedTargetsRequest() *pb.GetChangedTargetsRequest {
@@ -1423,14 +1265,16 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 	t.Run("corrupt cached blob falls through to recompute", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 
-		// A valid single-message blob truncated by one byte — mimics an
-		// incomplete concurrent write. The reader errors partway, and the
-		// caller must fall through (served=false) without sending anything.
+		// A two-message JSON blob with the second message truncated — mimics an
+		// incomplete concurrent write. The reader returns the first message fine
+		// but errors on the second, and the caller must fall through
+		// (served=false) without sending anything.
 		var buf bytes.Buffer
-		require.NoError(t, gogio.NewDelimitedWriter(&buf).WriteMsg(&pb.GetChangedTargetsResponse{
-			Item: &pb.GetChangedTargetsResponse_ChangedTargets{ChangedTargets: &pb.ChangedTargets{}},
-		}))
-		truncated := buf.Bytes()[:buf.Len()-1]
+		enc := json.NewEncoder(&buf)
+		enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}})
+		enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
+		// Truncate well into the second JSON object to guarantee corruption.
+		truncated := buf.Bytes()[:buf.Len()-5]
 
 		st := storagemock.NewMockStorage(ctrl)
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
@@ -1461,13 +1305,9 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		ctrl := gomock.NewController(t)
 
 		var buf bytes.Buffer
-		w := gogio.NewDelimitedWriter(&buf)
-		require.NoError(t, w.WriteMsg(&pb.GetChangedTargetsResponse{
-			Item: &pb.GetChangedTargetsResponse_ChangedTargets{ChangedTargets: &pb.ChangedTargets{}},
-		}))
-		require.NoError(t, w.WriteMsg(&pb.GetChangedTargetsResponse{
-			Item: &pb.GetChangedTargetsResponse_Metadata{Metadata: &pb.Metadata{}},
-		}))
+		enc := json.NewEncoder(&buf)
+		enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}})
+		enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
 		cached := buf.Bytes()
 
 		st := storagemock.NewMockStorage(ctrl)
@@ -1504,16 +1344,14 @@ func TestFetchTargetGraphs(t *testing.T) {
 		r.BypassCache = true
 		return r
 	}
-	chunk := &pb.GetTargetGraphResponse{
-		Item: &pb.GetTargetGraphResponse_Metadata{Metadata: &pb.Metadata{}},
-	}
+	entityChunk := entity.GetTargetGraphResponse{Metadata: &entity.Metadata{}}
 
 	t.Run("returns both graphs on success", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, _ entity.GetTargetGraphRequest) (storage.GraphReader, error) {
-				return newMockGraphReader(ctrl, chunk), nil
+				return newGraphReader(t, entityChunk), nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
@@ -1534,7 +1372,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 				if p.Build.BaseSha == "sha1" {
 					return nil, injected
 				}
-				return newMockGraphReader(ctrl, chunk), nil
+				return newGraphReader(t, entityChunk), nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
@@ -1552,7 +1390,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, _ entity.GetTargetGraphRequest) (storage.GraphReader, error) {
-				return newMockGraphReader(ctrl), nil
+				return newGraphReader(t), nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
@@ -1579,7 +1417,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 }
 
 func TestToDiffGraph_SkipsUnresolvedIDs(t *testing.T) {
-	targetsByID := map[int32]*pb.OptimizedTarget{
+	targetsByID := map[int32]*entity.OptimizedTarget{
 		1: {
 			Hash:               "h1",
 			RuleType:           100,
@@ -1590,8 +1428,8 @@ func TestToDiffGraph_SkipsUnresolvedIDs(t *testing.T) {
 		2: {Hash: "h2", RuleType: 100},
 		3: {Hash: "h3", RuleType: 100},
 	}
-	meta := &pb.Metadata{
-		TargetIdMapping:             map[int32]string{1: "//app:a", 2: "//app:b"},
+	meta := &entity.Metadata{
+		TargetIDMapping:             map[int32]string{1: "//app:a", 2: "//app:b"},
 		RuleTypeMapping:             map[int32]string{100: "go_library"},
 		TagMapping:                  map[int32]string{10: "tag_a"},
 		AttributeNameMapping:        map[int32]string{20: "attr_a"},

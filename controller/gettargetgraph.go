@@ -67,7 +67,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	sendStart := time.Now()
 	outputConfig := request.GetOutputConfig()
 	for {
-		graphStreamChunk, err := graphReader.Read()
+		chunk, err := graphReader.Read()
 		if err == io.EOF {
 			sendDuration := time.Since(sendStart)
 			totalDuration := time.Since(start)
@@ -82,7 +82,8 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 		if err != nil {
 			return common.WithReason(failureReasonGraphFetch, common.ErrorTypeInfra, err)
 		}
-		toSend := applyOptimizedTargetsOutputConfigToChunk(graphStreamChunk, outputConfig)
+		protoResp := mapper.GetTargetGraphResponseToProto(&chunk)
+		toSend := applyOptimizedTargetsOutputConfigToChunk(protoResp, outputConfig)
 		err = stream.Send(toSend)
 		if err != nil {
 			return common.WithReason(failureReasonSend, common.ErrorTypeInfra, fmt.Errorf("send graph: %w", err))

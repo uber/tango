@@ -32,10 +32,12 @@ import (
 
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/uber/tango/core/bazel"
-	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/targethasher"
+	"github.com/uber/tango/internal/mapper"
 	"go.uber.org/zap"
 )
+
+const defaultMaxMessageBytes = 4_250_000
 
 func main() {
 	if err := run(); err != nil {
@@ -112,18 +114,20 @@ func run() error {
 		totalDuration += elapsed
 		fmt.Printf("run %d: targethasher: %v  (%d targets)\n", i+1, elapsed.Round(time.Millisecond), len(targethasherResult.TargetNames))
 		start = time.Now()
-		response, err := common.ResultToGetTargetGraphResponse(
-			ctx, targethasherResult,
-			common.DefaultTargetChunkSize, common.DefaultMetadataMapChunkSize,
-		)
+		targets, meta, err := mapper.ResultToTargetGraph(ctx, targethasherResult)
 		if err != nil {
-			return fmt.Errorf("run %d: converting to GetTargetGraphResponse: %w", i+1, err)
+			return fmt.Errorf("run %d: converting to target graph: %w", i+1, err)
+		}
+		chunks, err := mapper.ChunkTargetGraph(targets, meta, defaultMaxMessageBytes)
+		if err != nil {
+			return fmt.Errorf("run %d: chunking target graph: %w", i+1, err)
 		}
 		elapsed = time.Since(start)
-		fmt.Printf("run %d: ResultToGetTargetGraphResponse: %v  (%d responses)\n", i+1, elapsed.Round(time.Millisecond), len(response))
+		fmt.Printf("run %d: ResultToTargetGraph+Chunk: %v  (%d chunks)\n", i+1, elapsed.Round(time.Millisecond), len(chunks))
 		m := jsonpb.Marshaler{Indent: "  "}
-		for _, r := range response {
-			if err := m.Marshal(os.Stdout, r); err != nil {
+		for _, chunk := range chunks {
+			protoResp := mapper.GetTargetGraphResponseToProto(&chunk)
+			if err := m.Marshal(os.Stdout, protoResp); err != nil {
 				return fmt.Errorf("run %d: encoding response: %w", i+1, err)
 			}
 			fmt.Println()
