@@ -4,7 +4,9 @@ go_library(
     name = "entity",
     srcs = [
         "build_description.go",
+        "changed_targets.go",
         "computation_strategy.go",
+        "optimized_target.go",
         "target_graph.go",
     ],
     importpath = "github.com/uber/tango/entity",
