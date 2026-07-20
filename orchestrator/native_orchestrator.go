@@ -34,6 +34,7 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
+	"github.com/uber/tango/internal/streaming"
 	"github.com/uber/tango/internal/url"
 	"github.com/uber/tango/mapper"
 	"github.com/uber/tango/observability/metrics"
@@ -217,9 +218,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph: %w", err)
 	}
-	chunks, err := mapper.ChunkTargetGraph(targets, meta, b.config.Service.MaxMessageBytes)
+	chunks, err := streaming.SplitTargetGraph(targets, meta, b.config.Service.MaxMessageBytes)
 	if err != nil {
-		return nil, fmt.Errorf("chunk target graph: %w", err)
+		return nil, fmt.Errorf("split target graph: %w", err)
 	}
 	cacheWriteStart := time.Now()
 	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, chunks)

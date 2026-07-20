@@ -574,7 +574,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 	require.NotNil(t, cs)
 	require.Len(t, cs, 1)
 	ct := cs[0]
-	require.Equal(t, int32(pb.CHANGE_TYPE_NEW), ct.ChangeType)
+	require.Equal(t, entity.ChangeTypeNew, ct.ChangeType)
 	// ID used in target should match canonical metadata mapping
 	meta := res[1].Metadata
 	require.NotNil(t, meta)
@@ -648,8 +648,8 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 	}
 	require.NotNil(t, aCT)
 	require.NotNil(t, lCT)
-	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), aCT.ChangeType)
-	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), lCT.ChangeType)
+	require.Equal(t, entity.ChangeTypeChanged, aCT.ChangeType)
+	require.Equal(t, entity.ChangeTypeChanged, lCT.ChangeType)
 	assert.Equal(t, int32(0), aCT.Distance, "source-file A with hash change is a seed (distance 0)")
 	assert.Equal(t, int32(0), lCT.Distance, "rule L whose own source A changed is a seed (distance 0)")
 	// Old and new IDs must match for each changed target under canonical metadata
@@ -697,7 +697,7 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	require.NotNil(t, cs)
 	require.Len(t, cs, 1)
 	got := cs[0]
-	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), got.ChangeType)
+	require.Equal(t, entity.ChangeTypeChanged, got.ChangeType)
 	assert.Equal(t, int32(0), got.Distance, "orphan hash change is seeded by trust-the-hasher")
 }
 
@@ -764,7 +764,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 		}
 	}
 	require.NotNil(t, targetT)
-	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), targetT.ChangeType, "Target with changed dependencies should be marked as CHANGED")
+	require.Equal(t, entity.ChangeTypeChanged, targetT.ChangeType, "Target with changed dependencies should be marked as CHANGED")
 	assert.Equal(t, int32(0), targetT.Distance, "Target whose dep-name set changed is a seed (distance 0)")
 }
 
@@ -825,7 +825,7 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 	require.NotNil(t, cs)
 	require.Len(t, cs, 1)
 	got := cs[0]
-	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), got.ChangeType, "Target with changed attributes should be marked as CHANGED")
+	require.Equal(t, entity.ChangeTypeChanged, got.ChangeType, "Target with changed attributes should be marked as CHANGED")
 	assert.Equal(t, int32(0), got.Distance, "Target with own-config (attrs) change is a seed (distance 0)")
 }
 
@@ -895,7 +895,7 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 	require.NotNil(t, cs)
 	require.Len(t, cs, 1)
 	got := cs[0]
-	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), got.ChangeType, "Target with new attribute added should be marked as CHANGED")
+	require.Equal(t, entity.ChangeTypeChanged, got.ChangeType, "Target with new attribute added should be marked as CHANGED")
 	assert.Equal(t, int32(0), got.Distance, "Target with own-config (attrs) change is a seed (distance 0)")
 }
 
@@ -906,7 +906,7 @@ func TestSendTrimmedChangedTargets_MetadataAlwaysForwarded(t *testing.T) {
 	responses := []entity.GetChangedTargetsResponse{
 		{
 			ChangedTargets: []entity.ChangedTarget{
-				{Distance: 5, ChangeType: int32(pb.CHANGE_TYPE_CHANGED)},
+				{Distance: 5, ChangeType: entity.ChangeTypeChanged},
 			},
 		},
 		{
@@ -955,8 +955,8 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	enc := json.NewEncoder(&buf)
 	enc.Encode(entity.GetChangedTargetsResponse{
 		ChangedTargets: []entity.ChangedTarget{
-			{Distance: 0, ChangeType: int32(pb.CHANGE_TYPE_CHANGED)},
-			{Distance: 2, ChangeType: int32(pb.CHANGE_TYPE_CHANGED)},
+			{Distance: 0, ChangeType: entity.ChangeTypeChanged},
+			{Distance: 2, ChangeType: entity.ChangeTypeChanged},
 		},
 	})
 	enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
@@ -1081,7 +1081,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 		}
 	}
 	require.NotNil(t, targetT)
-	require.Equal(t, int32(pb.CHANGE_TYPE_CHANGED), targetT.ChangeType, "Target with only hash change (not deps/attrs) is CHANGED")
+	require.Equal(t, entity.ChangeTypeChanged, targetT.ChangeType, "Target with only hash change (not deps/attrs) is CHANGED")
 	assert.Equal(t, int32(0), targetT.Distance, "T owns changed source file A so is a seed (distance 0)")
 }
 
@@ -1189,7 +1189,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 	require.NotNil(t, cs)
 	require.Len(t, cs, 1)
 	got := cs[0]
-	require.Equal(t, int32(pb.CHANGE_TYPE_DELETED), got.ChangeType)
+	require.Equal(t, entity.ChangeTypeDeleted, got.ChangeType)
 	require.NotNil(t, got.OldTarget, "DELETED entry must carry OldTarget")
 	assert.Nil(t, got.NewTarget, "DELETED entry must not carry NewTarget")
 	assert.Equal(t, int32(0), got.Distance, "DELETED targets are seeds (distance 0)")
@@ -1205,9 +1205,9 @@ func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) 
 	responses := []entity.GetChangedTargetsResponse{
 		{
 			ChangedTargets: []entity.ChangedTarget{
-				{Distance: 0, ChangeType: int32(pb.CHANGE_TYPE_DELETED)},
-				{Distance: 1, ChangeType: int32(pb.CHANGE_TYPE_CHANGED)},
-				{Distance: 5, ChangeType: int32(pb.CHANGE_TYPE_CHANGED)},
+				{Distance: 0, ChangeType: entity.ChangeTypeDeleted},
+				{Distance: 1, ChangeType: entity.ChangeTypeChanged},
+				{Distance: 5, ChangeType: entity.ChangeTypeChanged},
 			},
 		},
 	}

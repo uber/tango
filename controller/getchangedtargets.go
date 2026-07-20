@@ -638,17 +638,17 @@ func (m *canonicalMappers) transpose(src *targetdiff.Target) *entity.OptimizedTa
 	return dst
 }
 
-// toChangeType maps a targetdiff.ChangeType to its wire equivalent as an int32.
-func toChangeType(ct targetdiff.ChangeType) int32 {
+// toChangeType maps a targetdiff.ChangeType to its entity equivalent.
+func toChangeType(ct targetdiff.ChangeType) entity.ChangeType {
 	switch ct {
 	case targetdiff.ChangeTypeNew:
-		return int32(pb.CHANGE_TYPE_NEW)
+		return entity.ChangeTypeNew
 	case targetdiff.ChangeTypeDeleted:
-		return int32(pb.CHANGE_TYPE_DELETED)
+		return entity.ChangeTypeDeleted
 	case targetdiff.ChangeTypeChanged:
-		return int32(pb.CHANGE_TYPE_CHANGED)
+		return entity.ChangeTypeChanged
 	default:
-		return int32(pb.CHANGE_TYPE_INVALID)
+		return entity.ChangeTypeInvalid
 	}
 }
 

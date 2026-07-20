@@ -34,6 +34,7 @@ import (
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/internal/mapper"
+	"github.com/uber/tango/internal/streaming"
 	tgmapper "github.com/uber/tango/mapper"
 	"go.uber.org/zap"
 )
@@ -119,12 +120,12 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("run %d: converting to target graph: %w", i+1, err)
 		}
-		chunks, err := mapper.ChunkTargetGraph(targets, meta, defaultMaxMessageBytes)
+		chunks, err := streaming.SplitTargetGraph(targets, meta, defaultMaxMessageBytes)
 		if err != nil {
-			return fmt.Errorf("run %d: chunking target graph: %w", i+1, err)
+			return fmt.Errorf("run %d: splitting target graph: %w", i+1, err)
 		}
 		elapsed = time.Since(start)
-		fmt.Printf("run %d: ResultToTargetGraph+Chunk: %v  (%d chunks)\n", i+1, elapsed.Round(time.Millisecond), len(chunks))
+		fmt.Printf("run %d: ResultToTargetGraph+Split: %v  (%d chunks)\n", i+1, elapsed.Round(time.Millisecond), len(chunks))
 		m := jsonpb.Marshaler{Indent: "  "}
 		for _, chunk := range chunks {
 			protoResp := mapper.GetTargetGraphResponseToProto(&chunk)
