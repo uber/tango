@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/entity"
-	pb "github.com/uber/tango/tangopb"
 )
 
 func TestSplitBySize(t *testing.T) {
@@ -59,14 +58,18 @@ func TestSplitBySize_EmptyInputReturnsOneEmptyGroup(t *testing.T) {
 	assert.Empty(t, groups[0])
 }
 
-func TestMapEntryWireSize_MatchesGeneratedSize(t *testing.T) {
+func TestMapEntryWireSize(t *testing.T) {
 	t.Parallel()
 
-	m := &pb.Metadata{TargetIdMapping: map[int32]string{7: "hello world"}}
-	assert.Equal(t, m.Size(), mapEntryWireSize(7, "hello world"))
+	// Map entry for key=7, value="hello world":
+	//   inner: tag(1) + varint(7)(1) + tag(1) + len("hello world")(1) + 11 = 15
+	//   outer: tag(1) + varint(15)(1) + 15 = 17
+	assert.Equal(t, 17, mapEntryWireSize(7, "hello world"))
 
-	m2 := &pb.Metadata{TargetIdMapping: map[int32]string{1234567: strings.Repeat("x", 300)}}
-	assert.Equal(t, m2.Size(), mapEntryWireSize(1234567, strings.Repeat("x", 300)))
+	// Map entry for key=1234567, value=300×"x":
+	//   inner: tag(1) + varint(1234567)(3) + tag(1) + varint(300)(2) + 300 = 307
+	//   outer: tag(1) + varint(307)(2) + 307 = 310
+	assert.Equal(t, 310, mapEntryWireSize(1234567, strings.Repeat("x", 300)))
 }
 
 func TestSplitMetadata_SplitsTargetMapByBytes(t *testing.T) {
