@@ -7,6 +7,8 @@ go_library(
         "ctxreader.go",
         "graphreader.go",
         "graphwriter.go",
+        "jsongraphreader.go",
+        "jsongraphwriter.go",
         "memstorage.go",
         "reader.go",
         "storage.go",
@@ -14,6 +16,7 @@ go_library(
     importpath = "github.com/uber/tango/core/storage",
     visibility = ["//visibility:public"],
     deps = [
+        "//entity",
         "//tangopb",
         "@com_github_gogo_protobuf//io",
         "@com_github_gogo_protobuf//proto",
@@ -22,9 +25,13 @@ go_library(
 
 go_test(
     name = "storage_test",
-    srcs = ["storage_test.go"],
+    srcs = [
+        "jsongraph_test.go",
+        "storage_test.go",
+    ],
     embed = [":storage"],
     deps = [
+        "//entity",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
     ],
