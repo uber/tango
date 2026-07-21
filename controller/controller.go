@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/uber-go/tally"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
@@ -62,8 +63,7 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	}
 	maxMessageBytes := p.MaxMessageBytes
 	if maxMessageBytes <= 0 {
-		// TODO: provide via config.Parse instead of hardcoding
-		maxMessageBytes = 4_250_000
+		maxMessageBytes = config.DefaultMaxMessageBytes
 	}
 	return &controller{
 		logger:               p.Logger,

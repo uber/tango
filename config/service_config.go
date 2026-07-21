@@ -22,6 +22,6 @@ type ServiceConfig struct {
 	MaxMessageBytes      int    `yaml:"max_message_bytes"`       // max serialized bytes per streamed gRPC message; 0 → DefaultMaxMessageBytes
 }
 
-// defaultMaxMessageBytes is the fallback max serialized size per streamed
+// DefaultMaxMessageBytes is the fallback max serialized size per streamed
 // message (~4.25 MB), well under the 64 MB default gRPC limit.
-const defaultMaxMessageBytes = 4_250_000
+const DefaultMaxMessageBytes = 4_250_000

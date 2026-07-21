@@ -20,6 +20,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/uber-go/tally"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
 	"go.uber.org/zap"
@@ -29,7 +30,7 @@ func newTestController(logger *zap.Logger) *controller {
 	return &controller{
 		logger:               logger,
 		scope:                tally.NoopScope,
-		maxMessageBytes:      4_250_000,
+		maxMessageBytes:      config.DefaultMaxMessageBytes,
 		totalDurationBuckets: _totalDurationBuckets,
 		appCtx:               context.Background(),
 	}

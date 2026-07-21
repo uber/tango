@@ -447,23 +447,24 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 		})
 	}
 
-	// Emit changes in chunks to stay within gRPC per-message size limits, followed by chunked metadata.
-	// Entity ChangedTarget doesn't implement Sizer, so convert to proto for size measurement
-	// (same pattern as ChunkTargetGraph) and map groups back by index.
-	tempResp := mapper.ChangedTargetsResponseToProto(&entity.GetChangedTargetsResponse{ChangedTargets: changed})
-	protoChanged := tempResp.GetItem().(*pb.GetChangedTargetsResponse_ChangedTargets).ChangedTargets.GetChangedTargets()
+	// Split changes into groups bounded by maxMessageBytes.
 	var results []entity.GetChangedTargetsResponse
-	changedGroups, err := streaming.SplitBySize(protoChanged, c.maxMessageBytes)
-	if err != nil {
-		return nil, err
+	start2 := 0
+	currentBytes := 0
+	for i := range changed {
+		itemBytes := changed[i].Size()
+		if i > start2 && currentBytes+itemBytes > c.maxMessageBytes {
+			results = append(results, entity.GetChangedTargetsResponse{
+				ChangedTargets: changed[start2:i],
+			})
+			start2 = i
+			currentBytes = 0
+		}
+		currentBytes += itemBytes
 	}
-	idx := 0
-	for _, group := range changedGroups {
-		results = append(results, entity.GetChangedTargetsResponse{
-			ChangedTargets: changed[idx : idx+len(group)],
-		})
-		idx += len(group)
-	}
+	results = append(results, entity.GetChangedTargetsResponse{
+		ChangedTargets: changed[start2:],
+	})
 	metaGroups, err := streaming.SplitMetadata(
 		mappers.target.Invert(),
 		mappers.ruleType.Invert(),
