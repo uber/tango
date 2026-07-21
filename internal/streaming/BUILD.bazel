@@ -5,7 +5,10 @@ go_library(
     srcs = ["streaming.go"],
     importpath = "github.com/uber/tango/internal/streaming",
     visibility = ["//:__subpackages__"],
-    deps = ["//entity"],
+    deps = [
+        "//entity",
+        "//internal/streaming/wire",
+    ],
 )
 
 go_test(

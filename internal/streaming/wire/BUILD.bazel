@@ -1,0 +1,8 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "wire",
+    srcs = ["wire.go"],
+    importpath = "github.com/uber/tango/internal/streaming/wire",
+    visibility = ["//:__subpackages__"],
+)

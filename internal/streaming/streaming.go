@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/uber/tango/entity"
+	"github.com/uber/tango/internal/streaming/wire"
 )
 
 // Sizer is satisfied by any type that reports its serialized byte length.
@@ -113,17 +114,8 @@ func splitMapByBytes(m map[int32]string, maxBytes int) []map[int32]string {
 }
 
 func mapEntryWireSize(k int32, v string) int {
-	mapEntrySize := 1 + varintSize(uint64(k)) + 1 + len(v) + varintSize(uint64(len(v)))
-	return mapEntrySize + 1 + varintSize(uint64(mapEntrySize))
-}
-
-func varintSize(x uint64) int {
-	n := 1
-	for x >= 0x80 {
-		x >>= 7
-		n++
-	}
-	return n
+	mapEntrySize := 1 + wire.VarintSize(uint64(k)) + 1 + len(v) + wire.VarintSize(uint64(len(v)))
+	return mapEntrySize + 1 + wire.VarintSize(uint64(mapEntrySize))
 }
 
 // SplitTargetGraph splits targets and metadata into wire-safe
