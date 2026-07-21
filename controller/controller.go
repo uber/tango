@@ -18,6 +18,7 @@ import (
 	"context"
 
 	"github.com/uber-go/tally"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/observability/metrics"
 	"github.com/uber/tango/orchestrator"
@@ -35,7 +36,6 @@ type Params struct {
 	Scope           tally.Scope `optional:"true"`
 	MaxMessageBytes int         `optional:"true"`
 }
-
 
 type controller struct {
 	logger          *zap.Logger
@@ -56,8 +56,7 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	emitter := metrics.New(p.Scope).SubScope("controller")
 	maxMessageBytes := p.MaxMessageBytes
 	if maxMessageBytes <= 0 {
-		// TODO: provide via config.Parse instead of hardcoding
-		maxMessageBytes = 4_250_000
+		maxMessageBytes = config.DefaultMaxMessageBytes
 	}
 	return &controller{
 		logger:          p.Logger,

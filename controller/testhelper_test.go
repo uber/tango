@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/observability/metrics"
@@ -29,7 +30,7 @@ func newTestController(logger *zap.Logger) *controller {
 	return &controller{
 		logger:          logger,
 		emitter:         metrics.Nop(),
-		maxMessageBytes: 4_250_000,
+		maxMessageBytes: config.DefaultMaxMessageBytes,
 		appCtx:          context.Background(),
 	}
 }

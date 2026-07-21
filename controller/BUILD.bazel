@@ -15,6 +15,7 @@ go_library(
     importpath = "github.com/uber/tango/controller",
     visibility = ["//visibility:public"],
     deps = [
+        "//config",
         "//core/cachekey",
         "//core/common",
         "//core/errors",
@@ -47,6 +48,7 @@ go_test(
     ],
     embed = [":controller"],
     deps = [
+        "//config",
         "//core/storage",
         "//core/storage/storagemock",
         "//entity",
