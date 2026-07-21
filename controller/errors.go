@@ -18,8 +18,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/common"
+	"github.com/uber/tango/observability/metrics"
 )
 
 // failure_reason tag values for errors that originate in the controller itself.
@@ -38,8 +38,9 @@ const (
 
 // emitFailureMetric tags the failure counter with the reason and type from the
 // error's ClassifiedError. Context errors are recognised explicitly; everything
-// else falls back to unknown/infra.
-func emitFailureMetric(scope tally.Scope, err error) {
+// else falls back to unknown/infra. e should already carry the repo tag; op is
+// the operation subscope the counter lands under.
+func emitFailureMetric(e *metrics.Emitter, op string, err error) {
 	var ce common.ClassifiedError
 	switch {
 	case errors.As(err, &ce):
@@ -51,8 +52,8 @@ func emitFailureMetric(scope tally.Scope, err error) {
 	default:
 		ce = common.WithReason(common.FailureReasonUnknown, common.ErrorTypeInfra, err)
 	}
-	scope.Tagged(map[string]string{
+	e.Tagged(map[string]string{
 		"failure_type":   ce.Type(),
 		"failure_reason": ce.Reason(),
-	}).Counter("failure_type").Inc(1)
+	}).Counter(op, "failures").Inc(1)
 }

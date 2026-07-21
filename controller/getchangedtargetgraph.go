@@ -15,20 +15,15 @@
 package controller
 
 import (
+	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
 )
 
 // GetChangedTargetGraph is the streaming RPC that will return the subgraph
 // induced by the changed targets between two revisions. It is currently a
-// stub: it records success/failure metrics and returns no data.
+// stub: it records the start/finish lifecycle and returns no data.
 func (c *controller) GetChangedTargetGraph(request *pb.GetChangedTargetGraphRequest, stream pb.TangoServiceGetChangedTargetGraphYARPCServer) (retErr error) {
-	scope := c.scope.SubScope("get_changed_target_graph")
-	defer func() {
-		if retErr != nil {
-			scope.Counter("failure").Inc(1)
-		} else {
-			scope.Counter("success").Inc(1)
-		}
-	}()
+	op := metrics.Begin(c.emitter, opGetChangedTargetGraph, slowDurationBuckets)
+	defer func() { op.Complete(retErr) }()
 	return nil
 }
