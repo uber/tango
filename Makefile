@@ -53,6 +53,7 @@ gazelle:
 cover: ## Run tests with coverage
 	@echo "Running tests with coverage..."
 	@$(BAZEL) coverage --combined_report=lcov //...
+	@rm -f cover.out
 	@cp bazel-out/_coverage/_coverage_report.dat cover.out
 	@echo "Coverage report written to cover.out"
 

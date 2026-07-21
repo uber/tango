@@ -25,6 +25,7 @@ import (
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/internal/url"
+	"github.com/uber/tango/observability/metrics"
 
 	"github.com/uber/tango/core/storage"
 	pb "github.com/uber/tango/tangopb"
@@ -33,19 +34,17 @@ import (
 
 // GetTargetGraph returns the target graph for a given request.
 func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
-	scope := c.scope.SubScope("get_target_graph")
-	scope.Counter("calls").Inc(1)
+	repo := url.ToShortRemote(request.GetBuildDescription().GetRemote())
+	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
+	op := metrics.Begin(e, opGetTargetGraph, slowDurationBuckets)
 	logger := c.logger.WithLazy(
 		zap.Any("build_description", request.GetBuildDescription()),
 	)
 	defer func() {
+		op.Complete(retErr)
 		if retErr != nil {
 			logger.Error("GetTargetGraph failed", tangoerrors.Fields(retErr)...)
-			scope.Counter("failure").Inc(1)
-			emitFailureMetric(scope, retErr)
-			retErr = mapper.ToProtoError(retErr)
-		} else {
-			scope.Counter("success").Inc(1)
+			emitFailureMetric(e, opGetTargetGraph, retErr)
 		}
 	}()
 	start := time.Now()
@@ -55,8 +54,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	if err != nil {
 		return tangoerrors.NewUser(fmt.Errorf("convert get target graph request: %w", err))
 	}
-	scope = scope.Tagged(map[string]string{"repo": url.ToShortRemote(entityReq.Build.Remote)})
-	graphReader, err := c.getGraph(ctx, entityReq)
+	graphReader, err := c.getGraph(ctx, e, entityReq)
 	if err != nil {
 		return fmt.Errorf("get graph: %w", err)
 	}
@@ -71,13 +69,11 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 		graphStreamChunk, err := graphReader.Read()
 		if err == io.EOF {
 			sendDuration := time.Since(sendStart)
-			totalDuration := time.Since(start)
 			logger.Info("GetTargetGraph: Done streaming",
 				zap.Duration("send_duration", sendDuration),
-				zap.Duration("total_duration", totalDuration),
+				zap.Duration("total_duration", time.Since(start)),
 			)
-			scope.Timer("send_duration").Record(sendDuration)
-			scope.Timer("total_duration").Record(totalDuration)
+			e.DurationHistogram(opGetTargetGraph, "send_duration", fastDurationBuckets).RecordDuration(sendDuration)
 			return nil
 		}
 		if err != nil {
@@ -97,7 +93,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 // entries store the full payload and stripping happens at send time, so
 // letting an orchestrator see it could poison the shared cache with
 // stripped graphs.
-func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entity.GetTargetGraphRequest) (storage.GraphReader, error) {
 	start := time.Now()
 	logger := c.logger.With(
 		zap.Any("build_description", req.Build),
@@ -138,10 +134,8 @@ func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequ
 					zap.Duration("storage_duration", time.Since(storageStart)),
 					zap.Duration("total_duration", time.Since(start)),
 				)
-				scope := c.scope.SubScope("get_graph")
-				scope.Counter("graph_cache_hit").Inc(1)
-				scope.Timer("storage_duration").Record(time.Since(storageStart))
-				scope.Timer("total_duration").Record(time.Since(start))
+				e.Counter(opGetTargetGraph, "cache_hit").Inc(1)
+				e.DurationHistogram(opGetTargetGraph, "download_graph", slowDurationBuckets).RecordDuration(time.Since(storageStart))
 				return graphReader, nil
 			}
 		}
@@ -160,8 +154,5 @@ func (c *controller) getGraph(ctx context.Context, req entity.GetTargetGraphRequ
 		zap.Duration("compute_duration", time.Since(computeStart)),
 		zap.Duration("total_duration", time.Since(start)),
 	)
-	scope := c.scope.SubScope("get_graph")
-	scope.Timer("compute_duration").Record(time.Since(computeStart))
-	scope.Timer("total_duration").Record(time.Since(start))
 	return graphReader, nil
 }
