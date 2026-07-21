@@ -227,8 +227,8 @@ func TestDefaultGit_FileHashes(t *testing.T) {
 				`100644 blob d236	file1
 100644 blob 9bcc	file2`),
 			wantHashes: map[string][]byte{
-				"file1": []byte{0xd2, 0x36},
-				"file2": []byte{0x9b, 0xcc},
+				"file1": {0xd2, 0x36},
+				"file2": {0x9b, 0xcc},
 			},
 		},
 		{

@@ -36,7 +36,7 @@ func NewMemoryStorage() Storage {
 }
 
 // Get downloads a blob from the storage. Returns an error wrapping ErrNotFound when the blob is not found.
-func (m *memoryStorage) Get(ctx context.Context, req DownloadRequest) (DownloadResponse, error) {
+func (m *memoryStorage) Get(_ context.Context, req DownloadRequest) (DownloadResponse, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	b, ok := m.data[req.Key]
@@ -60,14 +60,14 @@ func (m *memoryStorage) Put(ctx context.Context, req UploadRequest) error {
 	return nil
 }
 
-func (m *memoryStorage) Exists(ctx context.Context, key string) (bool, error) {
+func (m *memoryStorage) Exists(_ context.Context, key string) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	_, ok := m.data[key]
 	return ok, nil
 }
 
-func (m *memoryStorage) List(ctx context.Context, prefix string) ([]string, error) {
+func (m *memoryStorage) List(_ context.Context, prefix string) ([]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var keys []string

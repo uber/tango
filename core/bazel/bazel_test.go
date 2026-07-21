@@ -36,7 +36,7 @@ func TestNewBazelClient(t *testing.T) {
 				WorkspacePath: "/tmp/test",
 				EnvVarsMap:    map[string]string{"FOO": "bar"},
 				Logger:        zap.NewNop().Sugar(),
-				ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+				ExecCommandContext: func(_ context.Context, _ string, _ ...string) commander {
 					return nil
 				},
 			},

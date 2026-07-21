@@ -48,6 +48,8 @@ type job struct {
 // GetChangedTargets returns the changed targets between two revisions. If the
 // client disconnects, the stream's context is cancelled and the function
 // returns with context.Canceled.
+//
+//nolint:gocyclo // orchestration method with inherently high branching
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	scope := c.scope.SubScope("get_changed_targets")
 	scope.Counter("calls").Inc(1)
@@ -102,8 +104,8 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 
 	changedTargetsResponses, err := c.compareTargetGraphs(ctx, scope, logger, firstGraph, secondGraph, maxDist)
 	// Allow GC of raw graph data while the caching goroutine runs.
-	firstGraph = nil
-	secondGraph = nil
+	firstGraph = nil  //nolint:ineffassign // intentional: allow GC of large slice
+	secondGraph = nil //nolint:ineffassign // intentional: allow GC of large slice
 	if err != nil {
 		if ctx.Err() != nil {
 			err = ctx.Err()
@@ -397,21 +399,21 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 		return nil, err
 	}
 	// Release raw chunk slices — individual target protos are now held by the ID maps.
-	firstGraph = nil
-	secondGraph = nil
+	firstGraph = nil  //nolint:ineffassign // intentional: allow GC of large slice
+	secondGraph = nil //nolint:ineffassign // intentional: allow GC of large slice
 	before, err := toDiffGraph(ctx, firstTargetsByID, firstMetadata)
 	if err != nil {
 		return nil, err
 	}
 	// Metadata and ID map are fully consumed by the name-resolved graph; drop them.
-	firstTargetsByID = nil
-	firstMetadata = nil
+	firstTargetsByID = nil //nolint:ineffassign // intentional: allow GC of duplicate map
+	firstMetadata = nil    //nolint:ineffassign // intentional: allow GC of duplicate map
 	after, err := toDiffGraph(ctx, secondTargetsByID, secondMetadata)
 	if err != nil {
 		return nil, err
 	}
-	secondTargetsByID = nil
-	secondMetadata = nil
+	secondTargetsByID = nil //nolint:ineffassign // intentional: allow GC of duplicate map
+	secondMetadata = nil    //nolint:ineffassign // intentional: allow GC of duplicate map
 	indexDuration := time.Since(indexStart)
 	compareScope.Timer("index_duration").Record(indexDuration)
 
@@ -426,8 +428,8 @@ func (c *controller) compareTargetGraphs(ctx context.Context, scope tally.Scope,
 		return nil, err
 	}
 	// Release the input graphs; only result is needed from here on.
-	before = nil
-	after = nil
+	before = nil //nolint:ineffassign // intentional: allow GC of large graph
+	after = nil  //nolint:ineffassign // intentional: allow GC of large graph
 	compareScope.Timer("compute_duration").Record(time.Since(computeStart))
 
 	if ctx.Err() != nil {

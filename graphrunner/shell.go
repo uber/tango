@@ -42,6 +42,6 @@ func NewShellGraphRunner(p ShellGraphRunnerParams) GraphRunner {
 	}
 }
 
-func (s *shellGraphRunner) Compute(ctx context.Context, ws workspace.Workspace) (targethasher.Result, error) {
+func (s *shellGraphRunner) Compute(_ context.Context, _ workspace.Workspace) (targethasher.Result, error) {
 	return targethasher.EmptyResult(), errors.New("shellGraphRunner.Compute: not yet implemented")
 }

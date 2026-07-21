@@ -61,10 +61,11 @@ func TestExecuteQuery_Success(t *testing.T) {
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
 		Logger:        zap.NewNop().Sugar(),
-		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+		ExecCommandContext: func(_ context.Context, _ string, _ ...string) commander {
 			return mockCmd
 		},
 	})
+	require.NoError(t, err)
 
 	resp, err := client.ExecuteQuery(context.Background(), &QueryRequest{Query: "//..."})
 	require.NoError(t, err)
@@ -105,7 +106,7 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
 		Logger:        zap.NewNop().Sugar(),
-		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+		ExecCommandContext: func(_ context.Context, _ string, arg ...string) commander {
 			capturedArgs = arg
 			return mockCmd
 		},
@@ -156,7 +157,7 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 		EnvVarsMap:    map[string]string{},
 		QueryTimeout:  10 * time.Millisecond, // Short timeout for test
 
-		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+		ExecCommandContext: func(ctx context.Context, _ string, _ ...string) commander {
 			// Simulate process behavior: when context is cancelled, close pipes
 			go func() {
 				<-ctx.Done()
@@ -169,7 +170,7 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	})
 	require.NoError(t, err)
 	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
-	require.Nil(t, result)
+	require.Empty(t, result.GetTarget())
 	require.Error(t, err)
 	// Should get timeout or deadline exceeded error
 	assert.Contains(t, err.Error(), "deadline exceeded")
@@ -234,7 +235,7 @@ func TestExecuteQueryInternal_Failures(t *testing.T) {
 				WorkspacePath: "/tmp/test",
 				EnvVarsMap:    map[string]string{},
 				Logger:        zap.NewNop().Sugar(),
-				ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+				ExecCommandContext: func(_ context.Context, _ string, _ ...string) commander {
 					return mockCmd
 				},
 			})
@@ -263,10 +264,11 @@ func TestExecuteQuery_ErrorCase(t *testing.T) {
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
 		Logger:        zap.NewNop().Sugar(),
-		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+		ExecCommandContext: func(_ context.Context, _ string, _ ...string) commander {
 			return mockCmd
 		},
 	})
+	require.NoError(t, err)
 
 	resp, err := client.ExecuteQuery(context.Background(), &QueryRequest{Query: "//..."})
 	require.Error(t, err)

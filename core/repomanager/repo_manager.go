@@ -67,7 +67,7 @@ type repoManager struct {
 // The origin directory holds the initial clone; workers are cheap local copies.
 type workerPool struct {
 	originDir string
-	originMu  sync.Mutex // one lock per repo for orginal clone
+	originMu  sync.Mutex // one lock per repo for original clone
 	cloned    bool
 
 	avail chan *workerSlot // available slots; pool capacity
