@@ -18,109 +18,57 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
+	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber/tango/core/bazel/commandermock"
 	"go.uber.org/goleak"
-	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protodelim"
 )
 
 func TestExecuteQuery_Success(t *testing.T) {
-	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
-	var (
-		ruleName, ruleClass = "//pkg:target", "go_library"
-	)
-	target := &buildpb.Target{
-		Type: buildpb.Target_RULE.Enum(),
-		Rule: &buildpb.Rule{
-			Name:      &ruleName,
-			RuleClass: &ruleClass,
-		},
-	}
-	var protoData bytes.Buffer
-	_, err := protodelim.MarshalTo(&protoData, target)
-	require.NoError(t, err)
-	gomock.InOrder(
-		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(&protoData), nil),
-		mockCmd.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil),
-		mockCmd.EXPECT().Start().Return(nil),
-		mockCmd.EXPECT().Wait().Return(nil),
-	)
-	client, err := NewBazelClient(context.Background(), Params{
-		BazelCommand:  "bazel",
-		WorkspacePath: "/tmp/test",
-		EnvVarsMap:    map[string]string{},
-		Logger:        zap.NewNop().Sugar(),
-		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
-			return mockCmd
-		},
+	mockCmd := NewMockCommander(ctrl)
+	protoData := marshalTarget(t, "//pkg:target")
+	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).DoAndReturn(func(stdout, _ io.Writer) error {
+		_, err := stdout.Write(protoData)
+		return err
 	})
 
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
 	resp, err := client.ExecuteQuery(context.Background(), &QueryRequest{Query: "//..."})
+
 	require.NoError(t, err)
-	require.NotNil(t, resp)
-	require.NotNil(t, resp.Result)
-	require.Equal(t, 1, len(resp.Result.Target))
-	assert.Equal(t, &ruleName, resp.Result.Target[0].Rule.Name)
-	assert.Equal(t, &ruleClass, resp.Result.Target[0].Rule.RuleClass)
+	require.Len(t, resp.Result.Target, 1)
+	assert.Equal(t, "//pkg:target", resp.Result.Target[0].Rule.GetName())
 }
 
 func TestExecuteQuery_WithStartupOptions(t *testing.T) {
-	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
-	var (
-		ruleName, ruleClass = "//pkg:target", "go_library"
-	)
-	target := &buildpb.Target{
-		Type: buildpb.Target_RULE.Enum(),
-		Rule: &buildpb.Rule{
-			Name:      &ruleName,
-			RuleClass: &ruleClass,
-		},
-	}
-	var protoData bytes.Buffer
-	_, err := protodelim.MarshalTo(&protoData, target)
-	require.NoError(t, err)
+	mockCmd := NewMockCommander(ctrl)
+	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).Return(nil)
 
 	var capturedArgs []string
-	gomock.InOrder(
-		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(&protoData), nil),
-		mockCmd.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil),
-		mockCmd.EXPECT().Start().Return(nil),
-		mockCmd.EXPECT().Wait().Return(nil),
-	)
-	client, err := NewBazelClient(context.Background(), Params{
-		BazelCommand:  "bazel",
-		WorkspacePath: "/tmp/test",
-		EnvVarsMap:    map[string]string{},
-		Logger:        zap.NewNop().Sugar(),
-		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
-			capturedArgs = arg
-			return mockCmd
-		},
+	client := newTestClient(t, func(_ context.Context, _ string, args ...string) Commander {
+		capturedArgs = args
+		return mockCmd
 	})
-	require.NoError(t, err)
-	resp, err := client.ExecuteQuery(context.Background(), &QueryRequest{
+	_, err := client.ExecuteQuery(context.Background(), &QueryRequest{
 		Query:          "//...",
 		StartupOptions: []string{"--bazelrc=/custom/.bazelrc", "--output_base=/tmp/bazel"},
 		AdditionalArgs: []string{"--keep_going"},
 	})
-	require.NoError(t, err)
-	require.NotNil(t, resp)
 
-	// Verify command structure: bazel <startupOpts> query <AdditionalArgs> --output=streamed_proto <Query>
-	require.Equal(t, []string{
+	require.NoError(t, err)
+	assert.Equal(t, []string{
 		"--bazelrc=/custom/.bazelrc",
 		"--output_base=/tmp/bazel",
 		"query",
@@ -133,143 +81,143 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
-
-	prStdout, pwStdout := io.Pipe()
-	prStderr, pwStderr := io.Pipe()
-
-	// Set up the mock expectations in the exact order they will be called.
-	gomock.InOrder(
-		mockCmd.EXPECT().StdoutPipe().Return(prStdout, nil),
-		mockCmd.EXPECT().StderrPipe().Return(prStderr, nil),
-		mockCmd.EXPECT().Start().Return(nil),
-		mockCmd.EXPECT().Wait().DoAndReturn(func() error {
-			// Simulate process ending after timeout
-			return context.DeadlineExceeded
-		}),
-	)
-
-	client, err := NewBazelClient(context.Background(), Params{
-		BazelCommand:  "bazel",
-		WorkspacePath: "/tmp/test",
-		Logger:        zap.NewNop().Sugar(),
-		EnvVarsMap:    map[string]string{},
-		QueryTimeout:  10 * time.Millisecond, // Short timeout for test
-
-		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
-			// Simulate process behavior: when context is cancelled, close pipes
-			go func() {
-				<-ctx.Done()
-				// Close pipes to unblock readers
-				pwStdout.Close()
-				pwStderr.Close()
-			}()
-			return mockCmd
-		},
+	mockCmd := NewMockCommander(ctrl)
+	var cmdCtx context.Context
+	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).DoAndReturn(func(io.Writer, io.Writer) error {
+		<-cmdCtx.Done()
+		return errors.New("signal: terminated")
 	})
-	require.NoError(t, err)
+
+	client := newTestClient(t, func(ctx context.Context, _ string, _ ...string) Commander {
+		cmdCtx = ctx
+		return mockCmd
+	})
+	client.queryTimeout = 10 * time.Millisecond
 	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
-	require.Nil(t, result)
+
 	require.Error(t, err)
-	// Should get timeout or deadline exceeded error
-	assert.Contains(t, err.Error(), "deadline exceeded")
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Nil(t, result)
 }
 
-func TestExecuteQueryInternal_Failures(t *testing.T) {
-	tests := []struct {
-		name            string
-		setupMock       func(*commandermock.Mockcommander)
-		expectedError   string
-		expectNilResult bool
-	}{
-		{
-			name: "stdout pipe failure",
-			setupMock: func(m *commandermock.Mockcommander) {
-				m.EXPECT().StdoutPipe().Return(nil, errors.New("stdout pipe failed"))
-			},
-			expectedError:   "stdout pipe failed",
-			expectNilResult: true,
-		},
-		{
-			name: "stderr pipe failure",
-			setupMock: func(m *commandermock.Mockcommander) {
-				m.EXPECT().StdoutPipe().Return(io.NopCloser(strings.NewReader("")), nil)
-				m.EXPECT().StderrPipe().Return(nil, errors.New("stderr pipe failed"))
-			},
-			expectedError:   "stderr pipe failed",
-			expectNilResult: true,
-		},
-		{
-			name: "command start failure",
-			setupMock: func(m *commandermock.Mockcommander) {
-				m.EXPECT().StdoutPipe().Return(io.NopCloser(strings.NewReader("")), nil)
-				m.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil)
-				m.EXPECT().Start().Return(errors.New("failed to start process"))
-			},
-			expectedError:   "failed to start process",
-			expectNilResult: true,
-		},
-		{
-			name: "command wait failure",
-			setupMock: func(m *commandermock.Mockcommander) {
-				m.EXPECT().StdoutPipe().Return(io.NopCloser(strings.NewReader("")), nil)
-				m.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil)
-				m.EXPECT().Start().Return(nil)
-				m.EXPECT().Wait().Return(errors.New("command wait failed"))
-			},
-			expectedError:   "command wait failed",
-			expectNilResult: false,
-		},
-	}
+func TestExecuteQueryInternal_PreCanceledContext(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockCmd := NewMockCommander(ctrl)
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			defer goleak.VerifyNone(t)
-			ctrl := gomock.NewController(t)
-			mockCmd := commandermock.NewMockcommander(ctrl)
-			tt.setupMock(mockCmd)
+	result, err := client.executeQueryInternal(ctx, "//...", nil)
 
-			client, err := NewBazelClient(context.Background(), Params{
-				BazelCommand:  "bazel",
-				WorkspacePath: "/tmp/test",
-				EnvVarsMap:    map[string]string{},
-				Logger:        zap.NewNop().Sugar(),
-				ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
-					return mockCmd
-				},
-			})
-			require.NoError(t, err)
-			result, err := client.executeQueryInternal(context.Background(), "//...", nil)
-			require.Error(t, err)
-			if tt.expectNilResult {
-				require.Nil(t, result)
-			} else {
-				require.NotNil(t, result)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, result)
+}
+
+func TestExecuteQueryInternal_CancelDuringParsing(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ctrl := gomock.NewController(t)
+	mockCmd := NewMockCommander(ctrl)
+	ctx, cancel := context.WithCancel(context.Background())
+	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).DoAndReturn(func(stdout, _ io.Writer) error {
+		_, err := stdout.Write(marshalTarget(t, "//pkg:target"))
+		cancel()
+		return err
+	})
+
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
+	result, err := client.executeQueryInternal(ctx, "//...", nil)
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, result)
+}
+
+func TestExecuteQueryInternal_CapturesCompleteOutput(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockCmd := NewMockCommander(ctrl)
+	const targetCount = 100
+	const stderrTail = "FINAL STDERR LINE"
+	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).DoAndReturn(func(stdout, stderr io.Writer) error {
+		for i := 0; i < targetCount; i++ {
+			if _, err := stdout.Write(marshalTarget(t, fmt.Sprintf("//pkg:target%d", i))); err != nil {
+				return err
 			}
-			assert.Contains(t, err.Error(), tt.expectedError)
-		})
-	}
+		}
+		_, err := io.WriteString(stderr, strings.Repeat("bazel progress line\n", 200)+stderrTail)
+		if err != nil {
+			return err
+		}
+		return errors.New("exit status 7")
+	})
+
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
+	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
+
+	require.Error(t, err)
+	require.Len(t, result.Target, targetCount)
+	assert.Contains(t, err.Error(), stderrTail)
+}
+
+func TestExecuteQueryInternal_ParseFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockCmd := NewMockCommander(ctrl)
+	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).DoAndReturn(func(stdout, _ io.Writer) error {
+		_, err := io.WriteString(stdout, "not a streamed proto")
+		return err
+	})
+
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
+	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
+
+	require.Error(t, err)
+	assert.Nil(t, result)
+}
+
+func TestExecuteQueryInternal_StreamLogs(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockCmd := NewMockCommander(ctrl)
+	mockCmd.EXPECT().Run(gomock.Any(), os.Stderr).Return(errors.New("exit status 1"))
+
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
+	client.streamLogs = true
+	_, err := client.executeQueryInternal(context.Background(), "//...", nil)
+	require.Error(t, err)
 }
 
 func TestExecuteQuery_ErrorCase(t *testing.T) {
-	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
-	mockCmd := commandermock.NewMockcommander(ctrl)
+	mockCmd := NewMockCommander(ctrl)
+	mockCmd.EXPECT().Run(gomock.Any(), gomock.Any()).Return(errors.New("command failed"))
 
-	mockCmd.EXPECT().StdoutPipe().Return(nil, errors.New("stdout pipe failed"))
-
-	client, err := NewBazelClient(context.Background(), Params{
-		BazelCommand:  "bazel",
-		WorkspacePath: "/tmp/test",
-		EnvVarsMap:    map[string]string{},
-		Logger:        zap.NewNop().Sugar(),
-		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
-			return mockCmd
-		},
-	})
-
+	client := newTestClient(t, func(context.Context, string, ...string) Commander { return mockCmd })
 	resp, err := client.ExecuteQuery(context.Background(), &QueryRequest{Query: "//..."})
+
 	require.Error(t, err)
-	require.Nil(t, resp)
-	assert.Contains(t, err.Error(), "stdout pipe failed")
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "command failed")
+}
+
+func marshalTarget(t *testing.T, name string) []byte {
+	t.Helper()
+	ruleClass := "go_library"
+	target := &buildpb.Target{
+		Type: buildpb.Target_RULE.Enum(),
+		Rule: &buildpb.Rule{Name: &name, RuleClass: &ruleClass},
+	}
+	var out bytes.Buffer
+	_, err := protodelim.MarshalTo(&out, target)
+	require.NoError(t, err)
+	return out.Bytes()
+}
+
+func newTestClient(t *testing.T, execCmd func(context.Context, string, ...string) Commander) *BazelClient {
+	t.Helper()
+	client, err := NewBazelClient(context.Background(), Params{
+		BazelCommand:       "bazel",
+		WorkspacePath:      "/tmp/test",
+		EnvVarsMap:         map[string]string{},
+		Logger:             zap.NewNop().Sugar(),
+		ExecCommandContext: execCmd,
+	})
+	require.NoError(t, err)
+	return client
 }

@@ -16,11 +16,24 @@ package bazel
 
 import (
 	"io"
+	"os/exec"
 )
 
-type commander interface {
-	StdoutPipe() (io.ReadCloser, error)
-	StderrPipe() (io.ReadCloser, error)
-	Start() error
-	Wait() error
+// Commander runs a command with the supplied output destinations.
+type Commander interface {
+	Run(stdout, stderr io.Writer) error
+}
+
+type execCommander struct {
+	*exec.Cmd
+}
+
+// Run attaches the supplied writers before starting the command. Query
+// execution intentionally supplies *os.File values: os/exec passes those file
+// descriptors directly to the child instead of creating copy goroutines that
+// Wait must drain.
+func (c *execCommander) Run(stdout, stderr io.Writer) error {
+	c.Stdout = stdout
+	c.Stderr = stderr
+	return c.Cmd.Run()
 }

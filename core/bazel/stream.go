@@ -23,53 +23,17 @@ import (
 	"google.golang.org/protobuf/encoding/protodelim"
 )
 
-func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
-	done := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(dst, src)
-		done <- err
-	}()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
-		return err
-	}
-}
-
-func streamAndParseTargets(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb.QueryResult, error) {
-	type result struct {
-		queryResult *buildpb.QueryResult
-		err         error
-	}
-	done := make(chan result, 1)
-
-	go func() {
-		queryResult, err := getQueryResult(ctx, src, dst)
-		done <- result{queryResult: queryResult, err: err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case res := <-done:
-		return res.queryResult, res.err
-	}
-}
-
 // cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
 // Picked to keep overhead negligible while still surfacing cancellation in <100ms
 // for typical target rates.
 const cancelCheckInterval = 1024
 
 // getQueryResult reads a QueryResult containing targets from the stream and returns it.
-func getQueryResult(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb.QueryResult, error) {
+func getQueryResult(ctx context.Context, src io.Reader) (*buildpb.QueryResult, error) {
 	result := &buildpb.QueryResult{
 		Target: make([]*buildpb.Target, 0),
 	}
-	tr := io.TeeReader(src, dst)
-	br := bufio.NewReader(tr)
+	br := bufio.NewReader(src)
 	unmarshalOpts := protodelim.UnmarshalOptions{
 		MaxSize: 64 * 1024 * 1024, // 64MB limit
 	}
@@ -92,6 +56,10 @@ func getQueryResult(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb
 		}
 		result.Target = append(result.Target, &target)
 	}
-
+	// Like streamOutput, prefer the context error over whatever the shutdown
+	// did to the stream mid-parse.
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	return result, parseErr
 }

@@ -15,9 +15,9 @@
 package bazel
 
 import (
-	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,11 +25,10 @@ import (
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 )
 
-func (b *BazelClient) setupCommand(ctx context.Context, query string, startupOptions []string, additionalArgs ...string) commander {
+func (b *BazelClient) setupCommand(ctx context.Context, query string, startupOptions []string, additionalArgs ...string) Commander {
 	// Build command: bazel <startupOpts> query <AdditionalArgs> --output=streamed_proto <Query>
 	args := make([]string, 0, len(startupOptions)+1+len(additionalArgs)+2)
 	args = append(args, startupOptions...)
@@ -50,55 +49,65 @@ func (b *BazelClient) ExecuteQuery(ctx context.Context, req *QueryRequest) (*Que
 }
 
 func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, startupOptions []string, additionalArgs ...string) (*buildpb.QueryResult, error) {
-	var (
-		stdoutBuf, stderrBuf bytes.Buffer
-		queryResults         *buildpb.QueryResult
-	)
 	cmdCtx, cancel := context.WithTimeout(ctx, b.queryTimeout)
 	defer cancel()
-	// setup bazel query command
+	if err := cmdCtx.Err(); err != nil {
+		return nil, err
+	}
 	cmd := b.setupCommand(cmdCtx, query, startupOptions, additionalArgs...)
-	// Get pipes for stdout and stderr BEFORE starting the process
-	stdout, err := cmd.StdoutPipe()
+
+	// Keep command output backed by files rather than StdoutPipe, StderrPipe,
+	// or custom pipe writers. A Bazel descendant can inherit a pipe's write end
+	// and prevent readers from seeing EOF after Bazel exits. Calling Wait early
+	// to activate its pipe cleanup is not an alternative: Wait may close the
+	// read ends before they are fully drained, truncating output. Direct files
+	// avoid both lifecycle problems and are rewound for parsing below.
+	stdout, err := os.CreateTemp(b.tempDir, "tango-bazel-stdout-*")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create stdout file: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, err
-	}
+	defer os.Remove(stdout.Name())
+	defer stdout.Close()
+
 	// In streamLogs mode, stderr goes straight to os.Stderr so operators see
 	// bazel progress live; otherwise it's captured for inclusion in failure
 	// errors (see wrapQueryFailure).
-	stderrSink := io.Writer(&stderrBuf)
-	if b.streamLogs {
-		stderrSink = os.Stderr
+	stderrSink := io.Writer(os.Stderr)
+	stderrPath := ""
+	var stderr *os.File
+	if !b.streamLogs {
+		stderr, err = os.CreateTemp(b.tempDir, "tango-bazel-stderr-*")
+		if err != nil {
+			return nil, fmt.Errorf("create stderr file: %w", err)
+		}
+		defer os.Remove(stderr.Name())
+		defer stderr.Close()
+		stderrSink = stderr
+		stderrPath = stderr.Name()
 	}
-	// orchestrate `allOfFailFast`
-	// create a `g` group and a new `gCtx` derived from our 15 minute timeout `ctx`.
-	g, gCtx := errgroup.WithContext(cmdCtx)
 
-	// Start the process
-	if err = cmd.Start(); err != nil {
-		return nil, err
+	// CommandContext and WaitDelay still govern process shutdown; using files
+	// changes only output transport and does not weaken cancellation.
+	waitErr := cmd.Run(stdout, stderrSink)
+	if ctxErr := cmdCtx.Err(); waitErr != nil && ctxErr != nil {
+		// A process terminated by SIGTERM or SIGKILL reports an ExitError, which
+		// does not wrap the context error. Preserve both causes so callers can
+		// reliably identify cancellation, and avoid parsing output after it.
+		return nil, b.wrapQueryFailure("bazel query canceled", errors.Join(ctxErr, waitErr), "")
 	}
-	// stream and parse targets
-	g.Go(func() error {
-		var err error
-		queryResults, err = streamAndParseTargets(gCtx, stdout, &stdoutBuf)
-		return err
-	})
-	// stream stderr
-	g.Go(func() error {
-		return streamOutput(gCtx, stderr, stderrSink)
-	})
-	waitErr := cmd.Wait()
-	streamErr := g.Wait()
+
+	if _, err := stdout.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("rewind bazel query output: %w", err)
+	}
+	queryResults, streamErr := getQueryResult(cmdCtx, stdout)
 	if waitErr != nil {
-		return queryResults, b.wrapQueryFailure("bazel query failed", waitErr, &stderrBuf)
+		return queryResults, b.wrapQueryFailure("bazel query failed", waitErr, stderrPath)
 	}
 	if streamErr != nil {
-		return nil, b.wrapQueryFailure("stream processing failed", streamErr, &stderrBuf)
+		if cmdCtx.Err() != nil {
+			stderrPath = ""
+		}
+		return nil, b.wrapQueryFailure("stream processing failed", streamErr, stderrPath)
 	}
 	b.logger.Debugw("Parsed targets from bazel query", zap.Int("target_count", len(queryResults.Target)))
 	return queryResults, nil
@@ -108,10 +117,14 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 // was captured (streamLogs off), its contents are appended so the failure is
 // self-contained. When streamLogs is on the operator has already seen stderr
 // live, so it's omitted.
-func (b *BazelClient) wrapQueryFailure(msg string, cause error, stderrBuf *bytes.Buffer) error {
+func (b *BazelClient) wrapQueryFailure(msg string, cause error, stderrPath string) error {
 	tail := ""
-	if !b.streamLogs {
-		tail = "\nstderr:\n" + stderrBuf.String()
+	if stderrPath != "" {
+		stderr, err := os.ReadFile(stderrPath)
+		if err != nil {
+			return fmt.Errorf("%s: %w (read stderr: %v)", msg, cause, err)
+		}
+		tail = "\nstderr:\n" + string(stderr)
 	}
 	return fmt.Errorf("%s: %w%s", msg, cause, tail)
 }
