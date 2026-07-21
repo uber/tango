@@ -15,13 +15,12 @@
 package cachekey
 
 import (
-	"crypto/md5"
-	"fmt"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/uber/tango/entity"
+	"github.com/uber/tango/internal/url"
 )
 
 func TestGetGraphByTreeHash(t *testing.T) {
@@ -55,16 +54,12 @@ func TestGetTreehashCachePath(t *testing.T) {
 		Remote:  "git@github:uber/tango",
 		BaseSha: "deadbeef",
 		ChangeRequests: []entity.ChangeRequest{
-			{URL: "github://org/repo/pull/1"},
-			{URL: "custom://foo/bar"},
+			{URL: "github://org/repo/pull/1", Commit: "abc"},
+			{URL: "custom://foo/bar", Commit: "def"},
 		},
 	}
 	got := GetTreehashCachePath(desc)
-	// URLs are sorted then fed individually into the digest (no separator)
-	h := md5.New()
-	h.Write([]byte("custom://foo/bar"))
-	h.Write([]byte("github://org/repo/pull/1"))
-	want := filepath.Join("uber/tango", "treehashes", "base-sha-deadbeef") + "_request-urls-" + fmt.Sprintf("%x", h.Sum(nil))
+	want := filepath.Join("uber/tango", "treehashes", "base-sha-deadbeef") + "_request-urls-" + url.GetReqURLsHash(desc.ChangeRequests)
 	assert.Equal(t, want, got)
 }
 
