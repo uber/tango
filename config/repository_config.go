@@ -24,7 +24,9 @@ type RepositoryConfig struct {
 	BazelCommand           string   `yaml:"bazel_command"`
 	QueryTimeout           int64    `yaml:"query_timeout"` // in seconds
 	BazelExtraArgs         []string `yaml:"bazel_extra_args"`
-	StreamBazelLogs        bool     `yaml:"stream_bazel_logs"`
+	// BazelStartupOptions are Bazel startup flags placed before the `query` subcommand (e.g. "--batch"); empty by default.
+	BazelStartupOptions []string `yaml:"bazel_startup_options"`
+	StreamBazelLogs     bool     `yaml:"stream_bazel_logs"`
 }
 
 // RepositoryConfigProvider looks up per-repository configuration by remote.

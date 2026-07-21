@@ -11,6 +11,8 @@ repository:
     excluded_files: ["^@@?bazel_tools/"]
     exclude_external_targets: true
     bzlmod_enabled: true
+    # Batch mode avoids a persistent Bazel server, which can wedge when a pooled worker's tree is swapped by `git checkout` between queries.
+    bazel_startup_options: ["--batch"]
     query_timeout: 600
 
 service:

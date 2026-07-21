@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 
@@ -25,8 +26,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/config"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
+	"github.com/uber/tango/core/repomanager"
 	repomanagermock "github.com/uber/tango/core/repomanager/mock"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
@@ -237,4 +240,45 @@ func testConfig(t *testing.T) *config.Config {
 	cfg, err := config.Parse("testdata/config.yaml")
 	require.NoError(t, err)
 	return cfg
+}
+
+func TestNative_GetTargetGraph_LeasePoolTimeout_InfraRetryable(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(nil,
+		fmt.Errorf("%w: %w", repomanager.ErrPoolTimeout, context.DeadlineExceeded))
+
+	o, err := NewNativeOrchestrator(context.Background(), Params{
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t).Sugar(),
+		Config:      testConfig(t),
+	})
+	require.NoError(t, err)
+	_, err = o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "abc"},
+	})
+	require.Error(t, err)
+	assert.Equal(t, tangoerrors.ErrorInfraRetryable, tangoerrors.GetErrorCode(err))
+}
+
+func TestNative_GetTargetGraph_LeaseGenericError_Infra(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(nil, errors.New("clone origin failed"))
+
+	o, err := NewNativeOrchestrator(context.Background(), Params{
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t).Sugar(),
+		Config:      testConfig(t),
+	})
+	require.NoError(t, err)
+	_, err = o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "abc"},
+	})
+	require.Error(t, err)
+	assert.Equal(t, tangoerrors.ErrorInfra, tangoerrors.GetErrorCode(err))
 }

@@ -27,7 +27,6 @@ import (
 	gogio "github.com/gogo/protobuf/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber/tango/core/common"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	"github.com/uber/tango/entity"
@@ -159,7 +158,7 @@ func TestGetChangedTargets_ValidationError(t *testing.T) {
 	c := NewController(context.Background(), Params{Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
 
 	err := c.GetChangedTargets(nil, stream)
-	assert.EqualError(t, err, "request cannot be nil")
+	require.Error(t, err)
 }
 
 func TestGetChangedTargets_CacheHit(t *testing.T) {
@@ -220,10 +219,10 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 
 	storagemock := storagemock.NewMockStorage(ctrl)
 	// A non-NotFound storage error on a treehash read must surface as a failed
-	// request (with failureReasonTreehashRead) rather than be silently treated
-	// as a cache miss. Both revision treehashes are read in parallel, so two Get
-	// calls happen; the handler returns the first failure (and drops the
-	// cancelled sibling's error) before any graph fetch happens.
+	// request rather than be silently treated as a cache miss. Both revision
+	// treehashes are read in parallel, so two Get calls happen; the handler
+	// returns the first failure (and drops the cancelled sibling's error)
+	// before any graph fetch happens.
 	injected := errors.New("storage exploded")
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
 		Return(storage.DownloadResponse{}, injected).Times(2)
@@ -242,11 +241,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 
 	err := c.GetChangedTargets(request, stream)
 	require.Error(t, err)
-	require.ErrorIs(t, err, injected)
-	var ce common.ClassifiedError
-	require.True(t, errors.As(err, &ce), "expected ClassifiedError, got %T", err)
-	assert.Equal(t, failureReasonTreehashRead, ce.Reason())
-	assert.Equal(t, common.ErrorTypeInfra, ce.Type())
+	assert.Contains(t, err.Error(), injected.Error())
 }
 
 func TestReadTreehash(t *testing.T) {

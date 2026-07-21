@@ -37,7 +37,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # This job executes untrusted PR code (make build/test). Don't leave
           # the GITHUB_TOKEN in the workspace git config while it runs.
@@ -63,10 +63,23 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
           fetch-depth: 0
+
+      # Persist Bazel's disk cache (see .bazelrc: --disk_cache) across runs. The
+      # integration test drives nested `bazel query` against the repo itself; a
+      # cold cache makes the first GetChangedTargets pay the full analysis cost
+      # and pushes the run against its deadline. Warming it removes that spike
+      # and speeds every run. restore-keys lets a stale cache seed a new one.
+      - name: Cache Bazel disk cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/bazel-disk-cache
+          key: bazel-disk-integration-${{ hashFiles('MODULE.bazel', 'go.mod', '.bazelrc') }}
+          restore-keys: |
+            bazel-disk-integration-
 
       - name: Run integration tests
         run: make test-integration
@@ -77,6 +90,31 @@ jobs:
           echo "=== Integration test logs ==="
           find . -name "test.log" -exec echo "--- {} ---" \; -exec cat {} \; || echo "No test logs found"
 
+  coverage:
+    name: Coverage
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests with coverage
+        run: make cover
+
+      - name: Upload coverage to codecov.io
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        with:
+          file: cover.out
+          verbose: true
+
   dependencies:
     name: Dependencies
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
@@ -84,7 +122,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # This job executes untrusted PR code (go mod tidy, bazel/gazelle).
           persist-credentials: false
@@ -125,7 +163,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           # This job executes untrusted PR code (gazelle, gofmt, goimports).
           persist-credentials: false
@@ -166,7 +204,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
       - name: actionlint
@@ -221,6 +259,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build-and-test
+      - integration
+      - coverage
       - dependencies
       - lint
       - workflow-security

@@ -69,7 +69,8 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 	bazelStart := time.Now()
 	queryResult, err := g.bazel.ExecuteQuery(ctx, &bazel.QueryRequest{
-		Query: query,
+		Query:          query,
+		StartupOptions: g.config.BazelStartupOptions,
 		// --order_output=no will make Bazel execute query faster
 		// --proto:locations: we need to get external file location to make CTC more accurate
 		// --noproto: parameters exclude fields from the output that are not used for hashing anyways, making

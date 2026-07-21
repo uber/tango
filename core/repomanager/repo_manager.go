@@ -16,16 +16,24 @@ package repomanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
+	"github.com/uber/tango/internal/url"
 	"go.uber.org/zap"
+)
+
+// Sentinel errors for classification by upper layers.
+var (
+	// ErrPoolTimeout indicates that all worker slots were leased and the
+	// caller's context was cancelled while waiting for one to become available.
+	ErrPoolTimeout = errors.New("worker pool timeout")
 )
 
 // RepoManager manages repository workspaces with a pool of workers per repo.
@@ -133,7 +141,7 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 // Lease borrows a worker workspace from the pool.
 // If all workers are leased, it blocks until one is returned or ctx is cancelled.
 func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (workspace.Workspace, error) {
-	repo := toShortRemote(desc.Remote)
+	repo := url.ToShortRemote(desc.Remote)
 	pool := r.poolFor(repo)
 
 	if err := pool.ensureOrigin(ctx, r.git, desc.Remote); err != nil {
@@ -145,7 +153,11 @@ func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (
 	select {
 	case slot = <-pool.avail:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		err := ctx.Err()
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: %w", ErrPoolTimeout, err)
+		}
+		return nil, fmt.Errorf("pool for repo %s: %w", repo, err)
 	}
 
 	// Lazily create the worker clone on first use
@@ -200,9 +212,4 @@ func (r *repoManager) createWorker(ctx context.Context, originDir, workerDir str
 		return err
 	}
 	return r.git.Clone(ctx, originDir, workerDir, "--local", "-c", "gc.auto=0")
-}
-
-func toShortRemote(remote string) string {
-	strs := strings.Split(remote, ":")
-	return strs[len(strs)-1]
 }

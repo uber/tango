@@ -17,7 +17,6 @@ package common
 import (
 	"context"
 	"encoding/hex"
-	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/uber/tango/core/targethasher"
@@ -42,13 +41,6 @@ const (
 	// At ~85 bytes/entry (60-char avg target name + proto overhead), 50 000 entries ≈ 4.25MB per chunk.
 	DefaultMetadataMapChunkSize = 50_000
 )
-
-// ToShortRemote returns the short remote name given a git ssh remote string.
-// For example, "git@github:uber/tango" will return "uber/tango".
-func ToShortRemote(remote string) string {
-	strs := strings.Split(remote, ":")
-	return strs[len(strs)-1]
-}
 
 // cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
 // Picked to keep overhead negligible while still surfacing cancellation in <100ms
