@@ -16,5 +16,6 @@ go_test(
         "//core/storage",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
+        "@net_pgregory_rapid//:rapid",
     ],
 )
