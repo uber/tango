@@ -67,7 +67,7 @@ func main() {
 		logger.Errorf("start dispatcher: %w", err)
 		os.Exit(1)
 	}
-	defer dispatcher.Stop()
+	defer func() { _ = dispatcher.Stop() }()
 
 	client := pb.NewTangoYARPCClient(dispatcher.ClientConfig("tango"))
 
@@ -159,7 +159,7 @@ func callGetTargetGraph(ctx context.Context, client pb.TangoYARPCClient, logger 
 	if err != nil {
 		return fmt.Errorf("GetTargetGraph: %w", err)
 	}
-	defer stream.CloseSend()
+	defer func() { _ = stream.CloseSend() }()
 
 	for {
 		msg, err := stream.Recv()
@@ -204,7 +204,7 @@ func callGetChangedTargets(ctx context.Context, client pb.TangoYARPCClient, logg
 	if err != nil {
 		return fmt.Errorf("GetChangedTargets: %w", err)
 	}
-	defer stream.CloseSend()
+	defer func() { _ = stream.CloseSend() }()
 
 	for {
 		msg, err := stream.Recv()

@@ -1,0 +1,23 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+  settings:
+    errcheck:
+      exclude-functions:
+        - os.Remove
+        - os.RemoveAll
+        - io.WriteString
+        - (*go.uber.org/zap.Logger).Sync
+        - (*go.uber.org/zap.SugaredLogger).Sync
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
