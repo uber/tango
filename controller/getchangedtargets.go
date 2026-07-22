@@ -438,39 +438,15 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 		})
 	}
 
-	// Split changes into groups bounded by maxMessageBytes.
-	var results []entity.GetChangedTargetsResponse
-	start2 := 0
-	currentBytes := 0
-	for i := range changed {
-		itemBytes := changed[i].Size()
-		if i > start2 && currentBytes+itemBytes > c.maxMessageBytes {
-			results = append(results, entity.GetChangedTargetsResponse{
-				ChangedTargets: changed[start2:i],
-			})
-			start2 = i
-			currentBytes = 0
-		}
-		currentBytes += itemBytes
-	}
-	results = append(results, entity.GetChangedTargetsResponse{
-		ChangedTargets: changed[start2:],
-	})
-	metaGroups, err := streaming.SplitMetadata(
-		mappers.target.Invert(),
-		mappers.ruleType.Invert(),
-		mappers.tag.Invert(),
-		mappers.attrName.Invert(),
-		mappers.attrVal.Invert(),
-		c.maxMessageBytes,
-	)
+	results, err := streaming.SplitChangedTargets(changed, &entity.Metadata{
+		TargetIDMapping:             mappers.target.Invert(),
+		RuleTypeMapping:             mappers.ruleType.Invert(),
+		TagMapping:                  mappers.tag.Invert(),
+		AttributeNameMapping:        mappers.attrName.Invert(),
+		AttributeStringValueMapping: mappers.attrVal.Invert(),
+	}, c.maxMessageBytes)
 	if err != nil {
 		return nil, err
-	}
-	for _, meta := range metaGroups {
-		results = append(results, entity.GetChangedTargetsResponse{
-			Metadata: meta,
-		})
 	}
 	logger.Info("GetChangedTargets: Target graphs compared")
 	return results, nil

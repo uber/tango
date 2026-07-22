@@ -156,3 +156,42 @@ func SplitTargetGraph(targets []entity.OptimizedTarget, meta *entity.Metadata, m
 
 	return chunks, nil
 }
+
+// SplitChangedTargets splits changed targets and metadata into wire-safe
+// entity.GetChangedTargetsResponse chunks bounded by maxMessageBytes.
+func SplitChangedTargets(changed []entity.ChangedTarget, meta *entity.Metadata, maxMessageBytes int) ([]entity.GetChangedTargetsResponse, error) {
+	var chunks []entity.GetChangedTargetsResponse
+	start := 0
+	currentBytes := 0
+	for i := range changed {
+		itemBytes := changed[i].Size()
+		if i > start && currentBytes+itemBytes > maxMessageBytes {
+			chunks = append(chunks, entity.GetChangedTargetsResponse{
+				ChangedTargets: changed[start:i],
+			})
+			start = i
+			currentBytes = 0
+		}
+		currentBytes += itemBytes
+	}
+	chunks = append(chunks, entity.GetChangedTargetsResponse{
+		ChangedTargets: changed[start:],
+	})
+
+	metaGroups, err := SplitMetadata(
+		meta.TargetIDMapping,
+		meta.RuleTypeMapping,
+		meta.TagMapping,
+		meta.AttributeNameMapping,
+		meta.AttributeStringValueMapping,
+		maxMessageBytes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range metaGroups {
+		chunks = append(chunks, entity.GetChangedTargetsResponse{Metadata: m})
+	}
+
+	return chunks, nil
+}
