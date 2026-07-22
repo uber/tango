@@ -19,20 +19,6 @@ import (
 	"github.com/uber/tango/observability/metrics"
 )
 
-// failure_reason tag values for errors that originate in the controller itself.
-// Errors from the orchestrator carry their own reason via common.ClassifiedError.
-// Shared reasons live in core/common as common.FailureReason*.
-const (
-	// Reading a cached target graph from storage failed.
-	failureReasonGraphFetch = "graph_fetch"
-	// Streaming a response message back to the client failed.
-	failureReasonSend = "send"
-	// Diffing two target graphs failed.
-	failureReasonCompare = "compare"
-	// Reading a stored treehash from storage failed (not a cache miss).
-	failureReasonTreehashRead = "treehash_read"
-)
-
 // emitFailureMetric tags the failure counter with err's ErrorCode. e should
 // already carry the repo tag; op is the operation subscope the counter lands under.
 func emitFailureMetric(e *metrics.Emitter, op string, err error) {
