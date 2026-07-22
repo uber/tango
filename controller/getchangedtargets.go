@@ -373,7 +373,7 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 // classification and distance rules.
 func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse, maxDist int32) (_ []entity.GetChangedTargetsResponse, retErr error) {
 	op := metrics.Begin(e, opCompareTargetGraphs, slowDurationBuckets)
-	defer func() { op.Complete(retErr) }
+	defer func() { op.Complete(retErr) }()
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
 
 	// 1) Decode each stream into a semantic graph keyed by canonical target name.

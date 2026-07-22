@@ -1,5 +1,7 @@
 package entity
 
+import "github.com/uber/tango/internal/streaming/wire"
+
 // ChangedTarget represents a target that differs between two revisions.
 type ChangedTarget struct {
 	ChangeType ChangeType       `json:"change_type"`
@@ -12,18 +14,18 @@ type ChangedTarget struct {
 func (ct *ChangedTarget) Size() int {
 	n := 0
 	if ct.ChangeType != 0 {
-		n += 1 + varintSize(uint64(ct.ChangeType))
+		n += 1 + wire.VarintSize(uint64(ct.ChangeType))
 	}
 	if ct.OldTarget != nil {
 		inner := ct.OldTarget.Size()
-		n += 1 + varintSize(uint64(inner)) + inner
+		n += 1 + wire.VarintSize(uint64(inner)) + inner
 	}
 	if ct.NewTarget != nil {
 		inner := ct.NewTarget.Size()
-		n += 1 + varintSize(uint64(inner)) + inner
+		n += 1 + wire.VarintSize(uint64(inner)) + inner
 	}
 	if ct.Distance != 0 {
-		n += 1 + varintSize(uint64(ct.Distance))
+		n += 1 + wire.VarintSize(uint64(ct.Distance))
 	}
 	return n
 }

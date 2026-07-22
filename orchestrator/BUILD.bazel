@@ -14,7 +14,6 @@ go_library(
         "//config",
         "//core/bazel",
         "//core/cachekey",
-        "//core/common",
         "//core/errors",
         "//core/git",
         "//core/repomanager",
