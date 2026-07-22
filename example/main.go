@@ -131,7 +131,7 @@ func run() error {
 	if err := dispatcher.Start(); err != nil {
 		return fmt.Errorf("failed to start dispatcher: %w", err)
 	}
-	defer dispatcher.Stop()
+	defer func() { _ = dispatcher.Stop() }()
 
 	logger.Infof("Tango server is running:")
 	logger.Infof("- gRPC inbound:  %s", port)
