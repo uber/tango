@@ -438,15 +438,27 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 		})
 	}
 
-	results, err := streaming.SplitChangedTargets(changed, &entity.Metadata{
-		TargetIDMapping:             mappers.target.Invert(),
-		RuleTypeMapping:             mappers.ruleType.Invert(),
-		TagMapping:                  mappers.tag.Invert(),
-		AttributeNameMapping:        mappers.attrName.Invert(),
-		AttributeStringValueMapping: mappers.attrVal.Invert(),
-	}, c.maxMessageBytes)
+	changedGroups, err := streaming.SplitBySize(changed, c.maxMessageBytes)
 	if err != nil {
 		return nil, err
+	}
+	results := make([]entity.GetChangedTargetsResponse, 0, len(changedGroups))
+	for _, g := range changedGroups {
+		results = append(results, entity.GetChangedTargetsResponse{ChangedTargets: g})
+	}
+	metaGroups, err := streaming.SplitMetadata(
+		mappers.target.Invert(),
+		mappers.ruleType.Invert(),
+		mappers.tag.Invert(),
+		mappers.attrName.Invert(),
+		mappers.attrVal.Invert(),
+		c.maxMessageBytes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range metaGroups {
+		results = append(results, entity.GetChangedTargetsResponse{Metadata: m})
 	}
 	logger.Info("GetChangedTargets: Target graphs compared")
 	return results, nil

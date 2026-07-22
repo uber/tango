@@ -217,9 +217,27 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph: %w", err)
 	}
-	chunks, err := streaming.SplitTargetGraph(targets, meta, b.config.Service.MaxMessageBytes)
+	targetGroups, err := streaming.SplitBySize(targets, b.config.Service.MaxMessageBytes)
 	if err != nil {
 		return nil, fmt.Errorf("split target graph: %w", err)
+	}
+	chunks := make([]entity.GetTargetGraphResponse, 0, len(targetGroups))
+	for _, g := range targetGroups {
+		chunks = append(chunks, entity.GetTargetGraphResponse{Targets: g})
+	}
+	metaGroups, err := streaming.SplitMetadata(
+		meta.TargetIDMapping,
+		meta.RuleTypeMapping,
+		meta.TagMapping,
+		meta.AttributeNameMapping,
+		meta.AttributeStringValueMapping,
+		b.config.Service.MaxMessageBytes,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("split target graph metadata: %w", err)
+	}
+	for _, m := range metaGroups {
+		chunks = append(chunks, entity.GetTargetGraphResponse{Metadata: m})
 	}
 	cacheWriteStart := time.Now()
 	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, chunks)

@@ -6,8 +6,10 @@ go_library(
     importpath = "github.com/uber/tango/example/cmd/query-bench",
     visibility = ["//visibility:private"],
     deps = [
+        "//config",
         "//core/bazel",
         "//core/targethasher",
+        "//entity",
         "//internal/mapper",
         "//internal/streaming",
         "//mapper",

@@ -31,15 +31,15 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/jsonpb"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/targethasher"
+	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/internal/streaming"
 	tgmapper "github.com/uber/tango/mapper"
 	"go.uber.org/zap"
 )
-
-const defaultMaxMessageBytes = 4_250_000
 
 func main() {
 	if err := run(); err != nil {
@@ -120,9 +120,27 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("run %d: converting to target graph: %w", i+1, err)
 		}
-		chunks, err := streaming.SplitTargetGraph(targets, meta, defaultMaxMessageBytes)
+		targetGroups, err := streaming.SplitBySize(targets, config.DefaultMaxMessageBytes)
 		if err != nil {
 			return fmt.Errorf("run %d: splitting target graph: %w", i+1, err)
+		}
+		chunks := make([]entity.GetTargetGraphResponse, 0, len(targetGroups))
+		for _, g := range targetGroups {
+			chunks = append(chunks, entity.GetTargetGraphResponse{Targets: g})
+		}
+		metaGroups, err := streaming.SplitMetadata(
+			meta.TargetIDMapping,
+			meta.RuleTypeMapping,
+			meta.TagMapping,
+			meta.AttributeNameMapping,
+			meta.AttributeStringValueMapping,
+			config.DefaultMaxMessageBytes,
+		)
+		if err != nil {
+			return fmt.Errorf("run %d: splitting target graph metadata: %w", i+1, err)
+		}
+		for _, m := range metaGroups {
+			chunks = append(chunks, entity.GetTargetGraphResponse{Metadata: m})
 		}
 		elapsed = time.Since(start)
 		fmt.Printf("run %d: ResultToTargetGraph+Split: %v  (%d chunks)\n", i+1, elapsed.Round(time.Millisecond), len(chunks))
