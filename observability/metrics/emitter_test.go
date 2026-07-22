@@ -26,17 +26,22 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	t.Run("nil scope returns error", func(t *testing.T) {
-		e, err := New(nil)
-		require.Error(t, err)
-		assert.Nil(t, e)
+	t.Run("nil scope falls back to no-op", func(t *testing.T) {
+		e := New(nil)
+		require.NotNil(t, e)
+		e.Counter("op", "c").Inc(1) // must not panic
 	})
 
-	t.Run("valid scope succeeds", func(t *testing.T) {
-		e, err := New(tally.NoopScope)
-		require.NoError(t, err)
-		assert.NotNil(t, e)
+	t.Run("valid scope", func(t *testing.T) {
+		e := New(tally.NoopScope)
+		require.NotNil(t, e)
 	})
+}
+
+func TestSubScope(t *testing.T) {
+	ts := tally.NewTestScope("pfx", nil)
+	New(ts).SubScope("child").Counter("op", "c").Inc(1)
+	require.Contains(t, ts.Snapshot().Counters(), "pfx.child.op.c+")
 }
 
 func TestNop(t *testing.T) {
@@ -48,8 +53,7 @@ func TestNop(t *testing.T) {
 
 func TestCounter(t *testing.T) {
 	ts := tally.NewTestScope("pfx", nil)
-	e, err := New(ts)
-	require.NoError(t, err)
+	e := New(ts)
 
 	e.Counter("my_op", "start").Inc(1)
 
@@ -60,8 +64,7 @@ func TestCounter(t *testing.T) {
 
 func TestDurationHistogram(t *testing.T) {
 	ts := tally.NewTestScope("pfx", nil)
-	e, err := New(ts)
-	require.NoError(t, err)
+	e := New(ts)
 
 	buckets := tally.MustMakeLinearDurationBuckets(0, time.Millisecond, 10)
 	e.DurationHistogram("my_op", "finish", buckets).RecordDuration(time.Millisecond)
@@ -71,8 +74,7 @@ func TestDurationHistogram(t *testing.T) {
 
 func TestValueHistogram(t *testing.T) {
 	ts := tally.NewTestScope("pfx", nil)
-	e, err := New(ts)
-	require.NoError(t, err)
+	e := New(ts)
 
 	buckets := tally.MustMakeLinearValueBuckets(0, 10, 5)
 	e.ValueHistogram("my_op", "target_count", buckets).RecordValue(42)
@@ -89,8 +91,7 @@ func TestTagged(t *testing.T) {
 
 	t.Run("tags appear on instruments", func(t *testing.T) {
 		ts := tally.NewTestScope("pfx", nil)
-		e, err := New(ts)
-		require.NoError(t, err)
+		e := New(ts)
 
 		e.Tagged(map[string]string{"repo": "myrepo"}).Counter("my_op", "start").Inc(1)
 
@@ -101,8 +102,7 @@ func TestTagged(t *testing.T) {
 
 	t.Run("parent is not affected by child tags", func(t *testing.T) {
 		ts := tally.NewTestScope("pfx", nil)
-		e, err := New(ts)
-		require.NoError(t, err)
+		e := New(ts)
 
 		e.Tagged(map[string]string{"repo": "myrepo"}).Counter("op", "c").Inc(1)
 		e.Counter("op", "c").Inc(1)
@@ -114,8 +114,7 @@ func TestTagged(t *testing.T) {
 
 	t.Run("tags compose across calls", func(t *testing.T) {
 		ts := tally.NewTestScope("pfx", nil)
-		e, err := New(ts)
-		require.NoError(t, err)
+		e := New(ts)
 
 		e.Tagged(map[string]string{"repo": "myrepo"}).
 			Tagged(map[string]string{"result": "success"}).
@@ -141,8 +140,7 @@ func TestBeginComplete(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := tally.NewTestScope("pfx", nil)
-			e, err := New(ts)
-			require.NoError(t, err)
+			e := New(ts)
 
 			op := Begin(e, "my_op", buckets)
 			op.Complete(tt.err)

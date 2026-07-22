@@ -2,7 +2,10 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "repomanager",
-    srcs = ["repo_manager.go"],
+    srcs = [
+        "metrics.go",
+        "repo_manager.go",
+    ],
     importpath = "github.com/uber/tango/core/repomanager",
     visibility = ["//visibility:public"],
     deps = [
@@ -10,6 +13,8 @@ go_library(
         "//core/workspace",
         "//entity",
         "//internal/url",
+        "//observability/metrics",
+        "@com_github_uber_go_tally//:tally",
         "@org_uber_go_zap//:zap",
     ],
 )

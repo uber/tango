@@ -89,17 +89,13 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 		scope = tally.NoopScope
 	}
 	scope = scope.SubScope("orchestrator")
-	emitter, err := metrics.New(scope)
-	if err != nil {
-		emitter = metrics.Nop()
-	}
 
 	return &nativeOrchestrator{
 		storage:     p.Storage,
 		repoManager: p.RepoManager,
 		logger:      p.Logger,
 		scope:       scope,
-		emitter:     emitter,
+		emitter:     metrics.New(scope),
 		gitFactory:  p.GitFactory,
 		graphRunner: p.GraphRunner,
 		appCtx:      appCtx,

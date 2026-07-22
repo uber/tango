@@ -21,11 +21,14 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
+	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/url"
+	"github.com/uber/tango/observability/metrics"
 	"go.uber.org/zap"
 )
 
@@ -46,6 +49,7 @@ type repoManager struct {
 	repoManagerClonePath string
 	workerRootPath       string
 	logger               *zap.SugaredLogger
+	emitter              *metrics.Emitter
 	poolSize             int
 
 	mu    sync.Mutex
@@ -87,6 +91,9 @@ type Params struct {
 	RepoManagerClonePath string
 	WorkerRootPath       string
 	PoolSize             int
+	// Scope is the tally scope for metrics. A nil scope disables metrics
+	// (defaults to a no-op). Metrics nest under <scope>.repo_manager.*.
+	Scope tally.Scope
 }
 
 // NewRepoManager creates a new repo manager with pooled worker workspaces.
@@ -103,6 +110,7 @@ func NewRepoManager(appCtx context.Context, p Params) (RepoManager, error) {
 		repoManagerClonePath: p.RepoManagerClonePath,
 		workerRootPath:       p.WorkerRootPath,
 		logger:               p.Logger,
+		emitter:              metrics.New(p.Scope).SubScope("repo_manager"),
 		poolSize:             p.PoolSize,
 		pools:                make(map[string]*workerPool),
 		appCtx:               appCtx,
@@ -140,29 +148,44 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 
 // Lease borrows a worker workspace from the pool.
 // If all workers are leased, it blocks until one is returned or ctx is cancelled.
-func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (workspace.Workspace, error) {
+func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (_ workspace.Workspace, retErr error) {
 	repo := url.ToShortRemote(desc.Remote)
+	e := r.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
+	op := metrics.Begin(e, _opLease, _stepDurationBuckets)
+	defer func() { op.Complete(retErr) }()
+
 	pool := r.poolFor(repo)
 
-	if err := pool.ensureOrigin(ctx, r.git, desc.Remote); err != nil {
-		return nil, err
+	originStart := time.Now()
+	err := pool.ensureOrigin(ctx, r.git, desc.Remote)
+	recordStep(e, _stepEnsureOrigin, originStart)
+	if err != nil {
+		return nil, fmt.Errorf("ensure origin: %w", err)
 	}
 
 	// Acquire a worker slot (blocks if all slots are leased)
+	waitStart := time.Now()
 	var slot *workerSlot
+	var waitErr error
 	select {
 	case slot = <-pool.avail:
 	case <-ctx.Done():
-		err := ctx.Err()
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%w: %w", ErrPoolTimeout, err)
+		waitErr = ctx.Err()
+	}
+	recordStep(e, _stepWaitSlot, waitStart)
+	if waitErr != nil {
+		if errors.Is(waitErr, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: %w", ErrPoolTimeout, waitErr)
 		}
-		return nil, fmt.Errorf("pool for repo %s: %w", repo, err)
+		return nil, fmt.Errorf("pool for repo %s: %w", repo, waitErr)
 	}
 
 	// Lazily create the worker clone on first use
 	if !slot.created {
-		if err := r.createWorker(ctx, pool.originDir, slot.dir); err != nil {
+		createStart := time.Now()
+		err := r.createWorker(ctx, pool.originDir, slot.dir)
+		recordStep(e, _stepCreateWorker, createStart)
+		if err != nil {
 			pool.avail <- slot // return slot so others can retry
 			return nil, fmt.Errorf("create worker: %w", err)
 		}

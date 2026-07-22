@@ -19,7 +19,6 @@
 package metrics
 
 import (
-	"errors"
 	"time"
 
 	"github.com/uber-go/tally"
@@ -31,17 +30,22 @@ type Emitter struct {
 	scope tally.Scope
 }
 
-// New creates an Emitter backed by the given tally.Scope. A nil scope is
-// treated as a wiring error and returns an error.
-func New(scope tally.Scope) (*Emitter, error) {
+// New creates an Emitter backed by the given tally.Scope. A nil scope falls
+// back to a no-op scope, so New always returns a usable Emitter.
+func New(scope tally.Scope) *Emitter {
 	if scope == nil {
-		return nil, errors.New("metrics: nil scope")
+		scope = tally.NoopScope
 	}
-	return &Emitter{scope: scope}, nil
+	return &Emitter{scope: scope}
 }
 
 // Nop returns an Emitter that discards all metrics.
 func Nop() *Emitter { return &Emitter{scope: tally.NoopScope} }
+
+// SubScope returns a child Emitter rooted at a nested scope segment.
+func (e *Emitter) SubScope(name string) *Emitter {
+	return &Emitter{scope: e.scope.SubScope(name)}
+}
 
 // Tagged returns a child Emitter whose instruments carry the given tags in
 // addition to any already on the scope. It delegates to tally.Scope.Tagged.

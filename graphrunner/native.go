@@ -45,20 +45,12 @@ type NativeGraphRunnerParams struct {
 
 // graph runner takes in a bazel query request and computes the graph
 func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
-	scope := p.Scope
-	if scope == nil {
-		scope = tally.NoopScope
-	}
-	emitter, err := metrics.New(scope.SubScope("graph_runner"))
-	if err != nil {
-		emitter = metrics.Nop()
-	}
 	return &nativeGraphRunner{
 		bazel:              p.BazelClient,
 		git:                p.GitClient,
 		config:             p.Config,
 		extraExcludedFiles: p.ExtraExcludedFiles,
-		emitter:            emitter,
+		emitter:            metrics.New(p.Scope).SubScope("graph_runner"),
 	}
 }
 

@@ -56,11 +56,7 @@ type controller struct {
 // NewController creates a new controller. appCtx is cancelled on process
 // shutdown to abort background work.
 func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
-	scope := p.Scope
-	if scope == nil {
-		scope = tally.NoopScope
-	}
-	emitter, _ := metrics.New(scope.SubScope("controller"))
+	emitter := metrics.New(p.Scope).SubScope("controller")
 	targetChunkSize := p.ChunkConfig.TargetChunkSize
 	if targetChunkSize <= 0 {
 		targetChunkSize = common.DefaultTargetChunkSize

@@ -30,8 +30,7 @@ import (
 // lands under <controller-scope>.<op>.<metric> with the outcome tag.
 func TestControllerMetricsPathShape(t *testing.T) {
 	ts := tally.NewTestScope("controller", nil)
-	e, err := metrics.New(ts)
-	require.NoError(t, err)
+	e := metrics.New(ts)
 
 	c := &controller{logger: zap.NewNop(), emitter: e, appCtx: context.Background()}
 	require.NoError(t, c.GetChangedTargetGraph(nil, nil))
