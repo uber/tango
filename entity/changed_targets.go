@@ -11,7 +11,7 @@ type ChangedTarget struct {
 }
 
 // Size returns an estimate of the protobuf wire size for this changed target.
-func (ct *ChangedTarget) Size() int {
+func (ct ChangedTarget) Size() int {
 	n := 0
 	if ct.ChangeType != 0 {
 		n += 1 + wire.VarintSize(uint64(ct.ChangeType))

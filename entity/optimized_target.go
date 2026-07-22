@@ -18,7 +18,7 @@ type OptimizedTarget struct {
 
 // Size returns an estimate of the protobuf wire size for this target.
 // Used by streaming splitters to stay within gRPC message size limits.
-func (t *OptimizedTarget) Size() int {
+func (t OptimizedTarget) Size() int {
 	n := 0
 	if t.ID != 0 {
 		n += 1 + wire.VarintSize(uint64(t.ID))

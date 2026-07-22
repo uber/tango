@@ -121,23 +121,14 @@ func mapEntryWireSize(k int32, v string) int {
 // SplitTargetGraph splits targets and metadata into wire-safe
 // entity.GetTargetGraphResponse chunks bounded by maxMessageBytes.
 func SplitTargetGraph(targets []entity.OptimizedTarget, meta *entity.Metadata, maxMessageBytes int) ([]entity.GetTargetGraphResponse, error) {
-	var chunks []entity.GetTargetGraphResponse
-	start := 0
-	currentBytes := 0
-	for i := range targets {
-		itemBytes := targets[i].Size()
-		if i > start && currentBytes+itemBytes > maxMessageBytes {
-			chunks = append(chunks, entity.GetTargetGraphResponse{
-				Targets: targets[start:i],
-			})
-			start = i
-			currentBytes = 0
-		}
-		currentBytes += itemBytes
+	groups, err := SplitBySize(targets, maxMessageBytes)
+	if err != nil {
+		return nil, err
 	}
-	chunks = append(chunks, entity.GetTargetGraphResponse{
-		Targets: targets[start:],
-	})
+	chunks := make([]entity.GetTargetGraphResponse, 0, len(groups))
+	for _, g := range groups {
+		chunks = append(chunks, entity.GetTargetGraphResponse{Targets: g})
+	}
 
 	metaGroups, err := SplitMetadata(
 		meta.TargetIDMapping,
@@ -160,23 +151,14 @@ func SplitTargetGraph(targets []entity.OptimizedTarget, meta *entity.Metadata, m
 // SplitChangedTargets splits changed targets and metadata into wire-safe
 // entity.GetChangedTargetsResponse chunks bounded by maxMessageBytes.
 func SplitChangedTargets(changed []entity.ChangedTarget, meta *entity.Metadata, maxMessageBytes int) ([]entity.GetChangedTargetsResponse, error) {
-	var chunks []entity.GetChangedTargetsResponse
-	start := 0
-	currentBytes := 0
-	for i := range changed {
-		itemBytes := changed[i].Size()
-		if i > start && currentBytes+itemBytes > maxMessageBytes {
-			chunks = append(chunks, entity.GetChangedTargetsResponse{
-				ChangedTargets: changed[start:i],
-			})
-			start = i
-			currentBytes = 0
-		}
-		currentBytes += itemBytes
+	groups, err := SplitBySize(changed, maxMessageBytes)
+	if err != nil {
+		return nil, err
 	}
-	chunks = append(chunks, entity.GetChangedTargetsResponse{
-		ChangedTargets: changed[start:],
-	})
+	chunks := make([]entity.GetChangedTargetsResponse, 0, len(groups))
+	for _, g := range groups {
+		chunks = append(chunks, entity.GetChangedTargetsResponse{ChangedTargets: g})
+	}
 
 	metaGroups, err := SplitMetadata(
 		meta.TargetIDMapping,
