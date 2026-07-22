@@ -15,7 +15,6 @@
 package git
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
@@ -162,24 +161,29 @@ func (c *impl) SubmoduleUpdate(ctx context.Context) error {
 // DiffWithStatus returns the list of changed files with their status between two refs,
 // parsed from `git diff --name-status`. For renames, Path is the destination path.
 func (c *impl) DiffWithStatus(ctx context.Context, baseRef, targetRef string) ([]DiffEntry, error) {
-	out, err := c.Diff(ctx, baseRef, targetRef, "--name-status")
+	out, err := c.Diff(ctx, baseRef, targetRef, "--name-status", "-z")
 	if err != nil {
 		return nil, err
 	}
 	var entries []DiffEntry
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
+	fields := bytes.Split(out, []byte{0})
+	for i := 0; i < len(fields); {
+		if len(fields[i]) == 0 {
+			i++
 			continue
 		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
+		status := string(fields[i])
+		i++
+		pathCount := 1
+		if status[0] == 'R' || status[0] == 'C' {
+			pathCount = 2
 		}
-		// Status may have a score suffix (e.g. "R100") — use only the first character.
-		status := string(fields[0][0])
-		// For renames/copies there are two paths; use the destination (last field).
-		path := fields[len(fields)-1]
-		entries = append(entries, DiffEntry{Status: status, Path: path})
+		if i+pathCount > len(fields) {
+			break
+		}
+		path := string(fields[i+pathCount-1])
+		i += pathCount
+		entries = append(entries, DiffEntry{Status: status[:1], Path: path})
 	}
 	return entries, nil
 }
@@ -195,33 +199,34 @@ func (c *impl) GetCommitTimeSecond(ctx context.Context, ref string) (int64, erro
 
 // FileHashes gets a mapping of files to their hashes based on `git ls-tree --full-tree -r <ref>`.
 func (c *impl) FileHashes(ctx context.Context, ref string) (map[string][]byte, error) {
-	out, err := c.runner.output(ctx, c.directory, "git", "ls-tree", "--full-tree", "-r", ref)
+	out, err := c.runner.output(ctx, c.directory, "git", "ls-tree", "--full-tree", "-r", "-z", ref)
 	if err != nil {
 		return nil, err
 	}
 
 	fileHashes := make(map[string][]byte)
-	scanner := bufio.NewScanner(bytes.NewReader(out))
-	// git ls-tree --full-tree output format:
-	// 100644 blob d236089b460070849370c1c813874ae9bea598a8 file1
-	// 100644 blob 9bccabefa0c7a4d68b219e2b62d6d3cc5271cf44 file2
-	// 100644 blob a14cddefd9112ee21e58f6c78ad224dc44a64297 file3
-	for scanner.Scan() {
-		line := scanner.Text()
-		x := strings.Split(line, "\t")
-		parts := strings.Fields(x[0]) // strings.Split is guaranteed to return an array of length 1
-		if len(parts) < 3 || len(x) < 2 {
-			c.logger.Warnw("skipping ls-tree line due to unexpected format", "line", line)
+	for _, record := range bytes.Split(out, []byte{0}) {
+		if len(record) == 0 {
 			continue
 		}
-		hash, err := hex.DecodeString(parts[2])
+		fields := bytes.SplitN(record, []byte{'\t'}, 2)
+		if len(fields) != 2 {
+			c.logger.Warnw("skipping ls-tree record due to unexpected format", "record", string(record))
+			continue
+		}
+		metadata := strings.Fields(string(fields[0]))
+		if len(metadata) < 3 {
+			c.logger.Warnw("skipping ls-tree record due to unexpected metadata", "record", string(record))
+			continue
+		}
+		hash, err := hex.DecodeString(metadata[2])
 		if err != nil {
-			c.logger.Warnw("skipping ls-tree line due to parsing error", "line", line, zap.Error(err))
+			c.logger.Warnw("skipping ls-tree record due to parsing error", "record", string(record), zap.Error(err))
 			continue
 		}
-		fileHashes[x[1]] = hash
+		fileHashes[string(fields[1])] = hash
 	}
-	return fileHashes, scanner.Err()
+	return fileHashes, nil
 }
 
 // commandRunner abstracts command execution for testability.
