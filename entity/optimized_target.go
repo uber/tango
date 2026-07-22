@@ -1,5 +1,7 @@
 package entity
 
+import "github.com/uber/tango/internal/streaming/wire"
+
 // OptimizedTarget is the compact, ID-mapped representation of a target used
 // for streaming and storage. String fields are replaced with int32 IDs that
 // reference the accompanying Metadata maps.
@@ -12,6 +14,46 @@ type OptimizedTarget struct {
 	Root               bool            `json:"root"`
 	External           bool            `json:"external"`
 	Attributes         map[int32]int32 `json:"attributes"`
+}
+
+// Size returns an estimate of the protobuf wire size for this target.
+// Used by streaming splitters to stay within gRPC message size limits.
+func (t *OptimizedTarget) Size() int {
+	n := 0
+	if t.ID != 0 {
+		n += 1 + wire.VarintSize(uint64(t.ID))
+	}
+	if len(t.Hash) > 0 {
+		n += 1 + wire.VarintSize(uint64(len(t.Hash))) + len(t.Hash)
+	}
+	if len(t.DirectDependencies) > 0 {
+		dataSize := 0
+		for _, d := range t.DirectDependencies {
+			dataSize += wire.VarintSize(uint64(d))
+		}
+		n += 1 + wire.VarintSize(uint64(dataSize)) + dataSize
+	}
+	if t.RuleType != 0 {
+		n += 1 + wire.VarintSize(uint64(t.RuleType))
+	}
+	if len(t.Tags) > 0 {
+		dataSize := 0
+		for _, tag := range t.Tags {
+			dataSize += wire.VarintSize(uint64(tag))
+		}
+		n += 1 + wire.VarintSize(uint64(dataSize)) + dataSize
+	}
+	if t.Root {
+		n += 1 + 1
+	}
+	if t.External {
+		n += 1 + 1
+	}
+	for k, v := range t.Attributes {
+		entrySize := 1 + wire.VarintSize(uint64(k)) + 1 + wire.VarintSize(uint64(v))
+		n += 1 + wire.VarintSize(uint64(entrySize)) + entrySize
+	}
+	return n
 }
 
 // Metadata holds the ID-to-string mappings that accompany a set of

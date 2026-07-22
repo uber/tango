@@ -4,6 +4,7 @@ go_library(
     name = "graphrunner",
     srcs = [
         "graph_runner.go",
+        "metrics.go",
         "native.go",
         "shell.go",
     ],
@@ -15,6 +16,7 @@ go_library(
         "//core/git",
         "//core/targethasher",
         "//core/workspace",
+        "//observability/metrics",
         "@com_github_uber_go_tally//:tally",
     ],
 )

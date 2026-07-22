@@ -4,6 +4,7 @@ go_library(
     name = "mapper",
     srcs = [
         "build_description.go",
+        "changed_targets.go",
         "errors.go",
         "target_graph.go",
     ],
