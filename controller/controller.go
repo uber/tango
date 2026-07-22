@@ -77,7 +77,12 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 // The returned cancel function MUST be deferred; it releases the
 // context.AfterFunc handle so we do not leak a watcher past the request.
 func (c *controller) linkRequestCtx(reqCtx context.Context) (context.Context, context.CancelFunc) {
+	// Derive a per-request ctx whose cancel only affects this ctx and its
+	// children — it never propagates up to reqCtx.
 	ctx, cancel := context.WithCancel(reqCtx)
+	// Register a one-shot watcher that cancels the derived ctx if appCtx fires.
+	// AfterFunc only observes appCtx; it never cancels it. stop() deregisters
+	// the watcher so the closure is not retained past the request.
 	stop := context.AfterFunc(c.appCtx, cancel)
 	return ctx, func() {
 		stop()
