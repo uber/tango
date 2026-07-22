@@ -62,7 +62,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 		// Nothing to stream
 		return nil
 	}
-	defer graphReader.Close()
+	defer func() { _ = graphReader.Close() }()
 	sendStart := time.Now()
 	outputConfig := request.GetOutputConfig()
 	for {
@@ -111,7 +111,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 				return nil, fmt.Errorf("get treehash: %w", err)
 			}
 		} else {
-			defer treehashResponse.ReadCloser.Close()
+			defer func() { _ = treehashResponse.ReadCloser.Close() }()
 			treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)
 			if err != nil {
 				return nil, fmt.Errorf("read treehash: %w", err)

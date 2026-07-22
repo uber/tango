@@ -162,7 +162,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 	var readErr error
 	for {
 		if err := ctx.Err(); err != nil {
-			cachedReader.Close()
+			_ = cachedReader.Close()
 			// Client gave up while we were draining the cache. Surface as a user-cancelled error.
 			return false, fmt.Errorf("cache reader: %w", err)
 		}
@@ -177,7 +177,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 		}
 		cached = append(cached, resp)
 	}
-	cachedReader.Close()
+	_ = cachedReader.Close()
 
 	if readErr != nil {
 		// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
@@ -254,7 +254,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 				results <- graphResult{order: idx, err: err}
 				return
 			}
-			defer graphReader.Close()
+			defer func() { _ = graphReader.Close() }()
 
 			// Read all chunks from the stream
 			var chunks []*pb.GetTargetGraphResponse
@@ -800,7 +800,7 @@ func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.
 		}
 		return "", fmt.Errorf("treehash read failed for key %q: %w", key, err)
 	}
-	defer resp.ReadCloser.Close()
+	defer func() { _ = resp.ReadCloser.Close() }()
 	b, err := io.ReadAll(resp.ReadCloser)
 	if err != nil {
 		return "", fmt.Errorf("treehash body read failed for key %q: %w", key, err)

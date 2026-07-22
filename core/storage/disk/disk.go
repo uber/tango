@@ -17,6 +17,7 @@ package disk
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -29,6 +30,12 @@ import (
 type diskStorage struct {
 	rootDir string
 }
+
+const (
+	_objectsDir   = ".objects"
+	_blobFileName = "blob"
+	_keyChunkSize = 200
+)
 
 var _ storage.Storage = (*diskStorage)(nil)
 
@@ -49,7 +56,7 @@ func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (sto
 	if ctx.Err() != nil {
 		return storage.DownloadResponse{}, ctx.Err()
 	}
-	path := filepath.Join(d.rootDir, req.Key)
+	path := d.keyPath(req.Key)
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -69,7 +76,7 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 		return errors.New("nil reader")
 	}
 
-	path := filepath.Join(d.rootDir, req.Key)
+	path := d.keyPath(req.Key)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -83,7 +90,7 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 	defer os.Remove(tmpPath)
 
 	if _, err := io.Copy(tmp, &storage.CtxReader{Ctx: ctx, R: req.Reader}); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -97,7 +104,7 @@ func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
 	if ctx.Err() != nil {
 		return false, ctx.Err()
 	}
-	_, err := os.Stat(filepath.Join(d.rootDir, key))
+	_, err := os.Stat(d.keyPath(key))
 	if err == nil {
 		return true, nil
 	}
@@ -108,19 +115,11 @@ func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
 }
 
 // List returns all keys whose name starts with the given prefix.
-//
-// To honor the literal-prefix contract without walking the entire rootDir, this
-// walks the longest path-prefix of `prefix` ending in "/" (or rootDir if none)
-// and filters entries by strings.HasPrefix on the full key.
 func (d *diskStorage) List(ctx context.Context, prefix string) ([]string, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	walkSubdir := ""
-	if idx := strings.LastIndex(prefix, "/"); idx >= 0 {
-		walkSubdir = prefix[:idx+1]
-	}
-	walkRoot := filepath.Join(d.rootDir, walkSubdir)
+	walkRoot := filepath.Join(d.rootDir, _objectsDir)
 	var keys []string
 	err := filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -129,18 +128,48 @@ func (d *diskStorage) List(ctx context.Context, prefix string) ([]string, error)
 			}
 			return err
 		}
-		if info.IsDir() {
+		if info.IsDir() || info.Name() != _blobFileName {
 			return nil
 		}
-		rel, err := filepath.Rel(d.rootDir, path)
+		key, err := d.keyFromPath(path)
 		if err != nil {
 			return err
 		}
-		if !strings.HasPrefix(rel, prefix) {
+		if !strings.HasPrefix(key, prefix) {
 			return nil
 		}
-		keys = append(keys, rel)
+		keys = append(keys, key)
 		return nil
 	})
 	return keys, err
+}
+
+// keyPath encodes the opaque key so path separators and traversal components
+// cannot acquire filesystem semantics. Chunking avoids filename length limits.
+func (d *diskStorage) keyPath(key string) string {
+	encoded := hex.EncodeToString([]byte(key))
+	parts := []string{d.rootDir, _objectsDir}
+	for len(encoded) > _keyChunkSize {
+		parts = append(parts, encoded[:_keyChunkSize])
+		encoded = encoded[_keyChunkSize:]
+	}
+	if encoded != "" {
+		parts = append(parts, encoded)
+	}
+	parts = append(parts, _blobFileName)
+	return filepath.Join(parts...)
+}
+
+func (d *diskStorage) keyFromPath(path string) (string, error) {
+	rel, err := filepath.Rel(filepath.Join(d.rootDir, _objectsDir), path)
+	if err != nil {
+		return "", err
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	encoded := strings.Join(parts[:len(parts)-1], "")
+	key, err := hex.DecodeString(encoded)
+	if err != nil {
+		return "", err
+	}
+	return string(key), nil
 }

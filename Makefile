@@ -1,4 +1,4 @@
-.PHONY: build cover test test-integration bench proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
+.PHONY: build cover test test-integration bench lint proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -34,6 +34,11 @@ bench:
 		--test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) \
 		--test_env=HOME=$$HOME
 	@echo "Benchmarks complete!"
+
+lint: ## Run golangci-lint
+	@echo "Running golangci-lint..."
+	@golangci-lint run ./...
+	@echo "Lint passed!"
 
 # Generate protobuf files using protoc
 proto:
@@ -112,7 +117,8 @@ help:
 	@echo "  make build            - Build all targets"
 	@echo "  make test             - Run all tests"
 	@echo "  make test-integration - Run integration tests (slow)"
-	@echo "  make bench        - Run GetChangedTargets benchs (measurement only, not in CI)"
+	@echo "  make bench            - Run GetChangedTargets benchs (measurement only, not in CI)"
+	@echo "  make lint             - Run golangci-lint"
 	@echo "  make gazelle          - Update BUILD.bazel files"
 	@echo "  make clean            - Clean generated files and binaries"
 	@echo ""

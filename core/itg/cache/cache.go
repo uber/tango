@@ -102,7 +102,7 @@ func (c *storageCache) Get(ctx context.Context, key Key) (*graph.OptimizedGraph,
 	if err != nil {
 		return nil, fmt.Errorf("download graph %s: %w", key.toStorageKey(), err)
 	}
-	defer resp.ReadCloser.Close()
+	defer func() { _ = resp.ReadCloser.Close() }()
 
 	var optimizedGraph graph.OptimizedGraph
 	if err := gob.NewDecoder(resp.ReadCloser).Decode(&optimizedGraph); err != nil {

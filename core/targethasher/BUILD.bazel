@@ -1,4 +1,3 @@
-load("@rules_go//extras:gomock.bzl", "gomock")
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
@@ -36,12 +35,4 @@ go_test(
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
     ],
-)
-
-gomock(
-    name = "mock_sourcehasher",
-    out = "mock_sourcehasher_test.go",
-    interfaces = ["SourceHasher"],
-    library = ":targethasher",
-    package = "targethasher",
 )
