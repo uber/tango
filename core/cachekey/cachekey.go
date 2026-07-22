@@ -18,8 +18,11 @@ package cachekey
 import (
 	"crypto/md5"
 	"fmt"
+	"hash"
+	"io"
 	"path/filepath"
 	"sort"
+	"strconv"
 
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/url"
@@ -75,7 +78,13 @@ func hashExcludeFilesRegex(excludeFilesRegex []string) string {
 	sort.Strings(sorted)
 	h := md5.New()
 	for _, r := range sorted {
-		h.Write([]byte(r))
+		writeFramedString(h, r)
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func writeFramedString(h hash.Hash, value string) {
+	io.WriteString(h, strconv.Itoa(len(value)))
+	h.Write([]byte{':'})
+	io.WriteString(h, value)
 }

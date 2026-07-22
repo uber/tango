@@ -13,10 +13,15 @@ go_library(
 
 go_test(
     name = "cachekey_test",
-    srcs = ["cachekey_test.go"],
+    srcs = [
+        "cachekey_test.go",
+        "exclude_regex_rapid_test.go",
+    ],
     embed = [":cachekey"],
     deps = [
         "//entity",
         "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@net_pgregory_rapid//:rapid",
     ],
 )

@@ -34,6 +34,8 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
+	"github.com/uber/tango/internal/url"
+	"github.com/uber/tango/observability/metrics"
 	"go.uber.org/zap"
 )
 
@@ -42,7 +44,10 @@ type nativeOrchestrator struct {
 	storage     storage.Storage
 	repoManager repomanager.RepoManager
 	logger      *zap.SugaredLogger
-	scope       tally.Scope
+	// scope is subscoped to the orchestrator component and forwarded to the
+	// graph runner so its metrics nest under orchestrator.*.
+	scope   tally.Scope
+	emitter *metrics.Emitter
 	// gitFactory allows injecting a git.Interface constructor for testing
 	gitFactory  func(directory string) git.Interface
 	graphRunner graphrunner.GraphRunner
@@ -83,12 +88,18 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 	if scope == nil {
 		scope = tally.NoopScope
 	}
+	scope = scope.SubScope("orchestrator")
+	emitter, err := metrics.New(scope)
+	if err != nil {
+		emitter = metrics.Nop()
+	}
 
 	return &nativeOrchestrator{
 		storage:     p.Storage,
 		repoManager: p.RepoManager,
 		logger:      p.Logger,
-		scope:       scope.SubScope("orchestrator"),
+		scope:       scope,
+		emitter:     emitter,
 		gitFactory:  p.GitFactory,
 		graphRunner: p.GraphRunner,
 		appCtx:      appCtx,
@@ -99,23 +110,9 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 // GetTargetGraph is used to compute the target graph locally.
 // It leases a workspace, checks out the base revision, applies the change requests, and computes the target graph.
 func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (_ storage.GraphReader, retErr error) {
-	scope := b.scope.SubScope("get_target_graph")
-	scope.Counter("calls").Inc(1)
-	defer func() {
-		if retErr != nil {
-			scope.Counter("failure").Inc(1)
-			var ce common.ClassifiedError
-			if !errors.As(retErr, &ce) {
-				ce = common.WithReason(common.FailureReasonUnknown, common.ErrorTypeInfra, retErr)
-			}
-			scope.Tagged(map[string]string{
-				"failure_type":   ce.Type(),
-				"failure_reason": ce.Reason(),
-			}).Counter("failure_type").Inc(1)
-		} else {
-			scope.Counter("success").Inc(1)
-		}
-	}()
+	e := b.emitter.Tagged(map[string]string{metrics.TagRepo: url.ToShortRemote(req.Build.Remote)})
+	op := metrics.Begin(e, _opGetTargetGraph, _stepDurationBuckets)
+	defer func() { op.Complete(retErr) }()
 	build := req.Build
 	logger := b.logger.With(zap.Any("build_description", build))
 	logger.Infow("GetTargetGraph: Processing request")
@@ -125,7 +122,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if !ok {
 		return nil, fmt.Errorf("no repository configuration found for remote %q", remote)
 	}
+	leaseStart := time.Now()
 	ws, err := b.repoManager.Lease(ctx, build)
+	recordStep(e, "lease_duration", leaseStart)
 	if err != nil {
 		return nil, classifyLeaseError(err)
 	}
@@ -138,7 +137,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 			}
 		}
 	}()
+	checkoutStart := time.Now()
 	err = ws.Checkout(ctx, build.Remote, build.BaseSha)
+	recordStep(e, "checkout_duration", checkoutStart)
 	if err != nil {
 		return nil, fmt.Errorf("checkout %s@%s: %w", build.Remote, build.BaseSha, err)
 	}
@@ -158,7 +159,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		}
 		requests = append(requests, request)
 	}
+	applyStart := time.Now()
 	err = ws.ApplyRequests(ctx, requests)
+	recordStep(e, "apply_requests_duration", applyStart)
 	if err != nil {
 		return nil, fmt.Errorf("apply requests: %w", err)
 	}
@@ -171,7 +174,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
 	if !req.BypassCache {
+		cacheReadStart := time.Now()
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
+		recordStep(e, "cache_read_duration", cacheReadStart)
 		if err == nil {
 			logger.Infow("GetTargetGraph: Cache hit on treehash", zap.String("treehash", treehash))
 			return graphReader, nil
@@ -205,7 +210,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 			Scope:              b.scope,
 		})
 	}
+	computeStart := time.Now()
 	result, err := runner.Compute(ctx, ws)
+	recordStep(e, "compute_duration", computeStart)
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
@@ -216,6 +223,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph to response: %w", err)
 	}
+	cacheWriteStart := time.Now()
 	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, responses)
 	if err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
@@ -226,10 +234,16 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("store treehash mapping at %s: %w", treehashCachePath, err)
 	}
+	recordStep(e, "cache_write_duration", cacheWriteStart)
 	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 	if err != nil {
 		return nil, fmt.Errorf("create graph reader at %s: %w", treehashPath, err)
 	}
 	logger.Infow("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
 	return graphReader, nil
+}
+
+// recordStep records a pipeline step's duration under the get_target_graph op.
+func recordStep(e *metrics.Emitter, name string, start time.Time) {
+	e.DurationHistogram(_opGetTargetGraph, name, _stepDurationBuckets).RecordDuration(time.Since(start))
 }
