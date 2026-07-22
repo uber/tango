@@ -15,10 +15,7 @@
 package controller
 
 import (
-	"context"
-	"errors"
-
-	"github.com/uber/tango/core/common"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/observability/metrics"
 )
 
@@ -36,24 +33,10 @@ const (
 	failureReasonTreehashRead = "treehash_read"
 )
 
-// emitFailureMetric tags the failure counter with the reason and type from the
-// error's ClassifiedError. Context errors are recognised explicitly; everything
-// else falls back to unknown/infra. e should already carry the repo tag; op is
-// the operation subscope the counter lands under.
+// emitFailureMetric tags the failure counter with err's ErrorCode. e should
+// already carry the repo tag; op is the operation subscope the counter lands under.
 func emitFailureMetric(e *metrics.Emitter, op string, err error) {
-	var ce common.ClassifiedError
-	switch {
-	case errors.As(err, &ce):
-		// already classified — use the error's own reason and type
-	case errors.Is(err, context.Canceled):
-		ce = common.WithReason(common.FailureReasonCancelled, common.ErrorTypeUser, err)
-	case errors.Is(err, context.DeadlineExceeded):
-		ce = common.WithReason(common.FailureReasonDeadlineExceeded, common.ErrorTypeUser, err)
-	default:
-		ce = common.WithReason(common.FailureReasonUnknown, common.ErrorTypeInfra, err)
-	}
 	e.Tagged(map[string]string{
-		"failure_type":   ce.Type(),
-		"failure_reason": ce.Reason(),
+		"error_code": tangoerrors.GetErrorCode(err).String(),
 	}).Counter(op, "failures").Inc(1)
 }
