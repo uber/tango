@@ -38,43 +38,42 @@ type mockRunner struct {
 	calls []runnerCall
 	out   []byte
 	err   error
+	// returnCtxErr, if true, makes run/output/runWithStdin return ctx.Err()
+	// instead of err — simulating what an exec-based runner returns when
+	// its command is killed by a canceled/expired context.
+	returnCtxErr bool
 }
 
-func (m *mockRunner) run(_ context.Context, dir string, name string, args ...string) error {
+func (m *mockRunner) run(ctx context.Context, dir string, name string, args ...string) error {
 	m.calls = append(m.calls, runnerCall{kind: "run", dir: dir, name: name, args: append([]string(nil), args...)})
+	if m.returnCtxErr {
+		return ctx.Err()
+	}
 	return m.err
 }
-func (m *mockRunner) output(_ context.Context, dir string, name string, args ...string) ([]byte, error) {
+func (m *mockRunner) output(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
 	m.calls = append(m.calls, runnerCall{kind: "output", dir: dir, name: name, args: append([]string(nil), args...)})
+	if m.returnCtxErr {
+		return nil, ctx.Err()
+	}
 	return append([]byte(nil), m.out...), m.err
 }
-func (m *mockRunner) runWithStdin(_ context.Context, dir string, name string, stdin []byte, args ...string) error {
+func (m *mockRunner) runWithStdin(ctx context.Context, dir string, name string, stdin []byte, args ...string) error {
 	m.calls = append(m.calls, runnerCall{kind: "runWithStdin", dir: dir, name: name, args: append([]string(nil), args...), stdin: append([]byte(nil), stdin...)})
+	if m.returnCtxErr {
+		return ctx.Err()
+	}
 	return m.err
-}
-
-// blockingRunner blocks run/output until ctx is done, then returns ctx.Err().
-type blockingRunner struct{}
-
-func (blockingRunner) run(ctx context.Context, _ string, _ string, _ ...string) error {
-	<-ctx.Done()
-	return ctx.Err()
-}
-func (blockingRunner) output(ctx context.Context, _ string, _ string, _ ...string) ([]byte, error) {
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-func (blockingRunner) runWithStdin(ctx context.Context, _ string, _ string, _ []byte, _ ...string) error {
-	<-ctx.Done()
-	return ctx.Err()
 }
 
 func TestCheckout_wrapsErrTimeoutWhenTimeoutElapses(t *testing.T) {
 	// A parent deadline already in the past causes the derived timeout
-	// context to be immediately Done with context.DeadlineExceeded.
+	// context to be immediately Done with context.DeadlineExceeded, before
+	// the runner is even invoked.
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
 	defer cancel()
-	g := &impl{directory: "/repo", runner: blockingRunner{}}
+	m := &mockRunner{returnCtxErr: true}
+	g := &impl{directory: "/repo", runner: m}
 	err := g.Checkout(ctx, "feature")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrTimeout)
@@ -84,7 +83,8 @@ func TestCheckout_wrapsErrTimeoutWhenTimeoutElapses(t *testing.T) {
 func TestCheckout_doesNotWrapErrTimeoutOnParentCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	g := &impl{directory: "/repo", runner: blockingRunner{}}
+	m := &mockRunner{returnCtxErr: true}
+	g := &impl{directory: "/repo", runner: m}
 	err := g.Checkout(ctx, "feature")
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrTimeout)
