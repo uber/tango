@@ -91,9 +91,9 @@ func wrapError(ctx context.Context, op string, err error) error {
 		return nil
 	}
 	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("%s: %w: %w", op, ErrTimeout, err)
+		return fmt.Errorf("git %s: %w: %w", op, ErrTimeout, err)
 	}
-	return fmt.Errorf("%s: %w", op, err)
+	return fmt.Errorf("git %s: %w", op, err)
 }
 
 // Checkout checks out a specific reference in the repository.
