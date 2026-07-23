@@ -50,7 +50,7 @@ func TestClassifyGitError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := classifyGitError("checkout main@abc123", tt.err)
+			got := classifyGitError(tt.err)
 			require.Error(t, got)
 			assert.Equal(t, tt.wantCode, tangoerrors.GetErrorCode(got))
 			assert.ErrorIs(t, got, tt.err)

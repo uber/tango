@@ -31,12 +31,11 @@ func classifyLeaseError(err error) error {
 	return tangoerrors.NewInfra(wrappedErr)
 }
 
-// classifyGitError wraps err with the given message and classifies it as an
-// infra error when it was caused by a git command timing out.
-func classifyGitError(msg string, err error) error {
-	wrappedErr := fmt.Errorf("%s: %w", msg, err)
+// classifyGitError classifies err as an infra error when it was caused by a
+// git command timing out.
+func classifyGitError(err error) error {
 	if errors.Is(err, git.ErrTimeout) {
-		return tangoerrors.NewInfra(wrappedErr)
+		return tangoerrors.NewInfra(err)
 	}
-	return wrappedErr
+	return err
 }

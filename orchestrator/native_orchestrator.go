@@ -138,7 +138,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	err = ws.Checkout(ctx, build.Remote, build.BaseSha)
 	recordStep(e, "checkout_duration", checkoutStart)
 	if err != nil {
-		return nil, classifyGitError(fmt.Sprintf("checkout %s@%s", build.Remote, build.BaseSha), err)
+		return nil, classifyGitError(err)
 	}
 	logger.Infow("GetTargetGraph: Checked out base revision")
 
@@ -160,14 +160,14 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	err = ws.ApplyRequests(ctx, requests)
 	recordStep(e, "apply_requests_duration", applyStart)
 	if err != nil {
-		return nil, classifyGitError("apply requests", err)
+		return nil, classifyGitError(err)
 	}
 	logger.Infow("GetTargetGraph: Applied requests", zap.Int("request_count", len(requests)))
 
 	// Compute the treehash and download the target graph from storage if exists.
 	treehash, err := gitModule.RevParse(ctx, "HEAD^{tree}")
 	if err != nil {
-		return nil, classifyGitError("compute treehash", err)
+		return nil, classifyGitError(err)
 	}
 	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
 	if !req.BypassCache {
