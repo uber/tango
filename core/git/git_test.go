@@ -19,6 +19,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,6 +51,44 @@ func (m *mockRunner) output(_ context.Context, dir string, name string, args ...
 func (m *mockRunner) runWithStdin(_ context.Context, dir string, name string, stdin []byte, args ...string) error {
 	m.calls = append(m.calls, runnerCall{kind: "runWithStdin", dir: dir, name: name, args: append([]string(nil), args...), stdin: append([]byte(nil), stdin...)})
 	return m.err
+}
+
+// blockingRunner blocks run/output until ctx is done, then returns ctx.Err().
+type blockingRunner struct{}
+
+func (blockingRunner) run(ctx context.Context, _ string, _ string, _ ...string) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+func (blockingRunner) output(ctx context.Context, _ string, _ string, _ ...string) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (blockingRunner) runWithStdin(ctx context.Context, _ string, _ string, _ []byte, _ ...string) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestCheckout_wrapsErrTimeoutWhenTimeoutElapses(t *testing.T) {
+	// A parent deadline already in the past causes the derived timeout
+	// context to be immediately Done with context.DeadlineExceeded.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+	defer cancel()
+	g := &impl{directory: "/repo", runner: blockingRunner{}}
+	err := g.Checkout(ctx, "feature")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTimeout)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestCheckout_doesNotWrapErrTimeoutOnParentCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	g := &impl{directory: "/repo", runner: blockingRunner{}}
+	err := g.Checkout(ctx, "feature")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrTimeout)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestClone_usesRunnerWithDirAndArgs(t *testing.T) {

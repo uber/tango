@@ -22,8 +22,41 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tangoerrors "github.com/uber/tango/core/errors"
+	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 )
+
+func TestClassifyGitError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      error
+		wantCode tangoerrors.ErrorCode
+	}{
+		{
+			name:     "git timeout is infra",
+			err:      fmt.Errorf("%w: %w", git.ErrTimeout, context.DeadlineExceeded),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+		{
+			name:     "generic error is unclassified but wrapped",
+			err:      fmt.Errorf("exit status 128"),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := classifyGitError("checkout main@abc123", tt.err)
+			require.Error(t, got)
+			assert.Equal(t, tt.wantCode, tangoerrors.GetErrorCode(got))
+			assert.ErrorIs(t, got, tt.err)
+		})
+	}
+}
 
 func TestClassifyLeaseError(t *testing.T) {
 	t.Parallel()

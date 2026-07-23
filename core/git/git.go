@@ -36,6 +36,10 @@ const (
 	_gitTimeout = 10 * time.Minute
 )
 
+// ErrTimeout is returned (wrapped) when a git command does not complete
+// within the configured timeout. Callers can check for it with errors.Is.
+var ErrTimeout = errors.New("git command timed out")
+
 // DiffEntry represents a single file change from git diff --name-status.
 type DiffEntry struct {
 	// Status is the single-character status code: "A", "D", "M", "R", etc.
@@ -79,12 +83,25 @@ func New(directory string, logger *zap.SugaredLogger) Interface {
 	}
 }
 
+// wrapError wraps a non-nil err with the name of the failing git operation,
+// additionally wrapping ErrTimeout if ctx's own timeout (rather than a
+// parent cancellation) has elapsed.
+func wrapError(ctx context.Context, op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("%s: %w: %w", op, ErrTimeout, err)
+	}
+	return fmt.Errorf("%s: %w", op, err)
+}
+
 // Checkout checks out a specific reference in the repository.
 func (c *impl) Checkout(ctx context.Context, ref string, options ...string) error {
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := append([]string{"checkout", ref}, options...)
-	return c.runner.run(ctx, c.directory, "git", args...)
+	return wrapError(ctx, "checkout", c.runner.run(ctx, c.directory, "git", args...))
 }
 
 // Fetch runs git fetch for a remote ref.
@@ -92,7 +109,7 @@ func (c *impl) Fetch(ctx context.Context, remote, ref string, options ...string)
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := append([]string{"fetch", remote, ref}, options...)
-	return c.runner.run(ctx, c.directory, "git", args...)
+	return wrapError(ctx, "fetch", c.runner.run(ctx, c.directory, "git", args...))
 }
 
 // Clone clones the target repository to the destination.
@@ -101,7 +118,7 @@ func (c *impl) Clone(ctx context.Context, target, destination string, options ..
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := append(append([]string{"clone"}, options...), target, destination)
-	return c.runner.run(ctx, c.directory, "git", args...)
+	return wrapError(ctx, "clone", c.runner.run(ctx, c.directory, "git", args...))
 }
 
 // Diff returns the diff between two references.
@@ -109,14 +126,15 @@ func (c *impl) Diff(ctx context.Context, baseRef, targetRef string, options ...s
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := append([]string{"diff", baseRef, targetRef}, options...)
-	return c.runner.output(ctx, c.directory, "git", args...)
+	out, err := c.runner.output(ctx, c.directory, "git", args...)
+	return out, wrapError(ctx, "diff", err)
 }
 
 // ApplyPatch applies a patch to the repository.
 func (c *impl) ApplyPatch(ctx context.Context, patch []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
-	return c.runner.runWithStdin(ctx, c.directory, "git", patch, "apply", "--3way", "--whitespace", "nowarn", "--index", "-")
+	return wrapError(ctx, "apply patch", c.runner.runWithStdin(ctx, c.directory, "git", patch, "apply", "--3way", "--whitespace", "nowarn", "--index", "-"))
 }
 
 // RevParse returns the revision hash of a reference.
@@ -148,7 +166,7 @@ func (c *impl) Commit(ctx context.Context, message string, options ...string) er
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := append([]string{"commit", "-am", message}, options...)
-	return c.runner.run(ctx, c.directory, "git", args...)
+	return wrapError(ctx, "commit", c.runner.run(ctx, c.directory, "git", args...))
 }
 
 // SubmoduleUpdate updates the submodules in the repository.
@@ -156,7 +174,7 @@ func (c *impl) SubmoduleUpdate(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := []string{"submodule", "update", "--init", "--recursive"}
-	return c.runner.run(ctx, c.directory, "git", args...)
+	return wrapError(ctx, "submodule update", c.runner.run(ctx, c.directory, "git", args...))
 }
 
 // DiffWithStatus returns the list of changed files with their status between two refs,
