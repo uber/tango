@@ -38,6 +38,10 @@ const (
 
 // ErrTimeout is returned (wrapped) when a git command does not complete
 // within the configured timeout. Callers can check for it with errors.Is.
+//
+// TODO: classify other git failure modes (e.g. exit codes, network errors,
+// auth failures) as sentinel errors here too, so callers can distinguish
+// them without inspecting raw exec output.
 var ErrTimeout = errors.New("git command timed out")
 
 // DiffEntry represents a single file change from git diff --name-status.
