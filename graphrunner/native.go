@@ -76,14 +76,14 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 		AdditionalArgs: additionalArgs,
 	})
-	g.emitter.DurationHistogram(_opCompute, "bazel_query_duration", _phaseDurationBuckets).RecordDuration(time.Since(bazelStart))
+	g.emitter.DurationHistogram(_opCompute, "bazel_query_duration", metrics.SlowDurationBuckets).RecordDuration(time.Since(bazelStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
 
 	gitStart := time.Now()
 	knownSourceHashes, err := g.git.FileHashes(ctx, "HEAD")
-	g.emitter.DurationHistogram(_opCompute, "git_file_hashes_duration", _phaseDurationBuckets).RecordDuration(time.Since(gitStart))
+	g.emitter.DurationHistogram(_opCompute, "git_file_hashes_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(gitStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
@@ -97,11 +97,11 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 	hashStart := time.Now()
 	res, err := targethasher.FromProto(ctx, queryResult.Result, ws.Path(), hashConfig)
-	g.emitter.DurationHistogram(_opCompute, "target_hash_duration", _phaseDurationBuckets).RecordDuration(time.Since(hashStart))
+	g.emitter.DurationHistogram(_opCompute, "target_hash_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(hashStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
 	}
 
-	g.emitter.ValueHistogram(_opCompute, "target_count", _targetCountBuckets).RecordValue(float64(len(res.Targets)))
+	g.emitter.ValueHistogram(_opCompute, "target_count", metrics.LargeCountBuckets).RecordValue(float64(len(res.Targets)))
 	return res, nil
 }

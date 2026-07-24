@@ -108,7 +108,7 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 // It leases a workspace, checks out the base revision, applies the change requests, and computes the target graph.
 func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (_ storage.GraphReader, retErr error) {
 	e := b.emitter.Tagged(map[string]string{metrics.TagRepo: url.ToShortRemote(req.Build.Remote)})
-	op := metrics.Begin(e, _opGetTargetGraph, _stepDurationBuckets)
+	op := metrics.Begin(e, _opGetTargetGraph, metrics.SlowDurationBuckets)
 	defer func() { op.Complete(retErr) }()
 	build := req.Build
 	logger := b.logger.With(zap.Any("build_description", build))
@@ -121,7 +121,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	leaseStart := time.Now()
 	ws, err := b.repoManager.Lease(ctx, build)
-	recordStep(e, "lease_duration", leaseStart)
+	recordStep(e, "lease_duration", leaseStart, metrics.FastDurationBuckets)
 	if err != nil {
 		return nil, classifyLeaseError(err)
 	}
@@ -136,7 +136,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}()
 	checkoutStart := time.Now()
 	err = ws.Checkout(ctx, build.Remote, build.BaseSha)
-	recordStep(e, "checkout_duration", checkoutStart)
+	recordStep(e, "checkout_duration", checkoutStart, metrics.FastDurationBuckets)
 	if err != nil {
 		return nil, fmt.Errorf("checkout %s@%s: %w", build.Remote, build.BaseSha, err)
 	}
@@ -158,7 +158,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	applyStart := time.Now()
 	err = ws.ApplyRequests(ctx, requests)
-	recordStep(e, "apply_requests_duration", applyStart)
+	recordStep(e, "apply_requests_duration", applyStart, metrics.FastDurationBuckets)
 	if err != nil {
 		return nil, fmt.Errorf("apply requests: %w", err)
 	}
@@ -173,7 +173,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if !req.BypassCache {
 		cacheReadStart := time.Now()
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
-		recordStep(e, "cache_read_duration", cacheReadStart)
+		recordStep(e, "cache_read_duration", cacheReadStart, metrics.FastDurationBuckets)
 		if err == nil {
 			logger.Infow("GetTargetGraph: Cache hit on treehash", zap.String("treehash", treehash))
 			return graphReader, nil
@@ -209,7 +209,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	computeStart := time.Now()
 	result, err := runner.Compute(ctx, ws)
-	recordStep(e, "compute_duration", computeStart)
+	recordStep(e, "compute_duration", computeStart, metrics.SlowDurationBuckets)
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
@@ -250,7 +250,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("store treehash mapping at %s: %w", treehashCachePath, err)
 	}
-	recordStep(e, "cache_write_duration", cacheWriteStart)
+	recordStep(e, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
 	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 	if err != nil {
 		return nil, fmt.Errorf("create graph reader at %s: %w", treehashPath, err)
@@ -260,6 +260,6 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 }
 
 // recordStep records a pipeline step's duration under the get_target_graph op.
-func recordStep(e *metrics.Emitter, name string, start time.Time) {
-	e.DurationHistogram(_opGetTargetGraph, name, _stepDurationBuckets).RecordDuration(time.Since(start))
+func recordStep(e *metrics.Emitter, name string, start time.Time, buckets tally.DurationBuckets) {
+	e.DurationHistogram(_opGetTargetGraph, name, buckets).RecordDuration(time.Since(start))
 }

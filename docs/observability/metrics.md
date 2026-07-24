@@ -1,6 +1,6 @@
 # observability/metrics
 
-Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins the metric path shape (`<scope>.<operation>.<metric>`) and enforces a uniform lifecycle convention: every instrumented operation emits a `start` counter and a `finish` duration histogram tagged with its outcome, so dashboards and alerts share a single query shape across all operations. It owns emission mechanics only.
+Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins the metric path shape (`<scope>.<operation>.<metric>`) and enforces a uniform lifecycle convention: every instrumented operation emits a `start` counter and a `finish` duration histogram tagged with its outcome, so dashboards and alerts share a single query shape across all operations. It owns emission mechanics plus the shared outcome vocabulary and latency/count bucket sets.
 
 ## What this package owns
 
@@ -9,17 +9,19 @@ Tango's metrics library. A thin, concrete wrapper over `tally.Scope` that pins t
 - `Begin`/`Complete` lifecycle helpers that emit the `start`/`finish` pair with a consistent shape
 - explicit no-op construction for deployments that intentionally do not emit
 - a small set of shared vocabulary constants and the `Outcome` error classifier
+- shared, cross-layer latency/count bucket sets so the same work is comparable across nesting layers
 
 ## Layout
 
 ```
 observability/metrics/
 ├── emitter.go       concrete Tally-backed emitter + Begin / Complete helpers
+├── buckets.go       shared, cross-layer latency / count bucket sets
 ├── names.go         shared op / tag-key / result-value constants + Outcome
 └── emitter_test.go
 ```
 
-Bucket vars are declared as package-level values next to the handlers that use them.
+Latency and count buckets come from a small set of shared, semantically-named sets (`FastDurationBuckets`, `SlowDurationBuckets`, `LargeCountBuckets`) in `buckets.go`; each callsite passes the one matching its timescale.
 
 ## Emitter
 
@@ -34,17 +36,22 @@ type Emitter struct {
     scope tally.Scope
 }
 
-// New creates an Emitter backed by the given tally.Scope. A nil scope is
-// treated as a wiring error and returns an error.
-func New(scope tally.Scope) (*Emitter, error) {
+// New creates an Emitter backed by the given tally.Scope. A nil scope falls
+// back to a no-op scope, so New always returns a usable Emitter.
+func New(scope tally.Scope) *Emitter {
     if scope == nil {
-        return nil, errors.New("metrics: nil scope")
+        scope = tally.NoopScope
     }
-    return &Emitter{scope: scope}, nil
+    return &Emitter{scope: scope}
 }
 
 // Nop returns an Emitter that discards all metrics.
 func Nop() *Emitter { return &Emitter{scope: tally.NoopScope} }
+
+// SubScope returns a child Emitter rooted at a nested scope segment.
+func (e *Emitter) SubScope(name string) *Emitter {
+    return &Emitter{scope: e.scope.SubScope(name)}
+}
 
 // Tagged returns a child Emitter whose instruments carry the given tags in
 // addition to any already on the scope. It delegates to tally.Scope.Tagged.
@@ -116,21 +123,10 @@ The only tag reused across an operation's metrics is `repo`, so the caller bakes
 
 ## Conventions
 
-Metric names and buckets are declared by the package that owns each operation, but the *outcome vocabulary* is shared: operation names, tag keys, and result values live in `metrics/names.go` and every operation draws from them.
+Metric and operation names are declared by the package that owns each operation, while the *outcome vocabulary* is shared: tag keys and result values live in `metrics/names.go` and every operation draws from them. Buckets are shared too — each callsite passes one of the `Fast`/`Slow`/`LargeCount` sets from `buckets.go` by timescale.
 
 ```go
 package metrics
-
-// Operation names — the <op> subscope for Tango's core operations. Extension
-// operations declare their own const next to the emit site.
-const (
-    OpGetTargetGraph        = "get_target_graph"
-    OpGetChangedTargets     = "get_changed_targets"
-    OpGetChangedTargetGraph = "get_changed_target_graph"
-    OpGetGraph              = "get_graph"
-    OpCompareTargetGraphs   = "compare_target_graphs"
-    OpGraphRunner           = "graph_runner"
-)
 
 // Tag keys.
 const (
@@ -147,6 +143,8 @@ const (
     ResultMiss      = "miss"
 )
 ```
+
+Operation names are *not* centralized here — each consuming package declares its own op-name consts in its `metrics.go`, named after the interface method they measure (e.g. `get_target_graph`, `compute`, `lease`).
 ```go
 // Outcome maps an error to a result tag value. Only an explicitly cancelled
 // context (client disconnect or shutdown) is `cancelled`; a deadline exceeded
@@ -171,8 +169,8 @@ Each component stores the `*metrics.Emitter` it was constructed with. At the top
 
 ```go
 func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (_ storage.GraphReader, retErr error) {
-    e := b.emitter.Tagged(map[string]string{metrics.TagRepo: common.ToShortRemote(req.Build.Remote)})
-    op := metrics.Begin(e, metrics.OpGetTargetGraph, getTargetGraphBuckets)
+    e := b.emitter.Tagged(map[string]string{metrics.TagRepo: url.ToShortRemote(req.Build.Remote)})
+    op := metrics.Begin(e, _opGetTargetGraph, metrics.SlowDurationBuckets)
     defer func() { op.Complete(retErr) }()
 
     // ... workspace lease, checkout, apply requests, compute graph ...
@@ -180,16 +178,16 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 }
 ```
 
-The controller follows the same shape; each RPC passes its own operation name and bucket range.
+The controller follows the same shape; each RPC passes its own operation name and picks the bucket set matching the work's timescale (`Fast` vs `Slow`).
 
 ```go
 func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
-    e := c.emitter.Tagged(map[string]string{metrics.TagRepo: common.ToShortRemote(req.GetFirstRevision().GetRemote())})
-    op := metrics.Begin(e, metrics.OpGetChangedTargets, getChangedTargetsBuckets)
+    e := c.emitter.Tagged(map[string]string{metrics.TagRepo: url.ToShortRemote(req.GetFirstRevision().GetRemote())})
+    op := metrics.Begin(e, opGetChangedTargets, metrics.SlowDurationBuckets)
     defer func() { op.Complete(retErr) }()
 
     // custom value metric on the same repo-tagged emitter:
-    e.ValueHistogram(metrics.OpGetChangedTargets, "target_count", targetCountBuckets).
+    e.ValueHistogram(opGetChangedTargets, "target_count", metrics.LargeCountBuckets).
         RecordValue(float64(changedCount))
     // ...
 }
@@ -202,7 +200,7 @@ A sub-operation uses `Begin`/`Complete` for the `start`/`finish` duration exactl
 const opCacheRead = "cache_read"
 
 func (c *controller) readGraphCache(ctx context.Context, e *metrics.Emitter, key string) (_ storage.GraphReader, hit bool, retErr error) {
-    op := metrics.Begin(e, opCacheRead, cacheReadBuckets)
+    op := metrics.Begin(e, opCacheRead, metrics.FastDurationBuckets)
     defer func() { op.Complete(retErr) }()
 
     return c.lookupGraph(ctx, key)
@@ -232,21 +230,3 @@ fetch service:tango name:controller.get_changed_targets.target_count | histogram
 
 Each distinct tag value is a new series, so tag values must be bounded — never request IDs, commit hashes, paths, or raw repo URLs. `repo` is safe only with an explicit cardinality budget and a normalized, allow-listed value; the handlers above apply it that way (`ToShortRemote`).
 
-## Buckets
-
-Buckets are declared at each callsite and passed to `Begin`. There is no universal default — even within the same scope, buckets can be drastically different: the enclosing `get_target_graph` operation can last minutes, while its diffing sub-operation is merely seconds. A shared set is introduced only when operations intentionally share a semantic range.
-
-Buckets are explicitly visible at the callsite and are never promoted into `observability/metrics`.
-
-## No-op behavior
-
-Missing production wiring is an error, not a silent fallback:
-
-```go
-emitter, err := metrics.New(scope)
-if err != nil {
-    return nil, fmt.Errorf("create metrics emitter: %w", err)
-}
-```
-
-Programs that intentionally emit nothing say so explicitly with `metrics.Nop()`. This keeps a forgotten wiring or a nil scope from quietly removing telemetry.

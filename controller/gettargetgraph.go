@@ -36,7 +36,7 @@ import (
 func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
 	repo := url.ToShortRemote(request.GetBuildDescription().GetRemote())
 	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
-	op := metrics.Begin(e, opGetTargetGraph, slowDurationBuckets)
+	op := metrics.Begin(e, opGetTargetGraph, metrics.SlowDurationBuckets)
 	logger := c.logger.WithLazy(
 		zap.Any("build_description", request.GetBuildDescription()),
 	)
@@ -73,7 +73,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 				zap.Duration("send_duration", sendDuration),
 				zap.Duration("total_duration", time.Since(start)),
 			)
-			e.DurationHistogram(opGetTargetGraph, "send_duration", fastDurationBuckets).RecordDuration(sendDuration)
+			e.DurationHistogram(opGetTargetGraph, "send_duration", metrics.FastDurationBuckets).RecordDuration(sendDuration)
 			return nil
 		}
 		if err != nil {
@@ -136,7 +136,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 					zap.Duration("total_duration", time.Since(start)),
 				)
 				e.Counter(opGetTargetGraph, "cache_hit").Inc(1)
-				e.DurationHistogram(opGetTargetGraph, "download_graph", slowDurationBuckets).RecordDuration(time.Since(storageStart))
+				e.DurationHistogram(opGetTargetGraph, "download_graph", metrics.SlowDurationBuckets).RecordDuration(time.Since(storageStart))
 				return graphReader, nil
 			}
 		}

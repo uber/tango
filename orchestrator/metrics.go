@@ -14,16 +14,5 @@
 
 package orchestrator
 
-import (
-	"time"
-
-	"github.com/uber-go/tally"
-)
-
 // opGetTargetGraph is snake_cased after the Orchestrator.GetTargetGraph method.
 const _opGetTargetGraph = "get_target_graph"
-
-// _stepDurationBuckets covers whole-operation and individual pipeline steps
-// (lease, checkout, apply, cache read/write, compute). A compute on a large
-// repo can run for hours, so the range extends to ~4h: exponential 1ms..~4h.
-var _stepDurationBuckets = tally.MustMakeExponentialDurationBuckets(time.Millisecond, 3, 16)

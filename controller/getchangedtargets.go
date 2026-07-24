@@ -51,7 +51,7 @@ type job struct {
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
 	repo := url.ToShortRemote(request.GetFirstRevision().GetRemote())
 	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
-	op := metrics.Begin(e, opGetChangedTargets, slowDurationBuckets)
+	op := metrics.Begin(e, opGetChangedTargets, metrics.SlowDurationBuckets)
 	logger := c.logger.WithLazy(
 		zap.Any("first_revision", request.GetFirstRevision()),
 		zap.Any("second_revision", request.GetSecondRevision()),
@@ -116,7 +116,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		return fmt.Errorf("send response: %w", err)
 	}
 	sendDuration := time.Since(sendStart)
-	e.DurationHistogram(opGetChangedTargets, "send_duration", fastDurationBuckets).RecordDuration(sendDuration)
+	e.DurationHistogram(opGetChangedTargets, "send_duration", metrics.FastDurationBuckets).RecordDuration(sendDuration)
 
 	logger.Info("GetChangedTargets: Successfully processed request",
 		zap.Duration("send_duration", sendDuration),
@@ -190,7 +190,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 		zap.Duration("cache_read_duration", cacheReadDuration),
 	)
 	e.Counter(opGetChangedTargets, "cache_hit").Inc(1)
-	e.DurationHistogram(opGetChangedTargets, "cache_read_duration", fastDurationBuckets).RecordDuration(cacheReadDuration)
+	e.DurationHistogram(opGetChangedTargets, "cache_read_duration", metrics.FastDurationBuckets).RecordDuration(cacheReadDuration)
 	if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
 		return false, fmt.Errorf("send cached response: %w", sendErr)
 	}
@@ -300,7 +300,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 	logger.Info("GetChangedTargets: Both graphs fetched",
 		zap.Duration("graph_fetch_duration", graphFetchDuration),
 	)
-	e.DurationHistogram(opGetChangedTargets, "graph_fetch_duration", slowDurationBuckets).RecordDuration(graphFetchDuration)
+	e.DurationHistogram(opGetChangedTargets, "graph_fetch_duration", metrics.SlowDurationBuckets).RecordDuration(graphFetchDuration)
 
 	if ctx.Err() != nil {
 		// If the context was cancelled by the upstream, just return the original error without additional augmentation
@@ -372,7 +372,7 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 // only carries the names actually referenced. See internal/targetdiff for the
 // classification and distance rules.
 func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse, maxDist int32) (_ []entity.GetChangedTargetsResponse, retErr error) {
-	op := metrics.Begin(e, opCompareTargetGraphs, slowDurationBuckets)
+	op := metrics.Begin(e, opCompareTargetGraphs, metrics.SlowDurationBuckets)
 	defer func() { op.Complete(retErr) }()
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
 
@@ -402,7 +402,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	}
 	secondTargetsByID = nil
 	secondMetadata = nil
-	e.DurationHistogram(opCompareTargetGraphs, "decode_duration", fastDurationBuckets).RecordDuration(time.Since(decodeStart))
+	e.DurationHistogram(opCompareTargetGraphs, "decode_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(decodeStart))
 
 	// 2) Compare the two semantic graphs.
 	diffStart := time.Now()
@@ -417,8 +417,8 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	// Release the input graphs; only result is needed from here on.
 	before = nil
 	after = nil
-	e.DurationHistogram(opCompareTargetGraphs, "diff_duration", fastDurationBuckets).RecordDuration(time.Since(diffStart))
-	e.ValueHistogram(opGetChangedTargets, "target_count", changedTargetCountBuckets).RecordValue(float64(len(result.ChangedTargets)))
+	e.DurationHistogram(opCompareTargetGraphs, "diff_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(diffStart))
+	e.ValueHistogram(opGetChangedTargets, "target_count", metrics.LargeCountBuckets).RecordValue(float64(len(result.ChangedTargets)))
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
