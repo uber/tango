@@ -137,7 +137,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 // rather than silent degradation.
 func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer, maxDist int32, start time.Time) (bool, error) {
 	cacheStart := time.Now()
-	treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
+	treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.GetFirstRevision(), request.GetSecondRevision(), e, opGetChangedTargets)
 	if err != nil {
 		return false, fmt.Errorf("read revision treehash: %w", err)
 	}
@@ -152,6 +152,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 		return false, nil
 	}
 	if cachedReader == nil {
+		recordCacheLookup(e, opGetChangedTargets, _metricComparedTargetsCacheLookup, cacheErr)
 		return false, nil
 	}
 
@@ -180,7 +181,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 	_ = cachedReader.Close()
 
 	if readErr != nil {
-		// Blob is corrupt (likely an incomplete write). Log and fall through to recompute.
+		// Blob is corrupt (likely an incomplete write); recompute.
 		logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
 		return false, nil
 	}
@@ -189,7 +190,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 	logger.Info("GetChangedTargets: Cache hit, streaming from storage",
 		zap.Duration("cache_read_duration", cacheReadDuration),
 	)
-	e.Counter(opGetChangedTargets, "cache_hit").Inc(1)
+	recordCacheLookup(e, opGetChangedTargets, _metricComparedTargetsCacheLookup, nil)
 	e.DurationHistogram(opGetChangedTargets, "cache_read_duration", metrics.FastDurationBuckets).RecordDuration(cacheReadDuration)
 	if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
 		return false, fmt.Errorf("send cached response: %w", sendErr)
@@ -343,7 +344,10 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 		// is cancelled on shutdown. Per-operation deadlines are the storage
 		// backend's responsibility — the controller is backend-agnostic and
 		// must not encode any one implementation's I/O budget.
-		treehash1, treehash2, err := readTreehashParallel(c.appCtx, c.storage, request.GetFirstRevision(), request.GetSecondRevision())
+		// The treehash reads here are for building the write key, not a cache
+		// serve attempt, so they pass a no-op emitter to avoid skewing the
+		// treehash cache hit rate.
+		treehash1, treehash2, err := readTreehashParallel(c.appCtx, c.storage, request.GetFirstRevision(), request.GetSecondRevision(), metrics.Nop(), opGetChangedTargets)
 		if err != nil {
 			// Goroutine outlives the handler so we can't return; log loudly and
 			// abandon the cache write. Surfacing infra failures matters more than
@@ -731,7 +735,7 @@ func validateGetChangedTargetsRequest(request *pb.GetChangedTargetsRequest) erro
 // wasting work on a result that will be discarded anyway. The cancelled sibling's error
 // is dropped — only the original failure is returned, so a self-inflicted
 // context.Canceled never masks the real reason the lookup failed.
-func readTreehashParallel(ctx context.Context, st storage.Storage, first, second *pb.BuildDescription) (string, string, error) {
+func readTreehashParallel(ctx context.Context, st storage.Storage, first, second *pb.BuildDescription, e *metrics.Emitter, op string) (string, string, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -744,7 +748,7 @@ func readTreehashParallel(ctx context.Context, st storage.Storage, first, second
 	results := make(chan result, len(descs))
 	for i, desc := range descs {
 		go func(idx int, d *pb.BuildDescription) {
-			hash, err := readTreehash(ctx, st, d)
+			hash, err := readTreehash(ctx, st, d, e, op)
 			results <- result{idx: idx, hash: hash, err: err}
 		}(i, desc)
 	}
@@ -771,13 +775,14 @@ func readTreehashParallel(ctx context.Context, st storage.Storage, first, second
 // Returns ("", nil) on a cache miss (not-found is the normal "not yet computed" state).
 // Returns ("", err) on any other storage or read failure so callers can decide whether to
 // surface the error or fall back. Returns (treehash, nil) on a successful read.
-func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription) (string, error) {
+func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription, e *metrics.Emitter, op string) (string, error) {
 	entityBuild, err := mapper.ProtoToBuildDescription(buildDescription)
 	if err != nil {
 		return "", err
 	}
 	key := cachekey.GetTreehashCachePath(entityBuild)
 	resp, err := st.Get(ctx, storage.DownloadRequest{Key: key})
+	recordCacheLookup(e, op, _metricTreehashCacheLookup, err)
 	if err != nil {
 		if storage.IsNotFound(err) {
 			return "", nil
