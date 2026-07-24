@@ -35,23 +35,28 @@ func TestClassifyGitError(t *testing.T) {
 		wantCode tangoerrors.ErrorCode
 	}{
 		{
-			name:     "git timeout is infra",
-			err:      fmt.Errorf("%w: %w", git.ErrTimeout, context.DeadlineExceeded),
+			name:     "generic error is unclassified but defaults to infra",
+			err:      fmt.Errorf("exit status 1"),
 			wantCode: tangoerrors.ErrorInfra,
 		},
 		{
-			name:     "generic error is unclassified but wrapped",
-			err:      fmt.Errorf("exit status 128"),
-			wantCode: tangoerrors.ErrorInfra,
-		},
-		{
-			name:     "context cancellation is reported as cancelled despite infra wrapping",
+			name:     "context cancellation is reported as cancelled despite unclassified wrapping",
 			err:      fmt.Errorf("checkout: %w", context.Canceled),
 			wantCode: tangoerrors.ErrorCancelled,
 		},
 		{
-			name:     "context deadline exceeded is infra",
+			name:     "bare context deadline exceeded is unclassified but defaults to infra",
 			err:      fmt.Errorf("checkout: %w", context.DeadlineExceeded),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+		{
+			name:     "git timeout is infra",
+			err:      fmt.Errorf("checkout: %w", git.ErrTimeout),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+		{
+			name:     "fatal git exit code is infra",
+			err:      fmt.Errorf("checkout: %w", git.ErrFatal),
 			wantCode: tangoerrors.ErrorInfra,
 		},
 	}

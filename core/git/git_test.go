@@ -17,6 +17,8 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"reflect"
 	"testing"
 	"time"
@@ -89,6 +91,33 @@ func TestCheckout_doesNotWrapErrTimeoutOnParentCancellation(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrTimeout)
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestWrapError_marksFatalExitCodesAsErrFatal(t *testing.T) {
+	tests := []struct {
+		name      string
+		exitCode  int
+		wantFatal bool
+	}{
+		{name: "fatal error exit code", exitCode: 128, wantFatal: true},
+		{name: "usage error exit code", exitCode: 129, wantFatal: true},
+		{name: "generic/conditional exit code", exitCode: 1, wantFatal: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runErr := exec.Command("sh", "-c", fmt.Sprintf("exit %d", tt.exitCode)).Run()
+			require.Error(t, runErr)
+
+			err := wrapError(context.Background(), []string{"checkout", "feature"}, runErr)
+			require.Error(t, err)
+			if tt.wantFatal {
+				assert.ErrorIs(t, err, ErrFatal)
+			} else {
+				assert.NotErrorIs(t, err, ErrFatal)
+			}
+		})
+	}
 }
 
 func TestClone_usesRunnerWithDirAndArgs(t *testing.T) {
