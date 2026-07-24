@@ -44,6 +44,16 @@ func TestClassifyGitError(t *testing.T) {
 			err:      fmt.Errorf("exit status 128"),
 			wantCode: tangoerrors.ErrorInfra,
 		},
+		{
+			name:     "context cancellation is reported as cancelled despite infra wrapping",
+			err:      fmt.Errorf("checkout: %w", context.Canceled),
+			wantCode: tangoerrors.ErrorCancelled,
+		},
+		{
+			name:     "context deadline exceeded is infra",
+			err:      fmt.Errorf("checkout: %w", context.DeadlineExceeded),
+			wantCode: tangoerrors.ErrorInfra,
+		},
 	}
 
 	for _, tt := range tests {

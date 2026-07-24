@@ -19,7 +19,6 @@ import (
 	"fmt"
 
 	tangoerrors "github.com/uber/tango/core/errors"
-	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 )
 
@@ -31,11 +30,9 @@ func classifyLeaseError(err error) error {
 	return tangoerrors.NewInfra(wrappedErr)
 }
 
-// classifyGitError classifies err as an infra error when it was caused by a
-// git command timing out.
+// classifyGitError classifies a git-command failure as an infra error: git
+// failures (including timeouts) are always infrastructure issues, not
+// caused by user input.
 func classifyGitError(err error) error {
-	if errors.Is(err, git.ErrTimeout) {
-		return tangoerrors.NewInfra(err)
-	}
-	return err
+	return tangoerrors.NewInfra(err)
 }
