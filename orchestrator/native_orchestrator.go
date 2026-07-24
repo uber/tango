@@ -138,7 +138,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	err = ws.Checkout(ctx, build.Remote, build.BaseSha)
 	recordStep(e, "checkout_duration", checkoutStart)
 	if err != nil {
-		return nil, classifyGitError(err)
+		return nil, classifyGitError(fmt.Errorf("checkout %s@%s: %w", build.Remote, build.BaseSha, err))
 	}
 	logger.Infow("GetTargetGraph: Checked out base revision")
 
