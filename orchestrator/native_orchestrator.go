@@ -33,7 +33,6 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
-	"github.com/uber/tango/internal/streaming"
 	"github.com/uber/tango/internal/url"
 	"github.com/uber/tango/mapper"
 	"github.com/uber/tango/observability/metrics"
@@ -213,31 +212,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
-	targets, meta, err := mapper.ResultToTargetGraph(ctx, result)
+	chunks, err := mapper.ResultToGraphChunks(ctx, result, b.config.Service.MaxMessageBytes)
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph: %w", err)
-	}
-	targetGroups, err := streaming.SplitBySize(targets, b.config.Service.MaxMessageBytes)
-	if err != nil {
-		return nil, fmt.Errorf("split target graph: %w", err)
-	}
-	chunks := make([]entity.GetTargetGraphResponse, 0, len(targetGroups))
-	for _, g := range targetGroups {
-		chunks = append(chunks, entity.GetTargetGraphResponse{Targets: g})
-	}
-	metaGroups, err := streaming.SplitMetadata(
-		meta.TargetIDMapping,
-		meta.RuleTypeMapping,
-		meta.TagMapping,
-		meta.AttributeNameMapping,
-		meta.AttributeStringValueMapping,
-		b.config.Service.MaxMessageBytes,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("split target graph metadata: %w", err)
-	}
-	for _, m := range metaGroups {
-		chunks = append(chunks, entity.GetTargetGraphResponse{Metadata: m})
 	}
 	cacheWriteStart := time.Now()
 	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, chunks)

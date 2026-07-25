@@ -8,6 +8,7 @@ import (
 	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper/idmapper"
+	"github.com/uber/tango/internal/streaming"
 )
 
 const cancelCheckInterval = 4096
@@ -94,4 +95,47 @@ func ResultToTargetGraph(ctx context.Context, result targethasher.Result) ([]ent
 	}
 
 	return targets, meta, nil
+}
+
+// ResultToGraphChunks converts a targethasher.Result into the ordered
+// sequence of GetTargetGraphResponse chunks ready to stream or persist. It
+// maps the result to entity types (ResultToTargetGraph), then splits both the
+// targets and the accompanying metadata so each chunk's serialized size stays
+// at or under maxBytes. Target chunks come first, followed by metadata chunks;
+// consumers merge metadata across chunks before resolving IDs.
+//
+// Callers that need to interleave or size chunks differently can use
+// ResultToTargetGraph directly; this is the convenience path for the common
+// "map, split, hand to WriteGraphStream" flow.
+func ResultToGraphChunks(ctx context.Context, result targethasher.Result, maxBytes int) ([]entity.GetTargetGraphResponse, error) {
+	targets, meta, err := ResultToTargetGraph(ctx, result)
+	if err != nil {
+		return nil, err
+	}
+
+	targetGroups, err := streaming.SplitBySize(targets, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	chunks := make([]entity.GetTargetGraphResponse, 0, len(targetGroups))
+	for _, g := range targetGroups {
+		chunks = append(chunks, entity.GetTargetGraphResponse{Targets: g})
+	}
+
+	metaGroups, err := streaming.SplitMetadata(
+		meta.TargetIDMapping,
+		meta.RuleTypeMapping,
+		meta.TagMapping,
+		meta.AttributeNameMapping,
+		meta.AttributeStringValueMapping,
+		maxBytes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range metaGroups {
+		chunks = append(chunks, entity.GetTargetGraphResponse{Metadata: m})
+	}
+
+	return chunks, nil
 }
