@@ -19,5 +19,4 @@ const (
 	opGetTargetGraph        = "get_target_graph"
 	opGetChangedTargets     = "get_changed_targets"
 	opGetChangedTargetGraph = "get_changed_target_graph"
-	opCompareTargetGraphs   = "compare_target_graphs"
 )
