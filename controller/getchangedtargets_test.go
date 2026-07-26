@@ -30,6 +30,7 @@ import (
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	"github.com/uber/tango/entity"
+	"github.com/uber/tango/observability/metrics"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
@@ -236,7 +237,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
 
-		val, err := readTreehash(t.Context(), st, bd)
+		val, err := readTreehash(t.Context(), st, bd, metrics.Nop(), opGetChangedTargets)
 		require.NoError(t, err)
 		assert.Empty(t, val)
 	})
@@ -248,7 +249,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{}, injected)
 
-		val, err := readTreehash(t.Context(), st, bd)
+		val, err := readTreehash(t.Context(), st, bd, metrics.Nop(), opGetChangedTargets)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
 		assert.Empty(t, val)
@@ -260,7 +261,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("deadbeef"))}, nil)
 
-		val, err := readTreehash(t.Context(), st, bd)
+		val, err := readTreehash(t.Context(), st, bd, metrics.Nop(), opGetChangedTargets)
 		require.NoError(t, err)
 		assert.Equal(t, "deadbeef", val)
 	})

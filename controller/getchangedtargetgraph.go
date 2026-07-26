@@ -23,7 +23,7 @@ import (
 // induced by the changed targets between two revisions. It is currently a
 // stub: it records the start/finish lifecycle and returns no data.
 func (c *controller) GetChangedTargetGraph(request *pb.GetChangedTargetGraphRequest, stream pb.TangoServiceGetChangedTargetGraphYARPCServer) (retErr error) {
-	op := metrics.Begin(c.emitter, opGetChangedTargetGraph, slowDurationBuckets)
+	op := metrics.Begin(c.emitter, opGetChangedTargetGraph, metrics.SlowDurationBuckets)
 	defer func() { op.Complete(retErr) }()
 	return nil
 }

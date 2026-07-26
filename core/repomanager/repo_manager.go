@@ -151,14 +151,14 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (_ workspace.Workspace, retErr error) {
 	repo := url.ToShortRemote(desc.Remote)
 	e := r.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
-	op := metrics.Begin(e, _opLease, _stepDurationBuckets)
+	op := metrics.Begin(e, _opLease, metrics.SlowDurationBuckets)
 	defer func() { op.Complete(retErr) }()
 
 	pool := r.poolFor(repo)
 
 	originStart := time.Now()
 	err := pool.ensureOrigin(ctx, r.git, desc.Remote)
-	recordStep(e, _stepEnsureOrigin, originStart)
+	recordStep(e, _stepEnsureOrigin, originStart, metrics.SlowDurationBuckets)
 	if err != nil {
 		return nil, fmt.Errorf("ensure origin: %w", err)
 	}
@@ -172,7 +172,7 @@ func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (
 	case <-ctx.Done():
 		waitErr = ctx.Err()
 	}
-	recordStep(e, _stepWaitSlot, waitStart)
+	recordStep(e, _stepWaitSlot, waitStart, metrics.FastDurationBuckets)
 	if waitErr != nil {
 		if errors.Is(waitErr, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("%w: %w", ErrPoolTimeout, waitErr)
@@ -184,7 +184,7 @@ func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (
 	if !slot.created {
 		createStart := time.Now()
 		err := r.createWorker(ctx, pool.originDir, slot.dir)
-		recordStep(e, _stepCreateWorker, createStart)
+		recordStep(e, _stepCreateWorker, createStart, metrics.FastDurationBuckets)
 		if err != nil {
 			pool.avail <- slot // return slot so others can retry
 			return nil, fmt.Errorf("create worker: %w", err)

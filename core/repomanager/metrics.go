@@ -30,9 +30,6 @@ const (
 	_stepCreateWorker = "create_worker_duration"
 )
 
-// _stepDurationBuckets spans a slot wait or clone: exponential 1ms..~1.3h.
-var _stepDurationBuckets = tally.MustMakeExponentialDurationBuckets(time.Millisecond, 3, 15)
-
-func recordStep(e *metrics.Emitter, name string, start time.Time) {
-	e.DurationHistogram(_opLease, name, _stepDurationBuckets).RecordDuration(time.Since(start))
+func recordStep(e *metrics.Emitter, name string, start time.Time, buckets tally.DurationBuckets) {
+	e.DurationHistogram(_opLease, name, buckets).RecordDuration(time.Since(start))
 }
