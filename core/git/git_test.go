@@ -18,11 +18,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,19 +44,84 @@ type mockRunner struct {
 	calls []runnerCall
 	out   []byte
 	err   error
+	// returnCtxErr, if true, makes run/output/runWithStdin return ctx.Err()
+	// instead of err — simulating what an exec-based runner returns when
+	// its command is killed by a canceled/expired context.
+	returnCtxErr bool
 }
 
-func (m *mockRunner) run(_ context.Context, dir string, name string, args ...string) error {
+func (m *mockRunner) run(ctx context.Context, dir string, name string, args ...string) error {
 	m.calls = append(m.calls, runnerCall{kind: "run", dir: dir, name: name, args: append([]string(nil), args...)})
+	if m.returnCtxErr {
+		return ctx.Err()
+	}
 	return m.err
 }
-func (m *mockRunner) output(_ context.Context, dir string, name string, args ...string) ([]byte, error) {
+func (m *mockRunner) output(ctx context.Context, dir string, name string, args ...string) ([]byte, error) {
 	m.calls = append(m.calls, runnerCall{kind: "output", dir: dir, name: name, args: append([]string(nil), args...)})
+	if m.returnCtxErr {
+		return nil, ctx.Err()
+	}
 	return append([]byte(nil), m.out...), m.err
 }
-func (m *mockRunner) runWithStdin(_ context.Context, dir string, name string, stdin []byte, args ...string) error {
+func (m *mockRunner) runWithStdin(ctx context.Context, dir string, name string, stdin []byte, args ...string) error {
 	m.calls = append(m.calls, runnerCall{kind: "runWithStdin", dir: dir, name: name, args: append([]string(nil), args...), stdin: append([]byte(nil), stdin...)})
+	if m.returnCtxErr {
+		return ctx.Err()
+	}
 	return m.err
+}
+
+func TestCheckout_wrapsErrTimeoutWhenTimeoutElapses(t *testing.T) {
+	// A parent deadline already in the past causes the derived timeout
+	// context to be immediately Done with context.DeadlineExceeded, before
+	// the runner is even invoked.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+	defer cancel()
+	m := &mockRunner{returnCtxErr: true}
+	g := &impl{directory: "/repo", runner: m}
+	err := g.Checkout(ctx, "feature")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTimeout)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestCheckout_doesNotWrapErrTimeoutOnParentCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m := &mockRunner{returnCtxErr: true}
+	g := &impl{directory: "/repo", runner: m}
+	err := g.Checkout(ctx, "feature")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrTimeout)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestWrapError_marksFatalExitCodesAsErrFatal(t *testing.T) {
+	tests := []struct {
+		name      string
+		exitCode  int
+		wantFatal bool
+	}{
+		{name: "fatal error exit code", exitCode: 128, wantFatal: true},
+		{name: "usage error exit code", exitCode: 129, wantFatal: true},
+		{name: "generic/conditional exit code", exitCode: 1, wantFatal: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runErr := exec.Command("sh", "-c", fmt.Sprintf("exit %d", tt.exitCode)).Run()
+			require.Error(t, runErr)
+
+			err := wrapError(context.Background(), []string{"checkout", "feature"}, runErr)
+			require.Error(t, err)
+			if tt.wantFatal {
+				assert.ErrorIs(t, err, ErrFatal)
+			} else {
+				assert.NotErrorIs(t, err, ErrFatal)
+			}
+		})
+	}
 }
 
 func TestClone_usesRunnerWithDirAndArgs(t *testing.T) {
