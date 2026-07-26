@@ -15,7 +15,6 @@
 package git
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
@@ -35,6 +34,17 @@ const (
 	// TODO: Make this configurable
 	_gitTimeout = 10 * time.Minute
 )
+
+// ErrFatal is returned (wrapped) when a git command exits with a fatal (128)
+// or usage (129) exit code -- e.g. an unreachable remote, failed
+// authentication, an invalid repository, or a malformed invocation -- as
+// opposed to a non-fatal, conditional exit code such as 1. Callers can check
+// for it with errors.Is.
+var ErrFatal = errors.New("git command failed fatally")
+
+// ErrTimeout is returned (wrapped) when a git command does not complete
+// within the configured timeout. Callers can check for it with errors.Is.
+var ErrTimeout = errors.New("git command timed out")
 
 // DiffEntry represents a single file change from git diff --name-status.
 type DiffEntry struct {
@@ -79,12 +89,35 @@ func New(directory string, logger *zap.SugaredLogger) Interface {
 	}
 }
 
+// wrapError wraps a non-nil err with the failing git command's arguments,
+// additionally wrapping ErrFatal if the command exited with a fatal (128) or
+// usage (129) exit code, as opposed to a non-fatal, conditional exit code
+// such as 1, and ErrTimeout if ctx's own timeout (rather than a parent
+// cancellation) has elapsed.
+func wrapError(ctx context.Context, args []string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && isFatalExitCode(exitErr.ExitCode()) {
+		err = fmt.Errorf("%w: %w", ErrFatal, err)
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		err = fmt.Errorf("%w: %w", ErrTimeout, err)
+	}
+	return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+}
+
+func isFatalExitCode(code int) bool {
+	return code == 128 || code == 129
+}
+
 // Checkout checks out a specific reference in the repository.
 func (c *impl) Checkout(ctx context.Context, ref string, options ...string) error {
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := append([]string{"checkout", ref}, options...)
-	return c.runner.run(ctx, c.directory, "git", args...)
+	return wrapError(ctx, args, c.runner.run(ctx, c.directory, "git", args...))
 }
 
 // Fetch runs git fetch for a remote ref.
@@ -92,7 +125,7 @@ func (c *impl) Fetch(ctx context.Context, remote, ref string, options ...string)
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := append([]string{"fetch", remote, ref}, options...)
-	return c.runner.run(ctx, c.directory, "git", args...)
+	return wrapError(ctx, args, c.runner.run(ctx, c.directory, "git", args...))
 }
 
 // Clone clones the target repository to the destination.
@@ -101,7 +134,7 @@ func (c *impl) Clone(ctx context.Context, target, destination string, options ..
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := append(append([]string{"clone"}, options...), target, destination)
-	return c.runner.run(ctx, c.directory, "git", args...)
+	return wrapError(ctx, args, c.runner.run(ctx, c.directory, "git", args...))
 }
 
 // Diff returns the diff between two references.
@@ -109,14 +142,16 @@ func (c *impl) Diff(ctx context.Context, baseRef, targetRef string, options ...s
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := append([]string{"diff", baseRef, targetRef}, options...)
-	return c.runner.output(ctx, c.directory, "git", args...)
+	out, err := c.runner.output(ctx, c.directory, "git", args...)
+	return out, wrapError(ctx, args, err)
 }
 
 // ApplyPatch applies a patch to the repository.
 func (c *impl) ApplyPatch(ctx context.Context, patch []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
-	return c.runner.runWithStdin(ctx, c.directory, "git", patch, "apply", "--3way", "--whitespace", "nowarn", "--index", "-")
+	args := []string{"apply", "--3way", "--whitespace", "nowarn", "--index", "-"}
+	return wrapError(ctx, args, c.runner.runWithStdin(ctx, c.directory, "git", patch, args...))
 }
 
 // RevParse returns the revision hash of a reference.
@@ -148,7 +183,7 @@ func (c *impl) Commit(ctx context.Context, message string, options ...string) er
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := append([]string{"commit", "-am", message}, options...)
-	return c.runner.run(ctx, c.directory, "git", args...)
+	return wrapError(ctx, args, c.runner.run(ctx, c.directory, "git", args...))
 }
 
 // SubmoduleUpdate updates the submodules in the repository.
@@ -156,30 +191,35 @@ func (c *impl) SubmoduleUpdate(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
 	defer cancel()
 	args := []string{"submodule", "update", "--init", "--recursive"}
-	return c.runner.run(ctx, c.directory, "git", args...)
+	return wrapError(ctx, args, c.runner.run(ctx, c.directory, "git", args...))
 }
 
 // DiffWithStatus returns the list of changed files with their status between two refs,
 // parsed from `git diff --name-status`. For renames, Path is the destination path.
 func (c *impl) DiffWithStatus(ctx context.Context, baseRef, targetRef string) ([]DiffEntry, error) {
-	out, err := c.Diff(ctx, baseRef, targetRef, "--name-status")
+	out, err := c.Diff(ctx, baseRef, targetRef, "--name-status", "-z")
 	if err != nil {
 		return nil, err
 	}
 	var entries []DiffEntry
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
+	fields := bytes.Split(out, []byte{0})
+	for i := 0; i < len(fields); {
+		if len(fields[i]) == 0 {
+			i++
 			continue
 		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
+		status := string(fields[i])
+		i++
+		pathCount := 1
+		if status[0] == 'R' || status[0] == 'C' {
+			pathCount = 2
 		}
-		// Status may have a score suffix (e.g. "R100") — use only the first character.
-		status := string(fields[0][0])
-		// For renames/copies there are two paths; use the destination (last field).
-		path := fields[len(fields)-1]
-		entries = append(entries, DiffEntry{Status: status, Path: path})
+		if i+pathCount > len(fields) {
+			break
+		}
+		path := string(fields[i+pathCount-1])
+		i += pathCount
+		entries = append(entries, DiffEntry{Status: status[:1], Path: path})
 	}
 	return entries, nil
 }
@@ -195,33 +235,34 @@ func (c *impl) GetCommitTimeSecond(ctx context.Context, ref string) (int64, erro
 
 // FileHashes gets a mapping of files to their hashes based on `git ls-tree --full-tree -r <ref>`.
 func (c *impl) FileHashes(ctx context.Context, ref string) (map[string][]byte, error) {
-	out, err := c.runner.output(ctx, c.directory, "git", "ls-tree", "--full-tree", "-r", ref)
+	out, err := c.runner.output(ctx, c.directory, "git", "ls-tree", "--full-tree", "-r", "-z", ref)
 	if err != nil {
 		return nil, err
 	}
 
 	fileHashes := make(map[string][]byte)
-	scanner := bufio.NewScanner(bytes.NewReader(out))
-	// git ls-tree --full-tree output format:
-	// 100644 blob d236089b460070849370c1c813874ae9bea598a8 file1
-	// 100644 blob 9bccabefa0c7a4d68b219e2b62d6d3cc5271cf44 file2
-	// 100644 blob a14cddefd9112ee21e58f6c78ad224dc44a64297 file3
-	for scanner.Scan() {
-		line := scanner.Text()
-		x := strings.Split(line, "\t")
-		parts := strings.Fields(x[0]) // strings.Split is guaranteed to return an array of length 1
-		if len(parts) < 3 || len(x) < 2 {
-			c.logger.Warnw("skipping ls-tree line due to unexpected format", "line", line)
+	for _, record := range bytes.Split(out, []byte{0}) {
+		if len(record) == 0 {
 			continue
 		}
-		hash, err := hex.DecodeString(parts[2])
+		fields := bytes.SplitN(record, []byte{'\t'}, 2)
+		if len(fields) != 2 {
+			c.logger.Warnw("skipping ls-tree record due to unexpected format", "record", string(record))
+			continue
+		}
+		metadata := strings.Fields(string(fields[0]))
+		if len(metadata) < 3 {
+			c.logger.Warnw("skipping ls-tree record due to unexpected metadata", "record", string(record))
+			continue
+		}
+		hash, err := hex.DecodeString(metadata[2])
 		if err != nil {
-			c.logger.Warnw("skipping ls-tree line due to parsing error", "line", line, zap.Error(err))
+			c.logger.Warnw("skipping ls-tree record due to parsing error", "record", string(record), zap.Error(err))
 			continue
 		}
-		fileHashes[x[1]] = hash
+		fileHashes[string(fields[1])] = hash
 	}
-	return fileHashes, scanner.Err()
+	return fileHashes, nil
 }
 
 // commandRunner abstracts command execution for testability.

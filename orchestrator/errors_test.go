@@ -22,8 +22,56 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tangoerrors "github.com/uber/tango/core/errors"
+	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 )
+
+func TestClassifyGitError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      error
+		wantCode tangoerrors.ErrorCode
+	}{
+		{
+			name:     "generic error is unclassified but defaults to infra",
+			err:      fmt.Errorf("exit status 1"),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+		{
+			name:     "context cancellation is reported as cancelled despite unclassified wrapping",
+			err:      fmt.Errorf("checkout: %w", context.Canceled),
+			wantCode: tangoerrors.ErrorCancelled,
+		},
+		{
+			name:     "bare context deadline exceeded is unclassified but defaults to infra",
+			err:      fmt.Errorf("checkout: %w", context.DeadlineExceeded),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+		{
+			name:     "git timeout is infra",
+			err:      fmt.Errorf("checkout: %w", git.ErrTimeout),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+		{
+			name:     "fatal git exit code is infra",
+			err:      fmt.Errorf("checkout: %w", git.ErrFatal),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := classifyGitError(tt.err)
+			require.Error(t, got)
+			assert.Equal(t, tt.wantCode, tangoerrors.GetErrorCode(got))
+			assert.ErrorIs(t, got, tt.err)
+		})
+	}
+}
 
 func TestClassifyLeaseError(t *testing.T) {
 	t.Parallel()

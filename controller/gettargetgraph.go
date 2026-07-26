@@ -36,7 +36,7 @@ import (
 func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
 	repo := url.ToShortRemote(request.GetBuildDescription().GetRemote())
 	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
-	op := metrics.Begin(e, opGetTargetGraph, slowDurationBuckets)
+	op := metrics.Begin(e, opGetTargetGraph, metrics.SlowDurationBuckets)
 	logger := c.logger.WithLazy(
 		zap.Any("build_description", request.GetBuildDescription()),
 	)
@@ -73,7 +73,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 				zap.Duration("send_duration", sendDuration),
 				zap.Duration("total_duration", time.Since(start)),
 			)
-			e.DurationHistogram(opGetTargetGraph, "send_duration", fastDurationBuckets).RecordDuration(sendDuration)
+			e.DurationHistogram(opGetTargetGraph, "send_duration", metrics.FastDurationBuckets).RecordDuration(sendDuration)
 			return nil
 		}
 		if err != nil {
@@ -103,6 +103,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 		// Look up the the git treehash based on cache path
 		treehashCachePath := cachekey.GetTreehashCachePath(req.Build)
 		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
+		recordCacheLookup(e, opGetTargetGraph, _metricTreehashCacheLookup, err)
 		if err != nil {
 			if storage.IsNotFound(err) {
 				// Cache miss - blob doesn't exist, need to compute and store target graph
@@ -122,10 +123,11 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
+			if ctx.Err() != nil {
+				err = ctx.Err()
+			}
+			recordCacheLookup(e, opGetTargetGraph, _metricGraphCacheLookup, err)
 			if err != nil {
-				if ctx.Err() != nil {
-					err = ctx.Err()
-				}
 				if !storage.IsNotFound(err) {
 					return nil, fmt.Errorf("graph reader: %w", err)
 				}
@@ -135,8 +137,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 					zap.Duration("storage_duration", time.Since(storageStart)),
 					zap.Duration("total_duration", time.Since(start)),
 				)
-				e.Counter(opGetTargetGraph, "cache_hit").Inc(1)
-				e.DurationHistogram(opGetTargetGraph, "download_graph", slowDurationBuckets).RecordDuration(time.Since(storageStart))
+				e.DurationHistogram(opGetTargetGraph, "download_graph", metrics.SlowDurationBuckets).RecordDuration(time.Since(storageStart))
 				return graphReader, nil
 			}
 		}
