@@ -21,7 +21,6 @@ go_library(
         "//core/workspace",
         "//entity",
         "//graphrunner",
-        "//internal/streaming",
         "//internal/url",
         "//mapper",
         "//observability/metrics",
