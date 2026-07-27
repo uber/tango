@@ -152,7 +152,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 		return false, nil
 	}
 	if cachedReader == nil {
-		recordCacheLookup(e, opGetChangedTargets, _metricComparedTargetsCacheLookup, cacheErr)
+		metrics.RecordCacheLookup(e, opGetChangedTargets, metrics.ComparedTargetsCacheLookup, cacheErr)
 		return false, nil
 	}
 
@@ -190,7 +190,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 	logger.Info("GetChangedTargets: Cache hit, streaming from storage",
 		zap.Duration("cache_read_duration", cacheReadDuration),
 	)
-	recordCacheLookup(e, opGetChangedTargets, _metricComparedTargetsCacheLookup, nil)
+	metrics.RecordCacheLookup(e, opGetChangedTargets, metrics.ComparedTargetsCacheLookup, nil)
 	e.DurationHistogram(opGetChangedTargets, "cache_read_duration", metrics.FastDurationBuckets).RecordDuration(cacheReadDuration)
 	if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, request.GetOutputConfig()); sendErr != nil {
 		return false, fmt.Errorf("send cached response: %w", sendErr)
@@ -784,7 +784,7 @@ func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.
 	}
 	key := cachekey.GetTreehashCachePath(entityBuild)
 	resp, err := st.Get(ctx, storage.DownloadRequest{Key: key})
-	recordCacheLookup(e, op, _metricTreehashCacheLookup, err)
+	metrics.RecordCacheLookup(e, op, metrics.TreehashCacheLookup, err)
 	if err != nil {
 		if storage.IsNotFound(err) {
 			return "", nil
