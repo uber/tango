@@ -36,10 +36,10 @@ const (
 	_queryTimeout = 15 * time.Minute
 )
 
-// ErrDownloadBazeliskNetwork indicates the bazelisk binary could not be
-// downloaded due to a transient network failure, as opposed to a permanent
-// failure (e.g. a non-200 response). Retrying is expected to succeed.
-var ErrDownloadBazeliskNetwork = errors.New("download bazelisk network failure")
+// ErrNetwork indicates an operation failed due to a transient network
+// failure, as opposed to a permanent failure (e.g. a non-200 response).
+// Retrying is expected to succeed.
+var ErrNetwork = errors.New("network failure")
 
 type QueryRequest struct {
 	Query          string
@@ -145,7 +145,7 @@ func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) {
-			return "", fmt.Errorf("download bazelisk: %w: %w", ErrDownloadBazeliskNetwork, err)
+			return "", fmt.Errorf("download bazelisk: %w: %w", ErrNetwork, err)
 		}
 		return "", fmt.Errorf("download bazelisk: %w", err)
 	}

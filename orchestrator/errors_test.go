@@ -116,7 +116,7 @@ func TestClassifyBazelClientError(t *testing.T) {
 	}{
 		{
 			name:     "bazelisk download network failure is infra retryable",
-			err:      fmt.Errorf("%w: dial tcp: timeout", bazel.ErrDownloadBazeliskNetwork),
+			err:      fmt.Errorf("%w: dial tcp: timeout", bazel.ErrNetwork),
 			wantCode: tangoerrors.ErrorInfraRetryable,
 		},
 		{

@@ -48,7 +48,7 @@ func classifyGitError(err error) error {
 // else is infra.
 func classifyBazelClientError(err error) error {
 	wrappedErr := fmt.Errorf("create bazel client: %w", err)
-	if errors.Is(err, bazel.ErrDownloadBazeliskNetwork) {
+	if errors.Is(err, bazel.ErrNetwork) {
 		return tangoerrors.NewInfraRetryable(wrappedErr)
 	}
 	return tangoerrors.NewInfra(wrappedErr)
