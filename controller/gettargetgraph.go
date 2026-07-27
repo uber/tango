@@ -103,6 +103,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 		// Look up the the git treehash based on cache path
 		treehashCachePath := cachekey.GetTreehashCachePath(req.Build)
 		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
+		recordCacheLookup(e, opGetTargetGraph, _metricTreehashCacheLookup, err)
 		if err != nil {
 			if storage.IsNotFound(err) {
 				// Cache miss - blob doesn't exist, need to compute and store target graph
@@ -122,10 +123,11 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
+			if ctx.Err() != nil {
+				err = ctx.Err()
+			}
+			recordCacheLookup(e, opGetTargetGraph, _metricGraphCacheLookup, err)
 			if err != nil {
-				if ctx.Err() != nil {
-					err = ctx.Err()
-				}
 				if !storage.IsNotFound(err) {
 					return nil, fmt.Errorf("graph reader: %w", err)
 				}
@@ -135,7 +137,6 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 					zap.Duration("storage_duration", time.Since(storageStart)),
 					zap.Duration("total_duration", time.Since(start)),
 				)
-				e.Counter(opGetTargetGraph, "cache_hit").Inc(1)
 				e.DurationHistogram(opGetTargetGraph, "download_graph", metrics.SlowDurationBuckets).RecordDuration(time.Since(storageStart))
 				return graphReader, nil
 			}
