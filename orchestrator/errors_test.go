@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/core/bazel"
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
@@ -98,6 +99,38 @@ func TestClassifyLeaseError(t *testing.T) {
 			t.Parallel()
 
 			got := classifyLeaseError(tt.err)
+			require.Error(t, got)
+			assert.Equal(t, tt.wantCode, tangoerrors.GetErrorCode(got))
+			assert.ErrorIs(t, got, tt.err)
+		})
+	}
+}
+
+func TestClassifyBazelClientError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      error
+		wantCode tangoerrors.ErrorCode
+	}{
+		{
+			name:     "bazelisk download network failure is infra retryable",
+			err:      fmt.Errorf("%w: dial tcp: timeout", bazel.ErrDownloadBazeliskNetwork),
+			wantCode: tangoerrors.ErrorInfraRetryable,
+		},
+		{
+			name:     "generic error is infra",
+			err:      fmt.Errorf("detect bazel executable: not found"),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := classifyBazelClientError(tt.err)
 			require.Error(t, got)
 			assert.Equal(t, tt.wantCode, tangoerrors.GetErrorCode(got))
 			assert.ErrorIs(t, got, tt.err)

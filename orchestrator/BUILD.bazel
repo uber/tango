@@ -39,6 +39,7 @@ go_test(
     embed = [":orchestrator"],
     deps = [
         "//config",
+        "//core/bazel",
         "//core/errors",
         "//core/git",
         "//core/git/gitmock",

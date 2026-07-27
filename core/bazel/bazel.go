@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,6 +35,11 @@ const (
 	// default query timeout if not provided in config
 	_queryTimeout = 15 * time.Minute
 )
+
+// ErrDownloadBazeliskNetwork indicates the bazelisk binary could not be
+// downloaded due to a transient network failure, as opposed to a permanent
+// failure (e.g. a non-200 response). Retrying is expected to succeed.
+var ErrDownloadBazeliskNetwork = errors.New("download bazelisk network failure")
 
 type QueryRequest struct {
 	Query          string
@@ -137,6 +143,10 @@ func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) {
+			return "", fmt.Errorf("download bazelisk: %w: %w", ErrDownloadBazeliskNetwork, err)
+		}
 		return "", fmt.Errorf("download bazelisk: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()

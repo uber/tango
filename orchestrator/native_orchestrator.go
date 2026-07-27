@@ -195,7 +195,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 			StreamLogs:    repoCfg.StreamBazelLogs,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("create bazel client: %w", err)
+			return nil, classifyBazelClientError(err)
 		}
 		// Use default native graph runner
 		runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{

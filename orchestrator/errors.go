@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/uber/tango/core/bazel"
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
@@ -40,4 +41,15 @@ func classifyGitError(err error) error {
 		return tangoerrors.NewInfra(err)
 	}
 	return err
+}
+
+// classifyBazelClientError classifies a bazel client creation failure. A
+// transient network failure downloading bazelisk is retryable; everything
+// else is infra.
+func classifyBazelClientError(err error) error {
+	wrappedErr := fmt.Errorf("create bazel client: %w", err)
+	if errors.Is(err, bazel.ErrDownloadBazeliskNetwork) {
+		return tangoerrors.NewInfraRetryable(wrappedErr)
+	}
+	return tangoerrors.NewInfra(wrappedErr)
 }
