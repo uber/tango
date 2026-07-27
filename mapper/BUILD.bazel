@@ -9,6 +9,7 @@ go_library(
         "//core/targethasher",
         "//entity",
         "//internal/mapper/idmapper",
+        "//internal/streaming",
         "@com_github_bazelbuild_buildtools//build_proto",
     ],
 )

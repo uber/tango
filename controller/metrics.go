@@ -24,7 +24,6 @@ const (
 	opGetTargetGraph        = "get_target_graph"
 	opGetChangedTargets     = "get_changed_targets"
 	opGetChangedTargetGraph = "get_changed_target_graph"
-	opCompareTargetGraphs   = "compare_target_graphs"
 )
 
 // Cache-lookup metric names. Each is emitted under its parent RPC op with a

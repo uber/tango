@@ -375,9 +375,11 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 // are re-mapped into a canonical per-call ID namespace so the response metadata
 // only carries the names actually referenced. See internal/targetdiff for the
 // classification and distance rules.
-func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse, maxDist int32) (_ []entity.GetChangedTargetsResponse, retErr error) {
-	op := metrics.Begin(e, opCompareTargetGraphs, metrics.SlowDurationBuckets)
-	defer func() { op.Complete(retErr) }()
+func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse, maxDist int32) ([]entity.GetChangedTargetsResponse, error) {
+	compareStart := time.Now()
+	defer func() {
+		e.DurationHistogram(opGetChangedTargets, "compare_duration", metrics.SlowDurationBuckets).RecordDuration(time.Since(compareStart))
+	}()
 	logger.Info("compareTargetGraphs: Computing differences between target graphs")
 
 	// 1) Decode each stream into a semantic graph keyed by canonical target name.
@@ -406,7 +408,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	}
 	secondTargetsByID = nil
 	secondMetadata = nil
-	e.DurationHistogram(opCompareTargetGraphs, "decode_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(decodeStart))
+	e.DurationHistogram(opGetChangedTargets, "decode_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(decodeStart))
 
 	// 2) Compare the two semantic graphs.
 	diffStart := time.Now()
@@ -421,7 +423,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	// Release the input graphs; only result is needed from here on.
 	before = nil
 	after = nil
-	e.DurationHistogram(opCompareTargetGraphs, "diff_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(diffStart))
+	e.DurationHistogram(opGetChangedTargets, "diff_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(diffStart))
 	e.ValueHistogram(opGetChangedTargets, "target_count", metrics.LargeCountBuckets).RecordValue(float64(len(result.ChangedTargets)))
 
 	if ctx.Err() != nil {
