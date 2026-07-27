@@ -22,6 +22,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -176,7 +177,7 @@ func HashRuleCommon(r *buildpb.Rule, h hash.Hash) {
 	// don't hash location, as it machine local paths
 	// Attribute                   []*Attribute
 	// Before hashing, sort to guarantee consistency
-	attributes := r.GetAttribute()
+	attributes := slices.Clone(r.GetAttribute())
 	sort.Slice(attributes, func(i, j int) bool {
 		return attributes[i].GetName() < attributes[j].GetName()
 	})
@@ -185,21 +186,21 @@ func HashRuleCommon(r *buildpb.Rule, h hash.Hash) {
 	}
 	// RuleInput                   []string
 	// Before hashing, sort to guarantee consistency
-	ruleInputs := r.GetRuleInput()
+	ruleInputs := slices.Clone(r.GetRuleInput())
 	sort.Strings(ruleInputs)
 	for _, ri := range ruleInputs {
 		io.WriteString(h, ri)
 	}
 	// RuleOutput                  []string
 	// Before hashing, sort to guarantee consistency
-	ruleOutputs := r.GetRuleOutput()
+	ruleOutputs := slices.Clone(r.GetRuleOutput())
 	sort.Strings(ruleOutputs)
 	for _, ro := range ruleOutputs {
 		io.WriteString(h, ro)
 	}
 	// DefaultSetting              []string
 	// Before hashing, sort to guarantee consistency
-	defaultSettings := r.GetDefaultSetting()
+	defaultSettings := slices.Clone(r.GetDefaultSetting())
 	sort.Strings(defaultSettings)
 	for _, d := range defaultSettings {
 		io.WriteString(h, d)
@@ -247,7 +248,7 @@ func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
 	}
 	// StringListValue                []string
 	// Before hashing, sort to guarantee consistency
-	stringListValue := a.GetStringListValue()
+	stringListValue := slices.Clone(a.GetStringListValue())
 	sort.Strings(stringListValue)
 	for _, s := range stringListValue {
 		io.WriteString(h, s)
@@ -255,7 +256,7 @@ func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
 	// License                        *License
 	// StringDictValue                []*StringDictEntry
 	// Before hashing, sort to guarantee consistency
-	stringDictValue := a.GetStringDictValue()
+	stringDictValue := slices.Clone(a.GetStringDictValue())
 	sort.Slice(stringDictValue, func(i, j int) bool {
 		return stringDictValue[i].GetKey() < stringDictValue[j].GetKey()
 	})
@@ -265,7 +266,7 @@ func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
 	}
 	// FilesetListValue               []*FilesetEntry
 	// Before hashing, sort to guarantee consistency
-	filesetListValue := a.GetFilesetListValue()
+	filesetListValue := slices.Clone(a.GetFilesetListValue())
 	sort.Slice(filesetListValue, func(i, j int) bool {
 		return filesetListValue[i].GetSource() < filesetListValue[j].GetSource()
 	})
@@ -280,14 +281,14 @@ func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
 		}
 		// File                 []string
 		// Before hashing, sort to guarantee consistency
-		files := f.GetFile()
+		files := slices.Clone(f.GetFile())
 		sort.Strings(files)
 		for _, file := range files {
 			io.WriteString(h, file)
 		}
 		// Exclude              []string
 		// Before hashing, sort to guarantee consistency
-		excludedFiles := f.GetExclude()
+		excludedFiles := slices.Clone(f.GetExclude())
 		sort.Strings(excludedFiles)
 		for _, file := range excludedFiles {
 			io.WriteString(h, file)
@@ -299,14 +300,14 @@ func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
 	}
 	// LabelListDictValue             []*LabelListDictEntry
 	// Before hashing, sort to guarantee consistency
-	labelListDictValue := a.GetLabelListDictValue()
+	labelListDictValue := slices.Clone(a.GetLabelListDictValue())
 	sort.Slice(labelListDictValue, func(i, j int) bool {
 		return labelListDictValue[i].GetKey() < labelListDictValue[j].GetKey()
 	})
 	for _, ll := range labelListDictValue {
 		io.WriteString(h, ll.GetKey())
 		// Before hashing, sort to guarantee consistency
-		llv := ll.GetValue()
+		llv := slices.Clone(ll.GetValue())
 		sort.Strings(llv)
 		for _, v := range llv {
 			io.WriteString(h, v)
@@ -314,14 +315,14 @@ func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
 	}
 	// StringListDictValue            []*StringListDictEntry
 	// Before hashing, sort to guarantee consistency
-	stringListDictValue := a.GetStringListDictValue()
+	stringListDictValue := slices.Clone(a.GetStringListDictValue())
 	sort.Slice(stringListDictValue, func(i, j int) bool {
 		return stringListDictValue[i].GetKey() < stringListDictValue[j].GetKey()
 	})
 	for _, sl := range stringListDictValue {
 		io.WriteString(h, sl.GetKey())
 		// Before hashing, sort to guarantee consistency
-		slv := sl.GetValue()
+		slv := slices.Clone(sl.GetValue())
 		sort.Strings(slv)
 		for _, v := range slv {
 			io.WriteString(h, v)
@@ -329,7 +330,7 @@ func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
 	}
 	// IntListValue                   []int32
 	// Before hashing, sort to guarantee consistency
-	intListValue := a.GetIntListValue()
+	intListValue := slices.Clone(a.GetIntListValue())
 	sort.Slice(intListValue, func(i, j int) bool {
 		return intListValue[i] < intListValue[j]
 	})
@@ -338,7 +339,7 @@ func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
 	}
 	// LabelDictUnaryValue            []*LabelDictUnaryEntry
 	// Before hashing, sort to guarantee consistency
-	labelDictUnaryValue := a.GetLabelDictUnaryValue()
+	labelDictUnaryValue := slices.Clone(a.GetLabelDictUnaryValue())
 	sort.Slice(labelDictUnaryValue, func(i, j int) bool {
 		return labelDictUnaryValue[i].GetKey() < labelDictUnaryValue[j].GetKey()
 	})
@@ -348,7 +349,7 @@ func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
 	}
 	// LabelKeyedStringDictValue      []*LabelKeyedStringDictEntry
 	// Before hashing, sort to guarantee consistency
-	labelKeyedStringDictValue := a.GetLabelKeyedStringDictValue()
+	labelKeyedStringDictValue := slices.Clone(a.GetLabelKeyedStringDictValue())
 	sort.Slice(labelKeyedStringDictValue, func(i, j int) bool {
 		return labelKeyedStringDictValue[i].GetKey() < labelKeyedStringDictValue[j].GetKey()
 	})

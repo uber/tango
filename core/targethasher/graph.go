@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 
@@ -157,12 +158,12 @@ var (
 	integrityAttr = "integrity"
 )
 
-func removeURLAttrs(t *buildpb.Target) {
-	if t.Rule == nil {
-		return
+func removeURLAttrs(rule *buildpb.Rule) *buildpb.Rule {
+	if rule == nil {
+		return nil
 	}
 
-	oldAttrs := t.GetRule().GetAttribute()
+	oldAttrs := rule.GetAttribute()
 	var willCheckContent bool
 
 	for _, attr := range oldAttrs {
@@ -173,7 +174,7 @@ func removeURLAttrs(t *buildpb.Target) {
 	}
 	// no-op if sha256 is not present
 	if !willCheckContent {
-		return
+		return rule
 	}
 
 	newAttrs := make([]*buildpb.Attribute, 0, len(oldAttrs))
@@ -182,30 +183,32 @@ func removeURLAttrs(t *buildpb.Target) {
 			newAttrs = append(newAttrs, attr)
 		}
 	}
-	t.Rule.Attribute = newAttrs
+	copy := *rule
+	copy.Attribute = newAttrs
+	return &copy
 }
 
 func toTarget(t *buildpb.Target) (*Target, error) {
 	switch *t.Type {
 	case buildpb.Target_RULE:
 		targetName := t.Rule.GetName()
-		deps := t.Rule.GetRuleInput()
+		deps := slices.Clone(t.Rule.GetRuleInput())
 		// sorting dependencies of rules, just like we do when calculating hashes for these rules.
 		sort.Strings(deps)
 		h := newHash()
 		// TODO: remove this and handle external targets in the same way as internal targets
 		if strings.HasPrefix(targetName, externalWorkspaceRulePrefix) {
 			// if this is an external target, remove unwanted attributes from the rule, e.g. url and urls
-			removeURLAttrs(t)
+			rule := removeURLAttrs(t.Rule)
 			// Workspace rule usually representing external repository or an HTTP file.
 			// It is only used to hash external source files, so store it in a separate map.
-			HashRuleCommon(t.Rule, h)
+			HashRuleCommon(rule, h)
 
 			return &Target{
 				Name:            targetName,
 				RuleType:        ExternalRuleType,
 				Deps:            deps,
-				Rule:            t.Rule,
+				Rule:            rule,
 				HashWithoutDeps: h.Sum(nil),
 				External:        true,
 			}, nil
