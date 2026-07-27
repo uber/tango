@@ -103,7 +103,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 		// Look up the the git treehash based on cache path
 		treehashCachePath := cachekey.GetTreehashCachePath(req.Build)
 		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
-		recordCacheLookup(e, opGetTargetGraph, _metricTreehashCacheLookup, err)
+		metrics.RecordCacheLookup(e, opGetTargetGraph, metrics.TreehashCacheLookup, err)
 		if err != nil {
 			if storage.IsNotFound(err) {
 				// Cache miss - blob doesn't exist, need to compute and store target graph
@@ -126,7 +126,6 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 			if ctx.Err() != nil {
 				err = ctx.Err()
 			}
-			recordCacheLookup(e, opGetTargetGraph, _metricGraphCacheLookup, err)
 			if err != nil {
 				if !storage.IsNotFound(err) {
 					return nil, fmt.Errorf("graph reader: %w", err)
