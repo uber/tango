@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber-go/tally"
+	tangoerrors "github.com/uber/tango/core/errors"
 )
 
 func TestNew(t *testing.T) {
@@ -133,9 +134,11 @@ func TestBeginComplete(t *testing.T) {
 		wantResult string
 	}{
 		{"success", nil, ResultSuccess},
-		{"failure", fmt.Errorf("boom"), ResultFailure},
-		{"cancelled", context.Canceled, ResultCancelled},
-		{"timeout is failure", context.DeadlineExceeded, ResultFailure},
+		{"infra error", fmt.Errorf("boom"), "infra"},
+		{"cancelled", context.Canceled, "cancelled"},
+		{"timeout is infra", context.DeadlineExceeded, "infra"},
+		{"user error", tangoerrors.NewUser(fmt.Errorf("bad input")), "user"},
+		{"infra retryable", tangoerrors.NewInfraRetryable(fmt.Errorf("transient")), "infra_retryable"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -159,10 +162,12 @@ func TestOutcome(t *testing.T) {
 		want string
 	}{
 		{"nil", nil, ResultSuccess},
-		{"generic error", fmt.Errorf("boom"), ResultFailure},
-		{"context canceled", context.Canceled, ResultCancelled},
-		{"wrapped canceled", fmt.Errorf("op: %w", context.Canceled), ResultCancelled},
-		{"deadline exceeded is failure", context.DeadlineExceeded, ResultFailure},
+		{"generic error", fmt.Errorf("boom"), "infra"},
+		{"context canceled", context.Canceled, "cancelled"},
+		{"wrapped canceled", fmt.Errorf("op: %w", context.Canceled), "cancelled"},
+		{"deadline exceeded is infra", context.DeadlineExceeded, "infra"},
+		{"user error", tangoerrors.NewUser(fmt.Errorf("bad")), "user"},
+		{"infra retryable", tangoerrors.NewInfraRetryable(fmt.Errorf("retry")), "infra_retryable"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

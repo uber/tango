@@ -15,8 +15,7 @@
 package metrics
 
 import (
-	"context"
-	"errors"
+	tangoerrors "github.com/uber/tango/core/errors"
 )
 
 // Operation (op) names live in each consuming package's metrics.go, named after
@@ -30,24 +29,17 @@ const (
 
 // Result values for TagResult.
 const (
-	ResultSuccess   = "success"
-	ResultFailure   = "failure"
-	ResultCancelled = "cancelled"
-	ResultHit       = "hit"
-	ResultMiss      = "miss"
+	ResultSuccess = "success"
+	ResultHit     = "hit"
+	ResultMiss    = "miss"
 )
 
-// Outcome maps an error to a result tag value. Only an explicitly cancelled
-// context (client disconnect or shutdown) is `cancelled`; a deadline exceeded
-// is a genuine timeout and counts as `failure` (tagged infra on the
-// failure_type axis).
+// Outcome maps an error to a result tag value. A nil error is "success";
+// any non-nil error delegates to tangoerrors.GetErrorCode, which returns
+// "cancelled", "user", "infra", or "infra_retryable".
 func Outcome(err error) string {
-	switch {
-	case err == nil:
+	if err == nil {
 		return ResultSuccess
-	case errors.Is(err, context.Canceled):
-		return ResultCancelled
-	default:
-		return ResultFailure
 	}
+	return tangoerrors.GetErrorCode(err).String()
 }
