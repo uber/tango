@@ -16,10 +16,12 @@ go_test(
     srcs = [
         "cachekey_test.go",
         "exclude_regex_rapid_test.go",
+        "treehash_rapid_test.go",
     ],
     embed = [":cachekey"],
     deps = [
         "//entity",
+        "//internal/url",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@net_pgregory_rapid//:rapid",

@@ -17,7 +17,9 @@ package url
 import (
 	"crypto/md5"
 	"fmt"
-	"sort"
+	"hash"
+	"io"
+	"strconv"
 	"strings"
 
 	"github.com/uber/tango/entity"
@@ -30,20 +32,22 @@ func ToShortRemote(remote string) string {
 	return strs[len(strs)-1]
 }
 
-// GetReqURLsHash returns a fixed-length MD5 hash of the sorted change request URLs.
-// Each URL's bytes are fed into the digest individually (no separator)
+// GetReqURLsHash returns a fixed-length hash of the ordered change requests.
+// Both URL and commit participate because either can change the materialized tree.
 func GetReqURLsHash(requests []entity.ChangeRequest) string {
 	if len(requests) == 0 {
 		return ""
 	}
-	urls := make([]string, 0, len(requests))
-	for _, req := range requests {
-		urls = append(urls, req.URL)
-	}
-	sort.Strings(urls)
 	h := md5.New()
-	for _, url := range urls {
-		h.Write([]byte(url))
+	for _, request := range requests {
+		writeFramedString(h, request.URL)
+		writeFramedString(h, request.Commit)
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func writeFramedString(h hash.Hash, value string) {
+	io.WriteString(h, strconv.Itoa(len(value)))
+	h.Write([]byte{':'})
+	io.WriteString(h, value)
 }

@@ -173,6 +173,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		cacheReadStart := time.Now()
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 		recordStep(e, "cache_read_duration", cacheReadStart, metrics.FastDurationBuckets)
+		metrics.RecordCacheLookup(e, _opGetTargetGraph, metrics.GraphCacheLookup, err)
 		if err == nil {
 			logger.Infow("GetTargetGraph: Cache hit on treehash", zap.String("treehash", treehash))
 			return graphReader, nil

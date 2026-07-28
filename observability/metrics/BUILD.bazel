@@ -9,7 +9,11 @@ go_library(
     ],
     importpath = "github.com/uber/tango/observability/metrics",
     visibility = ["//visibility:public"],
-    deps = ["@com_github_uber_go_tally//:tally"],
+    deps = [
+        "//core/errors",
+        "//core/storage",
+        "@com_github_uber_go_tally//:tally",
+    ],
 )
 
 go_test(
@@ -17,6 +21,7 @@ go_test(
     srcs = ["emitter_test.go"],
     embed = [":metrics"],
     deps = [
+        "//core/errors",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@com_github_uber_go_tally//:tally",
