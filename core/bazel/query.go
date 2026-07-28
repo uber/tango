@@ -94,16 +94,22 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	})
 	waitErr := cmd.Wait()
 	streamErr := g.Wait()
+	// cmdCtx carries only the query timeout (not a parent cancellation), so
+	// DeadlineExceeded here means the query itself ran too long, as opposed
+	// to the caller disconnecting. This can surface as either a killed
+	// process (waitErr) or, if the process exited right at the deadline, as
+	// the stream-reading goroutines being canceled mid-read (streamErr).
+	timedOut := cmdCtx.Err() == context.DeadlineExceeded
 	if waitErr != nil {
-		// cmdCtx carries only the query timeout (not a parent cancellation),
-		// so DeadlineExceeded here means the query itself was killed for
-		// running too long, as opposed to the caller disconnecting.
-		if cmdCtx.Err() == context.DeadlineExceeded {
+		if timedOut {
 			waitErr = fmt.Errorf("%w: %w", ErrQueryTimeout, waitErr)
 		}
 		return queryResults, b.wrapQueryFailure("bazel query failed", waitErr, &stderrBuf)
 	}
 	if streamErr != nil {
+		if timedOut {
+			streamErr = fmt.Errorf("%w: %w", ErrQueryTimeout, streamErr)
+		}
 		return nil, b.wrapQueryFailure("stream processing failed", streamErr, &stderrBuf)
 	}
 	b.logger.Debugw("Parsed targets from bazel query", zap.Int("target_count", len(queryResults.Target)))

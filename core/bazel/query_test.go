@@ -176,6 +176,48 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	assert.ErrorIs(t, err, ErrQueryTimeout)
 }
 
+func TestExecuteQueryInternal_StreamTimeoutWithoutWaitError(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ctrl := gomock.NewController(t)
+	mockCmd := commandermock.NewMockcommander(ctrl)
+
+	prStdout, pwStdout := io.Pipe()
+	prStderr, pwStderr := io.Pipe()
+
+	gomock.InOrder(
+		mockCmd.EXPECT().StdoutPipe().Return(prStdout, nil),
+		mockCmd.EXPECT().StderrPipe().Return(prStderr, nil),
+		mockCmd.EXPECT().Start().Return(nil),
+		// The process itself exits cleanly right at the deadline, but the
+		// stream-reading goroutines are still blocked mid-read when their
+		// context is canceled.
+		mockCmd.EXPECT().Wait().Return(nil),
+	)
+
+	client, err := NewBazelClient(context.Background(), Params{
+		BazelCommand:  "bazel",
+		WorkspacePath: "/tmp/test",
+		Logger:        zap.NewNop().Sugar(),
+		EnvVarsMap:    map[string]string{},
+		QueryTimeout:  10 * time.Millisecond, // Short timeout for test
+		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+			// Simulate process behavior: when context is cancelled, close pipes
+			// to unblock the stream-reading goroutines.
+			go func() {
+				<-ctx.Done()
+				pwStdout.Close()
+				pwStderr.Close()
+			}()
+			return mockCmd
+		},
+	})
+	require.NoError(t, err)
+	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
+	require.Nil(t, result)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrQueryTimeout)
+}
+
 func TestExecuteQueryInternal_WaitFailureWithoutTimeout(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
