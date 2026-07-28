@@ -173,6 +173,37 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	require.Error(t, err)
 	// Should get timeout or deadline exceeded error
 	assert.Contains(t, err.Error(), "deadline exceeded")
+	assert.ErrorIs(t, err, ErrQueryTimeout)
+}
+
+func TestExecuteQueryInternal_WaitFailureWithoutTimeout(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ctrl := gomock.NewController(t)
+	mockCmd := commandermock.NewMockcommander(ctrl)
+
+	gomock.InOrder(
+		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(strings.NewReader("")), nil),
+		mockCmd.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil),
+		mockCmd.EXPECT().Start().Return(nil),
+		mockCmd.EXPECT().Wait().Return(errors.New("exit status 1")),
+	)
+
+	client, err := NewBazelClient(context.Background(), Params{
+		BazelCommand:  "bazel",
+		WorkspacePath: "/tmp/test",
+		Logger:        zap.NewNop().Sugar(),
+		EnvVarsMap:    map[string]string{},
+		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+			return mockCmd
+		},
+	})
+	require.NoError(t, err)
+	_, err = client.executeQueryInternal(context.Background(), "//...", nil)
+	require.Error(t, err)
+	// A plain wait failure without the query's own context deadline elapsing
+	// (e.g. a parent cancellation, or bazel exiting non-zero) is not a
+	// timeout.
+	assert.NotErrorIs(t, err, ErrQueryTimeout)
 }
 
 func TestExecuteQueryInternal_Failures(t *testing.T) {

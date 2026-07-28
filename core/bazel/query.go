@@ -95,6 +95,12 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	waitErr := cmd.Wait()
 	streamErr := g.Wait()
 	if waitErr != nil {
+		// cmdCtx carries only the query timeout (not a parent cancellation),
+		// so DeadlineExceeded here means the query itself was killed for
+		// running too long, as opposed to the caller disconnecting.
+		if cmdCtx.Err() == context.DeadlineExceeded {
+			waitErr = fmt.Errorf("%w: %w", ErrQueryTimeout, waitErr)
+		}
 		return queryResults, b.wrapQueryFailure("bazel query failed", waitErr, &stderrBuf)
 	}
 	if streamErr != nil {

@@ -53,3 +53,14 @@ func classifyBazelClientError(err error) error {
 	}
 	return tangoerrors.NewInfra(wrappedErr)
 }
+
+// classifyComputeError classifies a target-graph compute failure. A bazel
+// query that was killed for exceeding its timeout is retryable; everything
+// else is infra.
+func classifyComputeError(err error) error {
+	wrappedErr := fmt.Errorf("compute target graph: %w", err)
+	if errors.Is(err, bazel.ErrQueryTimeout) {
+		return tangoerrors.NewInfraRetryable(wrappedErr)
+	}
+	return tangoerrors.NewInfra(wrappedErr)
+}
