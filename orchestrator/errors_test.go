@@ -137,35 +137,3 @@ func TestClassifyBazelClientError(t *testing.T) {
 		})
 	}
 }
-
-func TestClassifyComputeError(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		err      error
-		wantCode tangoerrors.ErrorCode
-	}{
-		{
-			name:     "bazel query timeout is infra retryable",
-			err:      fmt.Errorf("bazel query failed: %w: exit status 1", bazel.ErrQueryTimeout),
-			wantCode: tangoerrors.ErrorInfraRetryable,
-		},
-		{
-			name:     "generic error is infra",
-			err:      fmt.Errorf("bazel query failed: exit status 1"),
-			wantCode: tangoerrors.ErrorInfra,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := classifyComputeError(tt.err)
-			require.Error(t, got)
-			assert.Equal(t, tt.wantCode, tangoerrors.GetErrorCode(got))
-			assert.ErrorIs(t, got, tt.err)
-		})
-	}
-}

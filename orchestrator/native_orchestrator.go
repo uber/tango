@@ -211,7 +211,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	result, err := runner.Compute(ctx, ws)
 	recordStep(e, "compute_duration", computeStart, metrics.SlowDurationBuckets)
 	if err != nil {
-		return nil, classifyComputeError(err)
+		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
 	chunks, err := mapper.ResultToGraphChunks(ctx, result, b.config.Service.MaxMessageBytes)
 	if err != nil {
