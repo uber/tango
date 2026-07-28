@@ -94,31 +94,26 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	})
 	waitErr := cmd.Wait()
 	streamErr := g.Wait()
-	// cmdCtx carries only the query timeout (not a parent cancellation), so
-	// DeadlineExceeded here means the query itself ran too long, as opposed
-	// to the caller disconnecting. This can surface as either a killed
-	// process (waitErr) or, if the process exited right at the deadline, as
-	// the stream-reading goroutines being canceled mid-read (streamErr).
-	timedOut := cmdCtx.Err() == context.DeadlineExceeded
 	if waitErr != nil {
-		return queryResults, b.wrapQueryFailure("bazel query failed", waitErr, timedOut, &stderrBuf)
+		return queryResults, b.wrapQueryFailure(cmdCtx, "bazel query failed", waitErr, &stderrBuf)
 	}
 	if streamErr != nil {
-		return nil, b.wrapQueryFailure("stream processing failed", streamErr, timedOut, &stderrBuf)
+		return nil, b.wrapQueryFailure(cmdCtx, "stream processing failed", streamErr, &stderrBuf)
 	}
 	b.logger.Debugw("Parsed targets from bazel query", zap.Int("target_count", len(queryResults.Target)))
 	return queryResults, nil
 }
 
-// wrapQueryFailure logs the failure and returns a wrapped error. If timedOut
-// is set, cause is additionally wrapped with ErrQueryTimeout so callers can
-// identify via errors.Is that this failure was the query's own deadline
-// elapsing, not a parent cancellation. When stderr was captured (streamLogs
-// off), its contents are appended so the failure is self-contained. When
-// streamLogs is on the operator has already seen stderr live, so it's
-// omitted.
-func (b *BazelClient) wrapQueryFailure(msg string, cause error, timedOut bool, stderrBuf *bytes.Buffer) error {
-	if timedOut {
+// wrapQueryFailure logs the failure and returns a wrapped error. ctx is the
+// query's own timeout context (not a parent cancellation): if it has hit its
+// deadline, cause is additionally wrapped with ErrQueryTimeout so callers can
+// identify via errors.Is that this failure was the query's own timeout
+// elapsing, as opposed to the caller disconnecting. When stderr was captured
+// (streamLogs off), its contents are appended so the failure is
+// self-contained. When streamLogs is on the operator has already seen stderr
+// live, so it's omitted.
+func (b *BazelClient) wrapQueryFailure(ctx context.Context, msg string, cause error, stderrBuf *bytes.Buffer) error {
+	if ctx.Err() == context.DeadlineExceeded {
 		cause = fmt.Errorf("%w: %w", ErrQueryTimeout, cause)
 	}
 	tail := ""
