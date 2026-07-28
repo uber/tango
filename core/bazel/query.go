@@ -101,26 +101,26 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	// the stream-reading goroutines being canceled mid-read (streamErr).
 	timedOut := cmdCtx.Err() == context.DeadlineExceeded
 	if waitErr != nil {
-		if timedOut {
-			waitErr = fmt.Errorf("%w: %w", ErrQueryTimeout, waitErr)
-		}
-		return queryResults, b.wrapQueryFailure("bazel query failed", waitErr, &stderrBuf)
+		return queryResults, b.wrapQueryFailure("bazel query failed", waitErr, timedOut, &stderrBuf)
 	}
 	if streamErr != nil {
-		if timedOut {
-			streamErr = fmt.Errorf("%w: %w", ErrQueryTimeout, streamErr)
-		}
-		return nil, b.wrapQueryFailure("stream processing failed", streamErr, &stderrBuf)
+		return nil, b.wrapQueryFailure("stream processing failed", streamErr, timedOut, &stderrBuf)
 	}
 	b.logger.Debugw("Parsed targets from bazel query", zap.Int("target_count", len(queryResults.Target)))
 	return queryResults, nil
 }
 
-// wrapQueryFailure logs the failure and returns a wrapped error. When stderr
-// was captured (streamLogs off), its contents are appended so the failure is
-// self-contained. When streamLogs is on the operator has already seen stderr
-// live, so it's omitted.
-func (b *BazelClient) wrapQueryFailure(msg string, cause error, stderrBuf *bytes.Buffer) error {
+// wrapQueryFailure logs the failure and returns a wrapped error. If timedOut
+// is set, cause is additionally wrapped with ErrQueryTimeout so callers can
+// identify via errors.Is that this failure was the query's own deadline
+// elapsing, not a parent cancellation. When stderr was captured (streamLogs
+// off), its contents are appended so the failure is self-contained. When
+// streamLogs is on the operator has already seen stderr live, so it's
+// omitted.
+func (b *BazelClient) wrapQueryFailure(msg string, cause error, timedOut bool, stderrBuf *bytes.Buffer) error {
+	if timedOut {
+		cause = fmt.Errorf("%w: %w", ErrQueryTimeout, cause)
+	}
 	tail := ""
 	if !b.streamLogs {
 		tail = "\nstderr:\n" + stderrBuf.String()
