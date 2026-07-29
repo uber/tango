@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	tangoerrors "github.com/uber/tango/core/errors"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -62,6 +63,7 @@ func TestLinkRequestCtx_CancelsOnAppCtx(t *testing.T) {
 	<-linked.Done()
 	assert.ErrorIs(t, linked.Err(), context.Canceled)
 	assert.NoError(t, reqCtx.Err(), "linkRequestCtx must not cancel the request ctx")
+	assert.Equal(t, tangoerrors.ErrorInfra, tangoerrors.GetErrorCode(context.Cause(linked)))
 }
 
 // TestLinkRequestCtx_CancelsOnRequestCtx verifies that cancellation of the
@@ -80,6 +82,7 @@ func TestLinkRequestCtx_CancelsOnRequestCtx(t *testing.T) {
 	<-linked.Done()
 	assert.ErrorIs(t, linked.Err(), context.Canceled)
 	assert.NoError(t, appCtx.Err(), "linkRequestCtx must not cancel the app ctx")
+	assert.Equal(t, tangoerrors.ErrorCancelled, tangoerrors.GetErrorCode(context.Cause(linked)))
 }
 
 // TestLinkRequestCtx_CancelReleasesAfterFunc verifies that calling the returned

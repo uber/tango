@@ -32,7 +32,7 @@ func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return context.Cause(ctx)
 	case err := <-done:
 		return err
 	}
@@ -52,7 +52,7 @@ func streamAndParseTargets(ctx context.Context, src io.Reader, dst io.Writer) (*
 
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, context.Cause(ctx)
 	case res := <-done:
 		return res.queryResult, res.err
 	}
@@ -77,7 +77,7 @@ func getQueryResult(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb
 	for i := 0; ; i++ {
 		if i%cancelCheckInterval == 0 {
 			if err := ctx.Err(); err != nil {
-				return result, err
+				return result, context.Cause(ctx)
 			}
 		}
 		var target buildpb.Target

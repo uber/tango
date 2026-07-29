@@ -29,7 +29,7 @@ type CtxReader struct {
 
 func (c *CtxReader) Read(p []byte) (int, error) {
 	if err := c.Ctx.Err(); err != nil {
-		return 0, err
+		return 0, context.Cause(c.Ctx)
 	}
 	return c.R.Read(p)
 }

@@ -186,7 +186,7 @@ func computeAvailableHashes(
 // computeHashes computes hashes recursively for the given target ID.
 func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, error) {
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, context.Cause(ctx)
 	}
 
 	if externalRuleTarget, ok := g.ExternalRuleTargets[id]; ok {
