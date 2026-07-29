@@ -106,14 +106,15 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 
 // wrapQueryFailure logs the failure and returns a wrapped error. ctx is the
 // query's own timeout context (not a parent cancellation): if it has hit its
-// deadline, "query timeout exceeded" is noted in the message so this failure
-// can be told apart from the caller disconnecting, without a dedicated
-// sentinel error. When stderr was captured (streamLogs off), its contents are
-// appended so the failure is self-contained. When streamLogs is on the
-// operator has already seen stderr live, so it's omitted.
+// deadline, cause is additionally wrapped with ctx.Err() (context.DeadlineExceeded)
+// so callers can identify via errors.Is that this failure was the query's own
+// timeout elapsing, as opposed to the caller disconnecting, without a
+// dedicated sentinel error. When stderr was captured (streamLogs off), its
+// contents are appended so the failure is self-contained. When streamLogs is
+// on the operator has already seen stderr live, so it's omitted.
 func (b *BazelClient) wrapQueryFailure(ctx context.Context, msg string, cause error, stderrBuf *bytes.Buffer) error {
-	if ctx.Err() == context.DeadlineExceeded {
-		msg = msg + " (query timeout exceeded)"
+	if ctxErr := ctx.Err(); ctxErr == context.DeadlineExceeded {
+		cause = fmt.Errorf("%w: %w", ctxErr, cause)
 	}
 	tail := ""
 	if !b.streamLogs {
