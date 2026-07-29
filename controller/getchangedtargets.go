@@ -103,7 +103,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	secondGraph = nil
 	if err != nil {
 		if ctx.Err() != nil {
-			err = ctx.Err()
+			err = context.Cause(ctx)
 		}
 		return fmt.Errorf("compare target graphs: %w", err)
 	}
@@ -165,7 +165,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 		if err := ctx.Err(); err != nil {
 			_ = cachedReader.Close()
 			// Client gave up while we were draining the cache. Surface as a user-cancelled error.
-			return false, fmt.Errorf("cache reader: %w", err)
+			return false, fmt.Errorf("cache reader: %w", context.Cause(ctx))
 		}
 		var resp entity.GetChangedTargetsResponse
 		resp, readErr = cachedReader.Read()
@@ -305,7 +305,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 
 	if ctx.Err() != nil {
 		// If the context was cancelled by the upstream, just return the original error without additional augmentation
-		return nil, nil, ctx.Err()
+		return nil, nil, context.Cause(ctx)
 	}
 
 	// Process errors, only aggregating the ones that are original ones and not a result of the other job being cancelled
@@ -427,7 +427,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	e.ValueHistogram(opGetChangedTargets, "target_count", metrics.LargeCountBuckets).RecordValue(float64(len(result.ChangedTargets)))
 
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, context.Cause(ctx)
 	}
 
 	// 3) Re-map each change into a canonical per-call ID namespace. The mappers
@@ -487,7 +487,7 @@ func getTargetsAndMetadata(ctx context.Context, graph []entity.GetTargetGraphRes
 	}
 	for _, chunk := range graph {
 		if ctx.Err() != nil {
-			return nil, nil, ctx.Err()
+			return nil, nil, context.Cause(ctx)
 		}
 		for i := range chunk.Targets {
 			t := &chunk.Targets[i]
@@ -528,7 +528,7 @@ func toDiffGraph(ctx context.Context, targetsByID map[int32]*entity.OptimizedTar
 	i := 0
 	for id, t := range targetsByID {
 		if i%cancelCheckInterval == 0 && ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, context.Cause(ctx)
 		}
 		i++
 		name := targetIDMap[id]

@@ -88,7 +88,7 @@ type Result struct {
 // the nearest target whose own state changed.
 func Compare(ctx context.Context, request Request) (Result, error) {
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, context.Cause(ctx)
 	}
 
 	changedByName := make(map[string]*ChangedTarget)
@@ -97,7 +97,7 @@ func Compare(ctx context.Context, request Request) (Result, error) {
 	for name, afterTarget := range request.After {
 		if i%_cancelCheckInteral == 0 {
 			if err := ctx.Err(); err != nil {
-				return Result{}, err
+				return Result{}, context.Cause(ctx)
 			}
 		}
 		i++
@@ -144,14 +144,14 @@ func Compare(ctx context.Context, request Request) (Result, error) {
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		return Result{}, context.Cause(ctx)
 	}
 
 	i = 0
 	for name, beforeTarget := range request.Before {
 		if i%_cancelCheckInteral == 0 {
 			if err := ctx.Err(); err != nil {
-				return Result{}, err
+				return Result{}, context.Cause(ctx)
 			}
 		}
 		i++
@@ -256,7 +256,7 @@ func computeDistances(
 	for name, target := range targetsByName {
 		if i%_cancelCheckInteral == 0 {
 			if err := ctx.Err(); err != nil {
-				return err
+				return context.Cause(ctx)
 			}
 		}
 		i++
@@ -281,7 +281,7 @@ func computeDistances(
 	for i := 0; len(queue) > 0; i++ {
 		if i%_cancelCheckInteral == 0 {
 			if err := ctx.Err(); err != nil {
-				return err
+				return context.Cause(ctx)
 			}
 		}
 		current := queue[0]

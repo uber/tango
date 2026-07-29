@@ -170,7 +170,7 @@ func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (
 	select {
 	case slot = <-pool.avail:
 	case <-ctx.Done():
-		waitErr = ctx.Err()
+		waitErr = context.Cause(ctx)
 	}
 	recordStep(e, _stepWaitSlot, waitStart, metrics.FastDurationBuckets)
 	if waitErr != nil {

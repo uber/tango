@@ -37,7 +37,7 @@ func ResultToTargetGraph(ctx context.Context, result targethasher.Result) ([]ent
 		}
 		if n%cancelCheckInterval == 0 {
 			if err := ctx.Err(); err != nil {
-				return nil, nil, err
+				return nil, nil, context.Cause(ctx)
 			}
 		}
 		n++

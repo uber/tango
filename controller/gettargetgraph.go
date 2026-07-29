@@ -124,7 +124,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 			storageStart := time.Now()
 			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
 			if ctx.Err() != nil {
-				err = ctx.Err()
+				err = context.Cause(ctx)
 			}
 			if err != nil {
 				if !storage.IsNotFound(err) {
@@ -147,7 +147,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 	graphReader, err := c.orchestrator.GetTargetGraph(ctx, req)
 	if err != nil {
 		if ctx.Err() != nil {
-			err = ctx.Err()
+			err = context.Cause(ctx)
 		}
 		return nil, fmt.Errorf("get target graph: %w", err)
 	}

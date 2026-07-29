@@ -45,7 +45,7 @@ func writeStream[T any](ctx context.Context, st Storage, key string, values []T)
 		enc := json.NewEncoder(pw)
 		var err error
 		for i := range values {
-			if err = ctx.Err(); err != nil {
+			if err = context.Cause(ctx); err != nil {
 				break
 			}
 			if err = enc.Encode(&values[i]); err != nil {
