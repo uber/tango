@@ -41,13 +41,6 @@ const (
 // Retrying is expected to succeed.
 var ErrNetwork = errors.New("network failure")
 
-// ErrQueryTimeout indicates a bazel query was killed because it exceeded its
-// configured timeout, as opposed to being canceled by a parent context. It
-// exists so callers can identify via errors.Is that a DeadlineExceeded came
-// from the service's own query timeout rather than the client disconnecting;
-// it does not imply the failure is safe to retry automatically.
-var ErrQueryTimeout = errors.New("bazel query timeout")
-
 type QueryRequest struct {
 	Query          string
 	StartupOptions []string

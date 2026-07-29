@@ -173,7 +173,7 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	require.Error(t, err)
 	// Should get timeout or deadline exceeded error
 	assert.Contains(t, err.Error(), "deadline exceeded")
-	assert.ErrorIs(t, err, ErrQueryTimeout)
+	assert.Contains(t, err.Error(), "query timeout exceeded")
 }
 
 func TestExecuteQueryInternal_StreamTimeoutWithoutWaitError(t *testing.T) {
@@ -215,7 +215,7 @@ func TestExecuteQueryInternal_StreamTimeoutWithoutWaitError(t *testing.T) {
 	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
 	require.Nil(t, result)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrQueryTimeout)
+	assert.Contains(t, err.Error(), "query timeout exceeded")
 }
 
 func TestExecuteQueryInternal_WaitFailureWithoutTimeout(t *testing.T) {
@@ -245,7 +245,7 @@ func TestExecuteQueryInternal_WaitFailureWithoutTimeout(t *testing.T) {
 	// A plain wait failure without the query's own context deadline elapsing
 	// (e.g. a parent cancellation, or bazel exiting non-zero) is not a
 	// timeout.
-	assert.NotErrorIs(t, err, ErrQueryTimeout)
+	assert.NotContains(t, err.Error(), "query timeout exceeded")
 }
 
 func TestExecuteQueryInternal_Failures(t *testing.T) {
