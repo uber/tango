@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -65,9 +64,14 @@ var CompareKeyFunc = func(a Key, b Key) int {
 var EmptyKey = Key{}
 
 // toStorageKey converts a cache key to its storage key: itg/{remote}/{date}/{committime}_{sha}
+//
+// Keys are built with string concatenation, not filepath.Join, because storage
+// keys are opaque strings and filepath.Join would collapse double slashes in
+// URL-style remotes (e.g. "https://github.com/x" -> "https:/github.com/x")
+// and use platform-dependent separators.
 func (k *Key) toStorageKey() string {
 	date := time.Unix(k.BaseCommitTimeSecond, 0).UTC().Format("2006-01-02")
-	return filepath.Join(keyPrefix, k.Remote, date, fmt.Sprintf("%d_%s", k.BaseCommitTimeSecond, k.BaseSha))
+	return keyPrefix + k.Remote + "/" + date + "/" + fmt.Sprintf("%d_%s", k.BaseCommitTimeSecond, k.BaseSha)
 }
 
 // NewStorageCache creates a new cache backed by a storage.Storage implementation.
