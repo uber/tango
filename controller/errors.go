@@ -16,8 +16,18 @@ package controller
 
 import (
 	tangoerrors "github.com/uber/tango/core/errors"
+	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/observability/metrics"
 )
+
+// toWireError converts err into a YARPC error carrying a TangoError detail so
+// clients receive a classified error code on the wire. Implemented RPC
+// handlers pass their return errors through this function (typically via the
+// existing named-return defer) to satisfy the proto contract described in
+// docs/errors/errors.md. Nil errors pass through unchanged.
+func toWireError(err error) error {
+	return mapper.ToProtoError(err)
+}
 
 // emitFailureMetric tags the failure counter with err's ErrorCode. e should
 // already carry the repo tag; op is the operation subscope the counter lands under.

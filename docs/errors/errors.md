@@ -176,12 +176,17 @@ func (b *nativeOrchestrator) GetTargetGraph(...) (..., error) {
 		return nil, classifyBazelClientError(err)
 	}
 
-// controller
-func (c *controller) GetChangedTargets(...) error {
+// controller — implemented handlers convert their return errors through
+// toWireError in the existing named-return defer, so the TangoError detail is
+// attached uniformly without per-handler boilerplate.
+func (c *controller) GetChangedTargets(...) (retErr error) {
 	...
-	if err != nil {
-		return mapper.ToProtoError(err)
-	}
-	return nil
+	defer func() {
+		...
+		if retErr != nil {
+			retErr = toWireError(retErr) // mapper.ToProtoError
+		}
+	}()
+	...
 }
 ```

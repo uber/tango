@@ -45,6 +45,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 		if retErr != nil {
 			logger.Error("GetTargetGraph failed", tangoerrors.Fields(retErr)...)
 			emitFailureMetric(e, opGetTargetGraph, retErr)
+			retErr = toWireError(retErr)
 		}
 	}()
 	start := time.Now()
