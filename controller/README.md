@@ -22,8 +22,11 @@ sit between the wire protocol and the rest of the system:
   optionally compute reverse-dependency distances, and assemble the response
   in a canonical ID space derived from per-request mappers.
 - **Streaming and chunking.** Responses are emitted as multiple stream
-  messages sized to stay below the gRPC per-message limit. Targets,
-  metadata, and topology deltas are chunked independently.
+  messages sized to stay within an approximate budget that deliberately
+  undershoots the gRPC per-message limit, providing headroom for
+  repeated-field framing and response-envelope overhead that the inner
+  payload size estimates do not account for. Targets, metadata, and
+  topology deltas are chunked independently.
 - **Observability.** Every RPC emits per-call counters, per-phase timers,
   and a classified failure metric that distinguishes user from
   infrastructure errors.

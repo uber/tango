@@ -38,12 +38,23 @@ func WriteChangedTargetsStream(ctx context.Context, st Storage, key string, resp
 // writeStream JSON-encodes values and streams them to storage under key.
 // It uses an io.Pipe so the serialized payload is never buffered in full:
 // a writer goroutine encodes into the pipe while Put consumes from it.
+//
+// The stream is framed with a header (carrying the format version) and a
+// footer (carrying the data record count). The reader uses the header to
+// distinguish versioned streams from legacy blobs and verifies the footer
+// to detect truncation.
 func writeStream[T any](ctx context.Context, st Storage, key string, values []T) error {
 	pr, pw := io.Pipe()
 	writerErr := make(chan error, 1)
 	go func() {
 		enc := json.NewEncoder(pw)
 		var err error
+		if err = encodeHeader(enc); err != nil {
+			err = fmt.Errorf("encode header: %w", err)
+			pw.CloseWithError(err)
+			writerErr <- err
+			return
+		}
 		for i := range values {
 			if err = context.Cause(ctx); err != nil {
 				break
@@ -51,6 +62,11 @@ func writeStream[T any](ctx context.Context, st Storage, key string, values []T)
 			if err = enc.Encode(&values[i]); err != nil {
 				err = fmt.Errorf("encode value: %w", err)
 				break
+			}
+		}
+		if err == nil {
+			if err = encodeFooter(enc, len(values)); err != nil {
+				err = fmt.Errorf("encode footer: %w", err)
 			}
 		}
 		pw.CloseWithError(err)

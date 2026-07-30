@@ -10,6 +10,7 @@ go_library(
         "memstorage.go",
         "reader.go",
         "storage.go",
+        "streamformat.go",
     ],
     importpath = "github.com/uber/tango/core/storage",
     visibility = ["//visibility:public"],
@@ -18,9 +19,13 @@ go_library(
 
 go_test(
     name = "storage_test",
-    srcs = ["storage_test.go"],
+    srcs = [
+        "storage_test.go",
+        "streamformat_test.go",
+    ],
     embed = [":storage"],
     deps = [
+        "//entity",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
     ],
