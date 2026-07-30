@@ -134,34 +134,49 @@ const (
     TagResult = "result"
 )
 
-// Result values for TagResult.
+// Result values for TagResult on the finish histogram.
 const (
-    ResultSuccess   = "success"
-    ResultFailure   = "failure"
-    ResultCancelled = "cancelled"
-    ResultHit       = "hit"
-    ResultMiss      = "miss"
+    ResultSuccess = "success"
+    ResultHit     = "hit"
+    ResultMiss    = "miss"
 )
 ```
 
-Operation names are *not* centralized here — each consuming package declares its own op-name consts in its `metrics.go`, named after the interface method they measure (e.g. `get_target_graph`, `compute`, `lease`).
-```go
-// Outcome maps an error to a result tag value. Only an explicitly cancelled
-// context (client disconnect or shutdown) is `cancelled`; a deadline exceeded
-// is a genuine timeout and counts as `failure` (tagged infra on the
-// failure_type axis).
-func Outcome(err error) string {
-    switch {
-    case err == nil:
-        return ResultSuccess
-    case errors.Is(err, context.Canceled):
-        return ResultCancelled
-    default:
-        return ResultFailure
-    }
-}
-```
-The `result` tag is the sole outcome signal. Success, failure, and cancelled counts are derived from the `finish` histogram by summing its buckets grouped by `result`.
+### Outcome vocabulary
+
+`Outcome(err)` maps an error to a `result` tag value for the `finish` histogram. A nil error is `success`; any non-nil error delegates to `tangoerrors.GetErrorCode(err).String()`, which classifies by `ErrorCode`:
+
+| `result` value | When | Source |
+|---|---|---|
+| `success` | `err == nil` | hardcoded |
+| `cancelled` | `errors.Is(err, context.Canceled)` | `ErrorCancelled.String()` |
+| `user` | error wraps a `TangoError` with `ErrorUser` | `ErrorUser.String()` |
+| `infra` | unclassified error or `ErrorInfra` | `ErrorInfra.String()` |
+| `infra_retryable` | error wraps a `TangoError` with `ErrorInfraRetryable` | `ErrorInfraRetryable.String()` |
+
+Note: `"failure"` is **not** a valid outcome value. Dashboards should filter on the concrete values above (`cancelled`, `user`, `infra`, `infra_retryable`) rather than a single `failure` bucket.
+
+A `context.DeadlineExceeded` without a `TangoError` wrapper is classified as `infra` (a genuine timeout), not `cancelled` — only an explicit `context.Canceled` (client disconnect or shutdown) maps to `cancelled`.
+
+Operation names are *not* centralized here — each consuming package declares its own op-name consts in its `metrics.go`, snake_cased after the interface method they measure (e.g. `get_target_graph`, `compute`, `lease`).
+
+### Failure counters
+
+In addition to the `finish` histogram, the controller emits a `<scope>.<op>.failures` counter on every error, tagged with `error_code` carrying the same `ErrorCode.String()` value (`cancelled`, `user`, `infra`, `infra_retryable`). This counter is emitted by `emitFailureMetric` in `controller/errors.go` and supplements the `result`-tagged histogram when per-error-code alerting is needed without histogram math.
+
+### Cache-lookup counters
+
+Three cache-lookup counters track per-layer hit rates under their parent RPC op:
+
+| Counter name | Layer | Emitted by |
+|---|---|---|
+| `treehash_cache_lookup` | treehash-by-BuildDescription lookup | controller |
+| `graph_cache_lookup` | graph-by-treehash download | controller + orchestrator |
+| `compared_targets_cache_lookup` | compared-targets-by-treehash lookup | controller |
+
+Each is a `result`-tagged counter (`hit` or `miss`) emitted via `RecordCacheLookup(e, parentOp, name, err)`. The semantics: a nil error is a `hit`, a `storage.NotFoundError` is a `miss`, and any other error (infra failure) emits **nothing** — an infra error is not a cache miss and must not skew the hit rate. Infra errors are already tracked by the `failures` counter.
+
+The `result` tag on the `finish` histogram is the primary outcome signal. Success and error-class counts are derived from the `finish` histogram by summing its buckets grouped by `result`.
 
 ## Usage
 
@@ -193,17 +208,17 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
 }
 ```
 
-A sub-operation uses `Begin`/`Complete` for the `start`/`finish` duration exactly like the request handlers, reusing the repo-tagged emitter the caller already holds.
+A sub-operation uses `Begin`/`Complete` for the `start`/`finish` duration exactly like the request handlers, reusing the repo-tagged emitter the caller already holds. Cache lookups within a sub-operation record a `RecordCacheLookup` counter alongside the duration.
 
 ```go
-// opCacheRead is an extension op, declared next to the emit site.
-const opCacheRead = "cache_read"
-
-func (c *controller) readGraphCache(ctx context.Context, e *metrics.Emitter, key string) (_ storage.GraphReader, hit bool, retErr error) {
-    op := metrics.Begin(e, opCacheRead, metrics.FastDurationBuckets)
-    defer func() { op.Complete(retErr) }()
-
-    return c.lookupGraph(ctx, key)
+// In the orchestrator's GetTargetGraph, after computing the treehash:
+cacheReadStart := time.Now()
+graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
+recordStep(e, "cache_read_duration", cacheReadStart, metrics.FastDurationBuckets)
+metrics.RecordCacheLookup(e, _opGetTargetGraph, metrics.GraphCacheLookup, err)
+if err == nil {
+    // cache hit — return early
+    return graphReader, nil
 }
 ```
 

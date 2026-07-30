@@ -19,8 +19,8 @@ import (
 	"github.com/uber/tango/core/storage"
 )
 
-// Operation (op) names live in each consuming package's metrics.go, named after
-// the interface method they measure (e.g. "GetTargetGraph", "Compute").
+// Operation (op) names live in each consuming package's metrics.go, snake_cased
+// after the interface method they measure (e.g. "get_target_graph", "compute").
 
 // Tag keys.
 const (

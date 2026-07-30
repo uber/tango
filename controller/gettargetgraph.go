@@ -127,6 +127,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 			if ctx.Err() != nil {
 				err = context.Cause(ctx)
 			}
+			metrics.RecordCacheLookup(e, opGetTargetGraph, metrics.GraphCacheLookup, err)
 			if err != nil {
 				if !storage.IsNotFound(err) {
 					return nil, fmt.Errorf("graph reader: %w", err)

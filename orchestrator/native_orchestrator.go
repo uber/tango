@@ -208,7 +208,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 				GitClient:          gitModule,
 				Config:             repoCfg,
 				ExtraExcludedFiles: req.ExcludeFilesRegex,
-				Scope:              b.scope,
+				Scope:              b.scope.Tagged(map[string]string{metrics.TagRepo: url.ToShortRemote(build.Remote)}),
 			})
 		default:
 			return nil, tangoerrors.NewUser(fmt.Errorf("unknown computation strategy: %d", build.Strategy))

@@ -54,7 +54,10 @@ func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
 	}
 }
 
-func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace) (targethasher.Result, error) {
+func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace) (_ targethasher.Result, retErr error) {
+	op := metrics.Begin(g.emitter, _opCompute, metrics.SlowDurationBuckets)
+	defer func() { op.Complete(retErr) }()
+
 	query := "//external:all-targets + deps(//...:all-targets)"
 	if g.config.ExcludeExternalTargets {
 		query = "deps(//...:all-targets)"
