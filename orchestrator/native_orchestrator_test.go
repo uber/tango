@@ -137,6 +137,43 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	require.NotNil(t, chunk.Targets)
 }
 
+func TestNative_GetTargetGraph_UnknownStrategy_UserError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	st := storagemock.NewMockStorage(ctrl)
+	g := gitmock.NewMockInterface(ctrl)
+	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th", nil)
+	ws := workspacemock.NewMockWorkspace(ctrl)
+	ws.EXPECT().Path().Return("/tmp/ws")
+	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().ApplyRequests(gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().Release().Return(nil)
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
+
+	o, err := NewNativeOrchestrator(context.Background(), Params{
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t).Sugar(),
+		GitFactory:  func(dir string) git.Interface { return g },
+		Config:      testConfig(t),
+	})
+	require.NoError(t, err)
+
+	reader, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{
+			Remote:   "git@github:uber/tango",
+			BaseSha:  "1234567890",
+			Strategy: entity.ComputationStrategy(99),
+		},
+		BypassCache: true,
+	})
+	require.Nil(t, reader)
+	require.Error(t, err)
+	assert.Equal(t, tangoerrors.ErrorUser, tangoerrors.GetErrorCode(err))
+}
+
 func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

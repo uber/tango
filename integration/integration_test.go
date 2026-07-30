@@ -264,12 +264,14 @@ func getChangedTargets(t testing.TB, client pb.TangoYARPCClient, remote, firstSH
 
 	stream, err := client.GetChangedTargets(ctx, &pb.GetChangedTargetsRequest{
 		FirstRevision: &pb.BuildDescription{
-			Remote:  remote,
-			BaseSha: firstSHA,
+			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+			Remote:   remote,
+			BaseSha:  firstSHA,
 		},
 		SecondRevision: &pb.BuildDescription{
-			Remote:  remote,
-			BaseSha: secondSHA,
+			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+			Remote:   remote,
+			BaseSha:  secondSHA,
 		},
 	})
 	require.NoError(t, err, "failed to initiate GetChangedTargets stream")
@@ -363,8 +365,9 @@ func TestIntegration_GetTargetGraph(t *testing.T) {
 
 	stream, err := client.GetTargetGraph(ctx, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
-			Remote:  remote,
-			BaseSha: pinnedSHA,
+			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+			Remote:   remote,
+			BaseSha:  pinnedSHA,
 		},
 	})
 	require.NoError(t, err, "failed to initiate GetTargetGraph stream")
