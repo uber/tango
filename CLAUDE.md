@@ -30,6 +30,13 @@ tango/                              # repo root (Go module github.com/uber/tango
 │   └── orchestratormock/
 ├── graphrunner/                    # Strategy-pluggable target-graph computation (native / shell)
 │   └── mock/
+├── entity/                         # Domain value types (BuildDescription, ChangedTargets, TargetGraph, etc.)
+├── mapper/                         # Proto-to-entity and entity-to-proto conversion
+├── internal/                       # Internal-only packages (not importable by external consumers)
+│   ├── mapper/                     # Internal mapping helpers
+│   ├── streaming/                  # Chunked stream assembly
+│   ├── targetdiff/                 # Per-target change classification
+│   └── url/                        # URL normalization and hashing
 ├── config/                         # YAML config parsing and validation (storage, service, repository)
 ├── core/                           # Reusable infrastructure with no domain dependencies
 │   ├── git/                        # Git CLI wrapper (clone, fetch, checkout, rev-parse, ...)
@@ -37,7 +44,12 @@ tango/                              # repo root (Go module github.com/uber/tango
 │   ├── storage/                    # Blob storage interface and impls (in-memory, disk)
 │   ├── workspace/                  # Workspace abstraction over a git checkout, request application
 │   ├── cachekey/                   # Cache path/key construction for graphs, treehashes, compared-target results
-│   └── ...                         # bazel, common, execcmd, itg, targethasher, ...
+│   ├── errors/                     # TangoError type and ErrorCode classification
+│   └── ...                         # bazel, execcmd, itg, targethasher, ...
+├── observability/                  # Cross-cutting observability
+│   └── metrics/                    # Tally-backed metrics emitter, Begin/Complete lifecycle, bucket definitions
+├── integration/                    # Integration tests and benchmarks (requires a local repo)
+├── docs/                           # Supplementary documentation (error taxonomy, observability notes)
 ├── example/                        # Runnable server + client and benchmark CLI
 │   ├── client/
 │   └── cmd/query-bench/
@@ -51,10 +63,10 @@ The top-level split is by **responsibility**, not by domain: `controller/` handl
 The controller is the YARPC service implementation. It owns the transport-adjacent concerns: request validation, response chunking, cancellation handling, fan-out across revisions, and metrics emission. It does **not** own workspace creation, git operations, or graph computation — those belong to the orchestrator and below.
 
 Each RPC method follows the same shape:
-1. Increment a `calls` counter; defer `success` / `failure` counters and a `failure_type` tag based on `classifyError`.
-2. Validate the request; reject with a `ClassifiedError` of type `ErrorTypeUser` on bad input.
-3. Drive the orchestrator to obtain the given number of target graphs.
-5. Stream the result to the client.
+1. Call `metrics.Begin(emitter, op, buckets)` to record a start counter and capture the start time. Defer `op.Complete(err)` which records a finish-duration histogram tagged `result` with the outcome (one of `success`, `cancelled`, `user`, `infra`, `infra_retryable`). On failure, also emit a `failures` counter tagged with `error_code` via `emitFailureMetric`.
+2. Validate the request; reject with a `TangoError` classified `ErrorUser` on bad input.
+3. Attempt to serve the response from cache (read-through). On a cache miss, drive the orchestrator to compute the target graph(s).
+4. Stream the result to the client.
 
 ### Orchestrator
 
@@ -70,7 +82,7 @@ The bundled `nativeOrchestrator` (under `orchestrator/native_orchestrator.go`) i
 
 A custom orchestrator satisfies the same `orchestrator.Orchestrator` interface and is wired into the controller in place of the native one. It is the right seam to plug in remote build execution, CI-managed checkouts, or organization-specific caching — the controller and `graphrunner` stay unchanged.
 
-Whichever implementation is used, the orchestrator is responsible for **classifying** errors via `common.WithReason(reason, errorType, err)` so the metrics pipeline can tag failures with a stable `failure_reason` and `failure_type`.
+Whichever implementation is used, the orchestrator is responsible for **classifying** errors by wrapping them with `tangoerrors.NewInfra`, `tangoerrors.NewInfraRetryable`, or `tangoerrors.NewUser` (from `core/errors`) so the metrics pipeline can tag failures with a stable `error_code`. Per-cause classifiers in `orchestrator/errors.go` (e.g. `classifyLeaseError`, `classifyGitError`, `classifyBazelClientError`) map component-level sentinels (`repomanager.ErrPoolTimeout`, `git.ErrTimeout`, `bazel.ErrNetwork`) to the appropriate error code.
 
 ### Graphrunner
 
@@ -162,18 +174,17 @@ After regenerating, run `make gazelle` so the new file is picked up by Bazel.
 
 ### Makefile
 
-Targets stay **alphabetically sorted** and each has a `## Description` for the auto-generated `make help`:
-
-```makefile
-build: ## Build all targets
-	@$(BAZEL) build //...
-```
+The Makefile has a hand-written `help` target that lists available targets with descriptions. New targets should include a comment explaining their purpose.
 
 ### Common Make Targets
 
 ```bash
 make build                            # Build all targets
 make test                             # Run all tests
+make test-integration                 # Run integration tests (requires a local repo; slow)
+make bench                            # Run GetChangedTargets benchmarks (measurement only, not in CI)
+make lint                             # Run golangci-lint
+make cover                            # Run tests with coverage, write cover.out
 make gazelle                          # Update BUILD.bazel files
 make proto                            # Regenerate protobuf files
 make clean                            # Clean Bazel cache
@@ -181,7 +192,8 @@ make clean-proto                      # Remove generated proto files
 make run-server                       # Run the Tango YARPC server (127.0.0.1:8081)
 make run-client-get-graph             # Drive the client against the running server
 make run-client-changed-targets       # Drive get-changed-targets against the running server
-make help                             # Show all targets
+make version                          # Show Bazel version
+make help                             # Show all targets with descriptions
 ```
 
 ### CI and Validation
@@ -202,34 +214,35 @@ If you modified `.proto` files or interface signatures, also run `make proto` an
 2. **Interfaces for behavior, structs for data** — interfaces for behavioral contracts (`Storage`, `RepoManager`, `Workspace`, `GraphRunner`, `Orchestrator`). Structs for data containers, configs, and params (`Config`, `Params`, `WorkspaceParams`).
 3. **Value types over pointers** — prefer value types for structs, configs, and return values. Use `(T, bool)` to signal absence instead of `*T`. Pointers only when mutation or shared ownership is needed.
 4. **`Params` structs** — every non-trivial constructor takes a `Params` value (e.g. `controller.Params`, `orchestrator.Params`, `repomanager.Params`). New optional fields go on `Params` with a documented default, not as constructor overloads.
-5. **Errors for failures, not control flow** — reserve `error` for unexpected or infrastructure failures. For expected outcomes use result types or `(T, bool)`. Avoid sentinel errors that represent non-failure states; `storage.NotFoundError` exists specifically because "not found" is a legitimate cache-miss signal that callers must distinguish from real failures.
+5. **Errors for failures, not control flow** — reserve `error` for unexpected or infrastructure failures. For expected outcomes use result types or `(T, bool)`. Avoid sentinel errors that represent non-failure states; `storage.ErrNotFound` exists specifically because "not found" is a legitimate cache-miss signal that callers must distinguish from real failures via `storage.IsNotFound(err)`.
 
-### Error Classification (`core/common`)
+### Error Classification (`core/errors`)
 
-Errors are classified by **origin** (user vs infra) for metrics. The contract lives in `core/common/errors.go`:
+Errors are classified by **origin** (user vs infra) for metrics. The contract lives in `core/errors/errors.go`:
 
-- `ErrorTypeUser` — caused by client input (validation failure, unknown repo, malformed request, client disconnect).
-- `ErrorTypeInfra` — caused by infrastructure (storage failure, git failure, bazel failure, timeout, panic).
+- `TangoError` — the internal error type, carrying the underlying error and an `ErrorCode`.
+- `ErrorCode` values: `ErrorUser` (caused by client input), `ErrorInfra` (caused by infrastructure), `ErrorInfraRetryable` (transient infra failure the client may retry), `ErrorCancelled` (context cancellation, detected automatically by `GetErrorCode`).
+- Constructors: `NewUser(err)`, `NewInfra(err)`, `NewInfraRetryable(err)`.
 
 **Key rules:**
 
-1. **Wrap at the failure site** with `common.WithReason(reason, errorType, err)` so the metrics tag carries a stable `failure_reason` and `failure_type`.
-2. **The deepest layer that knows the classification wraps the error.** Lower layers (storage, git, bazel) return plain errors with their own sentinels (`storage.NotFoundError`). The orchestrator and controller decide whether a given failure is user-caused or infra-caused — the same `storage.NotFoundError` may be a cache miss (silent, not an error) in one path and a `failureReasonStorage` infra error in another.
-3. **`failureReason*` constants live next to the package that emits them** (e.g. `orchestrator/errors.go`, `controller/errors.go`). Add a new constant rather than reusing a vague existing one; the metric is only useful if the reason is specific enough to act on.
-4. **Errors flow through `errors.Is` / `errors.As`** — `ClassifiedError` implements `Unwrap`, so wrapping with `WithReason` preserves the underlying sentinels (e.g. callers can still `errors.As(..., &storage.NotFoundError{})`).
-
+1. **Wrap at the failure site** with the appropriate constructor (`NewUser`, `NewInfra`, `NewInfraRetryable`) so the metric tag carries a stable `error_code`. The `GetErrorCode` function extracts the code from any error chain; context cancellations are detected automatically.
+2. **The deepest layer that knows the classification wraps the error.** Lower layers (storage, git, bazel) return plain errors with their own sentinels (`storage.ErrNotFound`, `git.ErrTimeout`, `git.ErrFatal`, `bazel.ErrNetwork`, `repomanager.ErrPoolTimeout`). The orchestrator decides whether a given failure is user-caused or infra-caused — per-cause classifiers in `orchestrator/errors.go` (`classifyLeaseError`, `classifyGitError`, `classifyBazelClientError`) handle this mapping.
+3. **The controller emits the `error_code` metric tag.** `controller/errors.go` provides `emitFailureMetric`, which calls `tangoerrors.GetErrorCode(err).String()` to tag the `failures` counter. The `errors.Fields` helper produces structured zap fields (`error` + `error_code`) for log lines.
+4. **Errors flow through `errors.Is` / `errors.As`** — `TangoError` implements `Unwrap`, so wrapping preserves the underlying sentinels (e.g. callers can still `errors.Is(err, storage.ErrNotFound)` through a `TangoError` wrapper).
 ### Caching and Treehashes
 
-The cache is the single most performance-sensitive piece of Tango. Two rules:
+The cache is the single most performance-sensitive piece of Tango. Key rules:
 
 1. **Cache keys are content-addressable, derived from the git treehash** of the materialized workspace (base + applied requests). This is what makes the cache safe across branches and PR retargets: identical trees share entries regardless of how they were assembled. Helpers in `core/cachekey` (`GetGraphByTreeHash`, `GetComparedTargetsCachePath`, `GetTreehashCachePath`) own the key shape — never construct cache paths inline.
-2. **Treat the cache as best-effort.** Reads tolerate `NotFoundError` silently; other storage errors are logged but don't fail the request — fall through to recompute.
+2. **The controller owns read-through caching.** The controller (not only the orchestrator) reads cached treehashes, downloads cached graph blobs, and reads/writes compared-targets results. The orchestrator is invoked only on a cache miss.
+3. **Two-tier failure policy.** Identity-bearing reads (treehash mapping, graph blob download) are deliberately fail-fast: a storage error that disables the cache surfaces as a visible request failure rather than silently degrading to recompute (see rationale comments in `controller/getchangedtargets.go`). Compared-targets cache reads and writes are best-effort: a miss or write failure is logged but does not fail the request.
 
 ### Cancellation and Background Work
 
 - **Pass `ctx` everywhere** and check `ctx.Err()` periodically inside any loop whose body is cheap but iteration count is large (graph walks, BFS, metadata merges). The shared constant is `cancelCheckInterval`.
 - **Cancellation is cooperative.** When fanning out (e.g. parallel graph fetches in `GetChangedTargets`), derive each goroutine's context from the parent and cancel siblings when one fails so resources aren't wasted on a result that will be discarded.
-- **Background work that must outlive the request** (cache writes, telemetry flushes) uses `context.WithoutCancel(ctx)` — this preserves request-scoped values (tracing, identity) without inheriting the deadline or cancellation signal. Such goroutines must be self-contained: their inputs must not be mutated by the foreground after the goroutine starts.
+- **Background work that must outlive the request** (cache writes) uses the controller's `appCtx` — the application-lifetime context passed to `NewController`, which is cancelled on process shutdown but not by client disconnect. This ensures a cache write is not aborted mid-flight when a client disconnects, but is still cleaned up on graceful shutdown. Per-operation deadlines are the storage backend's responsibility, not the controller's. Goroutines using `appCtx` must be self-contained: their inputs must not be mutated by the foreground after the goroutine starts.
 
 ### Testing
 
