@@ -97,7 +97,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		return fmt.Errorf("fetch target graphs: %w", err)
 	}
 
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, e, logger, firstGraph, secondGraph, maxDist)
+	changedTargetsResponses, err := c.compareTargetGraphs(ctx, e, logger, firstGraph, secondGraph)
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -375,7 +375,7 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 // are re-mapped into a canonical per-call ID namespace so the response metadata
 // only carries the names actually referenced. See internal/targetdiff for the
 // classification and distance rules.
-func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse, maxDist int32) ([]entity.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse) ([]entity.GetChangedTargetsResponse, error) {
 	compareStart := time.Now()
 	defer func() {
 		e.DurationHistogram(opGetChangedTargets, "compare_duration", metrics.SlowDurationBuckets).RecordDuration(time.Since(compareStart))
@@ -415,7 +415,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	result, err := targetdiff.Compare(ctx, targetdiff.Request{
 		Before:      before,
 		After:       after,
-		MaxDistance: maxDist,
+		MaxDistance: -1,
 	})
 	if err != nil {
 		return nil, err

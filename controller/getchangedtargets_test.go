@@ -139,7 +139,7 @@ func TestCompareTargetGraphs(t *testing.T) {
 	firstGraph := entity.GetTargetGraphResponse{Metadata: &entity.Metadata{}}
 	secondGraph := entity.GetTargetGraphResponse{Metadata: &entity.Metadata{}}
 
-	response, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), []entity.GetTargetGraphResponse{firstGraph}, []entity.GetTargetGraphResponse{secondGraph}, -1)
+	response, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), []entity.GetTargetGraphResponse{firstGraph}, []entity.GetTargetGraphResponse{secondGraph})
 	require.NoError(t, err)
 	require.NotNil(t, response)
 }
@@ -568,7 +568,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 	cs := res[0].ChangedTargets
@@ -628,7 +628,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -692,7 +692,7 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	// Hash-only change on a rule with no own-config change and no reachable
 	// seed: under "trust the hasher" semantics, an orphan CHANGED rule with
 	// no upstream explanation becomes a distance-0 seed itself.
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -747,7 +747,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -820,7 +820,7 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -890,7 +890,7 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -1064,7 +1064,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -1137,7 +1137,7 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -1184,7 +1184,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
