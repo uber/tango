@@ -33,7 +33,6 @@ func ToShortRemote(remote string) string {
 }
 
 // GetReqURLsHash returns a fixed-length hash of the ordered change requests.
-// Both URL and commit participate because either can change the materialized tree.
 func GetReqURLsHash(requests []entity.ChangeRequest) string {
 	if len(requests) == 0 {
 		return ""
@@ -41,7 +40,6 @@ func GetReqURLsHash(requests []entity.ChangeRequest) string {
 	h := md5.New()
 	for _, request := range requests {
 		writeFramedString(h, request.URL)
-		writeFramedString(h, request.Commit)
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
 }

@@ -19,12 +19,20 @@ message TangoError {
     string message = 2;
 }
 
-// Request represents a single change request with a URL and optional commit SHA.
+// Request represents a single change request, identified by a change URI.
 message Request {
-    // The URL of the change request (e.g., a GitHub pull request URL or Phabricator diff URL)
+    // The change URI of the request. The format is interpreted by the
+    // Orchestrator implementation: the bundled native orchestrator requires
+    // the canonical change-URI form
+    // github://{host[:port]}/{org}/{repo}/pull/{pr}/{head_sha}
+    // e.g. github://github.com/uber/tango/pull/123/c3a4b5d6e7f80912a3b4c5d6e7f80912a3b4c5d6
+    // whose embedded head SHA pins the exact code state; custom
+    // orchestrators may accept formats of their own. The URL participates
+    // in cache keys as an opaque string.
     string url = 1;
-    // The commit SHA associated with the change request
-    string commit = 2;
+    // commit was the SHA to apply; it is now embedded in the URI.
+    reserved 2;
+    reserved "commit";
 }
 
 // BuildDescription defines a Storage state by a primary revision string and
@@ -35,8 +43,9 @@ message BuildDescription {
     // The base commit sha of the Storage
     string base_sha = 2;
     // List of change requests to apply on top of the base revision.
-    // Each request contains a URL (e.g., a GitHub pull request or Phabricator diff URL)
-    // and an required commit SHA. If empty, the computation happens on the base revision.
+    // Each request is identified by a canonical change URI whose embedded
+    // head SHA pins the applied content. If empty, the computation happens
+    // on the base revision.
     repeated Request requests = 3;
     // The computation strategy of the original target graph
     ComputationStrategy strategy = 4;

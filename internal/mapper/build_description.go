@@ -37,8 +37,7 @@ func toChangeRequests(requests []*tangopb.Request) []entity.ChangeRequest {
 	out := make([]entity.ChangeRequest, len(requests))
 	for i, r := range requests {
 		out[i] = entity.ChangeRequest{
-			URL:    r.GetUrl(),
-			Commit: r.GetCommit(),
+			URL: r.GetUrl(),
 		}
 	}
 	return out

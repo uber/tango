@@ -27,6 +27,7 @@ import (
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/cachekey"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
@@ -149,9 +150,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 
 	gitModule := gitFactory(ws.Path())
 	for _, req := range build.ChangeRequests {
-		request, err := workspace.NewRequest(req.URL, gitModule, build.BaseSha, req.Commit, logger)
+		request, err := workspace.NewRequest(req.URL, gitModule, build.BaseSha, logger)
 		if err != nil {
-			return nil, fmt.Errorf("create request for %q: %w", req.URL, err)
+			return nil, tangoerrors.NewUser(fmt.Errorf("create request for %q: %w", req.URL, err))
 		}
 		requests = append(requests, request)
 	}

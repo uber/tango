@@ -26,21 +26,16 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestNewGitRequest_InvalidPath(t *testing.T) {
-	req := NewGitRequest(nil, "invalid", "baseRef", "", zap.NewNop().Sugar())
-	require.NotNil(t, req)
-}
-
-func TestNewGitRequest_ExtractsID(t *testing.T) {
-	r := NewGitRequest(nil, "/org/repo/pull/456", "baseRef", "abc123", zap.NewNop().Sugar())
+func TestNewGitRequest_Fields(t *testing.T) {
+	r := NewGitRequest(nil, "456", "baseRef", _testHeadSHA, zap.NewNop().Sugar())
 	gr, ok := r.(*gitRequest)
 	assert.True(t, ok, "expected *gitRequest, got %T", r)
 	assert.Equal(t, "456", gr.requestID)
 	assert.Equal(t, "baseRef", gr.baseRef)
-	assert.Equal(t, "abc123", gr.commit)
+	assert.Equal(t, _testHeadSHA, gr.headSHA)
 }
 
-func TestGitRequest_Apply_CommitIsAncestor_Success(t *testing.T) {
+func TestGitRequest_Apply_HeadSHAIsAncestor_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
@@ -54,7 +49,7 @@ func TestGitRequest_Apply_CommitIsAncestor_Success(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestGitRequest_Apply_CommitNotAncestor_ReturnsError(t *testing.T) {
+func TestGitRequest_Apply_HeadSHANotAncestor_ReturnsError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)

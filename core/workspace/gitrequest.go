@@ -17,7 +17,6 @@ package workspace
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/uber/tango/core/git"
 	"go.uber.org/zap"
@@ -27,38 +26,37 @@ type gitRequest struct {
 	git       git.Interface
 	requestID string
 	baseRef   string
-	commit    string
+	headSHA   string
 	logger    *zap.SugaredLogger
 }
 
-func NewGitRequest(git git.Interface, requestPath string, baseRef string, commit string, logger *zap.SugaredLogger) Request {
-	// get the last part of the request path
-	requestID := filepath.Base(requestPath)
+// NewGitRequest creates a Request that applies a GitHub pull request.
+// requestID and headSHA come from the parsed change URI; see
+// https://github.com/uber/submitqueue/blob/main/doc/rfc/change-uri.md.
+func NewGitRequest(git git.Interface, requestID string, baseRef string, headSHA string, logger *zap.SugaredLogger) Request {
 	return &gitRequest{
 		git:       git,
 		requestID: requestID,
 		baseRef:   baseRef,
-		commit:    commit,
+		headSHA:   headSHA,
 		logger:    logger,
 	}
 }
 
 // Apply applies the change request to the workspace.
 func (r *gitRequest) Apply(ctx context.Context) error {
-	r.logger.Infow("gitRequest: Applying PR", zap.String("request_id", r.requestID), zap.String("base_ref", r.baseRef), zap.String("commit", r.commit))
+	r.logger.Infow("gitRequest: Applying PR", zap.String("request_id", r.requestID), zap.String("base_ref", r.baseRef), zap.String("head_sha", r.headSHA))
 	ref := fmt.Sprintf("+pull/%s/head:pull/%s/head", r.requestID, r.requestID)
 	err := r.git.Fetch(ctx, "origin", ref, "--force", "--no-tags")
 	if err != nil {
 		return fmt.Errorf("fetch PR %s: %w", r.requestID, err)
 	}
-	if r.commit != "" {
-		isAncestor, err := r.git.IsAncestor(ctx, r.commit, fmt.Sprintf("pull/%s/head", r.requestID))
-		if err != nil {
-			return fmt.Errorf("failed to read PR commit history: %w", err)
-		}
-		if !isAncestor {
-			return fmt.Errorf("commit %q is not an ancestor of PR %s", r.commit, r.requestID)
-		}
+	isAncestor, err := r.git.IsAncestor(ctx, r.headSHA, fmt.Sprintf("pull/%s/head", r.requestID))
+	if err != nil {
+		return fmt.Errorf("failed to read PR commit history: %w", err)
+	}
+	if !isAncestor {
+		return fmt.Errorf("head SHA %q is not an ancestor of PR %s", r.headSHA, r.requestID)
 	}
 	patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
 	if err != nil {

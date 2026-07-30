@@ -1,0 +1,19 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "changeuri",
+    srcs = ["changeuri.go"],
+    importpath = "github.com/uber/tango/core/changeuri",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "changeuri_test",
+    srcs = ["changeuri_test.go"],
+    embed = [":changeuri"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@net_pgregory_rapid//:rapid",
+    ],
+)

@@ -22,19 +22,21 @@ import (
 	"pgregory.net/rapid"
 )
 
-func TestGetTreehashCachePath_commitAffectsKey(t *testing.T) {
+func TestGetTreehashCachePath_headSHAAffectsKey(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		commit := rapid.StringMatching(`[a-z]+`).Draw(t, "commit")
+		sha := rapid.StringMatching(`[0-9a-f]{40}`).Draw(t, "sha")
+		otherSHA := rapid.StringMatching(`[0-9a-f]{40}`).Filter(func(s string) bool { return s != sha }).Draw(t, "otherSHA")
 		build := entity.BuildDescription{
 			Remote:  "git@github:uber/tango",
 			BaseSha: "base",
 			ChangeRequests: []entity.ChangeRequest{
-				{URL: "github://uber/tango/pull/1", Commit: commit},
+				{URL: "github://github.com/uber/tango/pull/1/" + sha},
 			},
 		}
 		changed := build
-		changed.ChangeRequests = append([]entity.ChangeRequest(nil), build.ChangeRequests...)
-		changed.ChangeRequests[0].Commit = commit + "x"
+		changed.ChangeRequests = []entity.ChangeRequest{
+			{URL: "github://github.com/uber/tango/pull/1/" + otherSHA},
+		}
 
 		require.NotEqual(t, GetTreehashCachePath(build), GetTreehashCachePath(changed))
 	})
@@ -42,14 +44,14 @@ func TestGetTreehashCachePath_commitAffectsKey(t *testing.T) {
 
 func TestGetTreehashCachePath_changeRequestOrderAffectsKey(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		firstCommit := rapid.StringMatching(`[a-z]+`).Draw(t, "firstCommit")
-		secondCommit := rapid.StringMatching(`[a-z]+`).Draw(t, "secondCommit")
+		firstSHA := rapid.StringMatching(`[0-9a-f]{40}`).Draw(t, "firstSHA")
+		secondSHA := rapid.StringMatching(`[0-9a-f]{40}`).Filter(func(s string) bool { return s != firstSHA }).Draw(t, "secondSHA")
 		build := entity.BuildDescription{
 			Remote:  "git@github:uber/tango",
 			BaseSha: "base",
 			ChangeRequests: []entity.ChangeRequest{
-				{URL: "github://uber/tango/pull/1", Commit: firstCommit},
-				{URL: "github://uber/tango/pull/2", Commit: secondCommit},
+				{URL: "github://github.com/uber/tango/pull/1/" + firstSHA},
+				{URL: "github://github.com/uber/tango/pull/2/" + secondSHA},
 			},
 		}
 		swapped := build

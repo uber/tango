@@ -54,8 +54,8 @@ func TestGetTreehashCachePath(t *testing.T) {
 		Remote:  "git@github:uber/tango",
 		BaseSha: "deadbeef",
 		ChangeRequests: []entity.ChangeRequest{
-			{URL: "github://org/repo/pull/1", Commit: "abc"},
-			{URL: "custom://foo/bar", Commit: "def"},
+			{URL: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
+			{URL: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
 		},
 	}
 	got := GetTreehashCachePath(desc)

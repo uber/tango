@@ -48,6 +48,8 @@ and flags for limiting changed-target distance (`-max-distance`), cache bypass
 `-include-attributes`), and request URLs (`-request-urls`,
 `-new-request-urls`). Run with `-h` for the full list.
 
+Change requests are identified by canonical change URIs of the form `github://{host[:port]}/{org}/{repo}/pull/{pr}/{head_sha}`, per the [change-URI RFC](https://github.com/uber/submitqueue/blob/main/doc/rfc/change-uri.md) — for example `github://github.com/uber/tango/pull/123/c3a4b5d6e7f80912a3b4c5d6e7f80912a3b4c5d6`. The head SHA is the PR's head commit at submission time; it pins the exact code state applied on top of the base revision and forms the cache identity. The bundled native orchestrator rejects non-canonical spellings (uppercase host, abbreviated SHA, missing host); custom Orchestrator implementations may accept formats of their own.
+
 ## Benchmarking
 
 The query-bench tool times the standard Tango query against a real Bazel

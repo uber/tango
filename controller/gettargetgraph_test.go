@@ -56,8 +56,8 @@ func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
 			Requests: []*pb.Request{
-				{Url: "github://repo/1", Commit: "abc111"},
-				{Url: "github://repo/2", Commit: "abc222"},
+				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
+				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
 			},
 		},
 	}
@@ -81,8 +81,8 @@ func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
 			Requests: []*pb.Request{
-				{Url: "github://repo/1", Commit: "abc111"},
-				{Url: "github://repo/2", Commit: "abc222"},
+				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
+				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
 			},
 		},
 	}, stream)
@@ -107,8 +107,8 @@ func TestGetTargetGraph_DecodeError_ReturnsError(t *testing.T) {
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
 			Requests: []*pb.Request{
-				{Url: "github://repo/1", Commit: "abc111"},
-				{Url: "github://repo/2", Commit: "abc222"},
+				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
+				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
 			},
 		},
 	}, stream)
@@ -137,8 +137,8 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 			Remote:  "repo:go-code",
 			BaseSha: "sha",
 			Requests: []*pb.Request{
-				{Url: "github://repo/1", Commit: "abc111"},
-				{Url: "github://repo/2", Commit: "abc222"},
+				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
+				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
 			},
 		},
 	}, stream)
@@ -158,8 +158,8 @@ func TestGetTargetGraph_BuildDescriptionMissingRequiredFields_ReturnsError(t *te
 		BuildDescription: &pb.BuildDescription{
 			Remote: "repo:go-code",
 			Requests: []*pb.Request{
-				{Url: "github://repo/1", Commit: "abc111"},
-				{Url: "github://repo/2", Commit: "abc222"},
+				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
+				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
 			},
 		},
 	}, stream)

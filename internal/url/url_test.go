@@ -58,10 +58,14 @@ func TestGetReqURLsHash(t *testing.T) {
 	md5hex := func(requests ...entity.ChangeRequest) string {
 		h := md5.New()
 		for _, request := range requests {
-			fmt.Fprintf(h, "%d:%s%d:%s", len(request.URL), request.URL, len(request.Commit), request.Commit)
+			fmt.Fprintf(h, "%d:%s", len(request.URL), request.URL)
 		}
 		return fmt.Sprintf("%x", h.Sum(nil))
 	}
+	const (
+		uri1 = "github://github.com/org/repo/pull/42/c3a4b5d6e7f80912a3b4c5d6e7f80912a3b4c5d6"
+		uri2 = "github://github.com/org/repo/pull/43/1111111111111111111111111111111111111111"
+	)
 	tests := []struct {
 		name string
 		in   []entity.ChangeRequest
@@ -74,18 +78,18 @@ func TestGetReqURLsHash(t *testing.T) {
 		},
 		{
 			name: "single",
-			in:   []entity.ChangeRequest{{URL: "github://org/repo/pull/42", Commit: "abc"}},
-			want: md5hex(entity.ChangeRequest{URL: "github://org/repo/pull/42", Commit: "abc"}),
+			in:   []entity.ChangeRequest{{URL: uri1}},
+			want: md5hex(entity.ChangeRequest{URL: uri1}),
 		},
 		{
 			name: "multiple",
-			in:   []entity.ChangeRequest{{URL: "a", Commit: "1"}, {URL: "b", Commit: "2"}},
-			want: md5hex(entity.ChangeRequest{URL: "a", Commit: "1"}, entity.ChangeRequest{URL: "b", Commit: "2"}),
+			in:   []entity.ChangeRequest{{URL: uri1}, {URL: uri2}},
+			want: md5hex(entity.ChangeRequest{URL: uri1}, entity.ChangeRequest{URL: uri2}),
 		},
 		{
 			name: "reverse order",
-			in:   []entity.ChangeRequest{{URL: "b", Commit: "2"}, {URL: "a", Commit: "1"}},
-			want: md5hex(entity.ChangeRequest{URL: "b", Commit: "2"}, entity.ChangeRequest{URL: "a", Commit: "1"}),
+			in:   []entity.ChangeRequest{{URL: uri2}, {URL: uri1}},
+			want: md5hex(entity.ChangeRequest{URL: uri2}, entity.ChangeRequest{URL: uri1}),
 		},
 	}
 	for _, tt := range tests {

@@ -197,7 +197,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 		Build: entity.BuildDescription{
 			Remote:         "git@github:uber/tango",
 			BaseSha:        "1234567890",
-			ChangeRequests: []entity.ChangeRequest{{URL: "github://org/repo/pull/123"}},
+			ChangeRequests: []entity.ChangeRequest{{URL: "github://github.com/org/repo/pull/123/c3a4b5d6e7f80912a3b4c5d6e7f80912a3b4c5d6"}},
 		},
 	})
 	require.NoError(t, err)
@@ -206,6 +206,39 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	chunk, rerr := reader.Read()
 	require.NoError(t, rerr)
 	require.NotNil(t, chunk.Targets)
+}
+
+func TestNative_GetTargetGraph_InvalidChangeURI_UserError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	st := storagemock.NewMockStorage(ctrl)
+	g := gitmock.NewMockInterface(ctrl)
+	ws := workspacemock.NewMockWorkspace(ctrl)
+	ws.EXPECT().Path().Return("/tmp/ws")
+	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().Release().Return(nil)
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
+	o, err := NewNativeOrchestrator(context.Background(), Params{
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t).Sugar(),
+		GitFactory:  func(dir string) git.Interface { return g },
+		Config:      testConfig(t),
+	})
+	require.NoError(t, err)
+	resp, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{
+			Remote:  "git@github:uber/tango",
+			BaseSha: "1234567890",
+			// Legacy hostless form without a head SHA — rejected by the
+			// native orchestrator as a user error.
+			ChangeRequests: []entity.ChangeRequest{{URL: "github://org/repo/pull/123"}},
+		},
+	})
+	require.Error(t, err)
+	require.Nil(t, resp)
+	assert.Equal(t, tangoerrors.ErrorUser, tangoerrors.GetErrorCode(err))
 }
 
 func TestNewNativeOrchestrator_usesProvidedConfig(t *testing.T) {

@@ -36,7 +36,7 @@ func main() {
 	method := flag.String("method", "get-target-graph", "method to call: get-target-graph, get-changed-targets")
 	remote := flag.String("remote", "", "build description remote")
 	baseSHA := flag.String("base-sha", "", "build description base sha")
-	reqURLs := flag.String("request-urls", "", "comma-separated change request URLs")
+	reqURLs := flag.String("request-urls", "", "comma-separated canonical change URIs, e.g. github://{host}/{org}/{repo}/pull/{pr}/{head_sha}")
 	timeout := flag.Duration("timeout", 5*time.Minute, "request timeout")
 	maxDistance := flag.Int("max-distance", -1, "max distance for changed targets")
 	bypassCache := flag.Bool("bypass-cache", false, "skip cache lookup and force recomputation, overwriting cached result")
@@ -45,7 +45,7 @@ func main() {
 	includeAttributes := flag.Bool("include-attributes", false, "include per-target attributes + attribute mappings in responses (proto3 default: false)")
 
 	newBaseSHA := flag.String("new-base-sha", "", "build description new base sha")
-	newRequestURLs := flag.String("new-request-urls", "", "comma-separated change request URLs for new state")
+	newRequestURLs := flag.String("new-request-urls", "", "comma-separated canonical change URIs for new state, e.g. github://{host}/{org}/{repo}/pull/{pr}/{head_sha}")
 	flag.Parse()
 
 	grpcTransport := yarpcgrpc.NewTransport()

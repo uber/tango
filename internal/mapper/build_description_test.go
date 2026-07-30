@@ -43,8 +43,10 @@ func TestProtoToBuildDescription(t *testing.T) {
 				Remote:  "git@example.com:org/repo",
 				BaseSha: "abc123",
 				Requests: []*tangopb.Request{
-					{Url: "https://example.com/pr/1", Commit: "sha1"},
-					{Url: "https://example.com/pr/2", Commit: "sha2"},
+					{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
+					// URL format is orchestrator-specific; the mapper passes
+					// it through opaquely without validation.
+					{Url: "https://example.com/pr/2"},
 				},
 				Strategy: tangopb.COMPUTATION_STRATEGY_NATIVE,
 			},
@@ -52,8 +54,8 @@ func TestProtoToBuildDescription(t *testing.T) {
 				Remote:  "git@example.com:org/repo",
 				BaseSha: "abc123",
 				ChangeRequests: []entity.ChangeRequest{
-					{URL: "https://example.com/pr/1", Commit: "sha1"},
-					{URL: "https://example.com/pr/2", Commit: "sha2"},
+					{URL: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
+					{URL: "https://example.com/pr/2"},
 				},
 				Strategy: entity.ComputationStrategyNative,
 			},

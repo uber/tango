@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/uber/tango/core/changeuri"
 	"github.com/uber/tango/core/git"
 	"go.uber.org/zap"
 )
@@ -28,15 +29,20 @@ type Request interface {
 	Apply(ctx context.Context) error
 }
 
-// NewRequest creates a new request based on the request URL.
-func NewRequest(rawURL string, g git.Interface, baseRef string, commit string, logger *zap.SugaredLogger) (Request, error) {
+// NewRequest creates a new request from a canonical change URI, e.g.
+// github://{host[:port]}/{org}/{repo}/pull/{pr}/{head_sha}.
+func NewRequest(rawURL string, g git.Interface, baseRef string, logger *zap.SugaredLogger) (Request, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
 	}
 	switch u.Scheme {
-	case "github":
-		return NewGitRequest(g, u.Path, baseRef, commit, logger), nil
+	case changeuri.Scheme:
+		pr, err := changeuri.Parse(rawURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid change URI %q: %w", rawURL, err)
+		}
+		return NewGitRequest(g, pr.Number, baseRef, pr.HeadSHA, logger), nil
 	}
 	return nil, fmt.Errorf("unsupported scheme: %v", u.Scheme)
 }
