@@ -63,7 +63,7 @@ func TestLinkRequestCtx_CancelsOnAppCtx(t *testing.T) {
 	<-linked.Done()
 	assert.ErrorIs(t, linked.Err(), context.Canceled)
 	assert.NoError(t, reqCtx.Err(), "linkRequestCtx must not cancel the request ctx")
-	assert.Equal(t, tangoerrors.ErrorInfra, tangoerrors.GetErrorCode(context.Cause(linked)))
+	assert.Equal(t, tangoerrors.ErrorCancelled, tangoerrors.GetErrorCode(context.Cause(linked)))
 }
 
 // TestLinkRequestCtx_CancelsOnRequestCtx verifies that cancellation of the

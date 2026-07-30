@@ -16,7 +16,7 @@ package controller
 
 import (
 	"context"
-	"errors"
+	"fmt"
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
@@ -84,7 +84,7 @@ func (c *controller) linkRequestCtx(reqCtx context.Context) (context.Context, co
 	// Register a one-shot watcher that cancels the derived ctx if appCtx fires.
 	// AfterFunc only observes appCtx; it never cancels it. stop() deregisters
 	// the watcher so the closure is not retained past the request.
-	stop := context.AfterFunc(c.appCtx, func() { cancel(errors.New("app context canceled")) })
+	stop := context.AfterFunc(c.appCtx, func() { cancel(fmt.Errorf("app context canceled: %w", context.Canceled)) })
 	return ctx, func() {
 		stop()
 		cancel(nil)

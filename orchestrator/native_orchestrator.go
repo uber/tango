@@ -27,6 +27,7 @@ import (
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/cachekey"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
@@ -116,7 +117,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	remote := build.Remote
 	repoCfg, ok := b.config.GetRepositoryConfig(remote)
 	if !ok {
-		return nil, fmt.Errorf("no repository configuration found for remote %q", remote)
+		return nil, tangoerrors.NewUser(fmt.Errorf("no repository configuration found for remote %q", remote))
 	}
 	leaseStart := time.Now()
 	ws, err := b.repoManager.Lease(ctx, build)
@@ -211,7 +212,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	result, err := runner.Compute(ctx, ws)
 	recordStep(e, "compute_duration", computeStart, metrics.SlowDurationBuckets)
 	if err != nil {
-		return nil, fmt.Errorf("compute target graph: %w", err)
+		return nil, classifyRunnerError(fmt.Errorf("compute target graph: %w", err))
 	}
 	chunks, err := mapper.ResultToGraphChunks(ctx, result, b.config.Service.MaxMessageBytes)
 	if err != nil {

@@ -15,6 +15,7 @@
 package orchestrator
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -52,4 +53,22 @@ func classifyBazelClientError(err error) error {
 		return tangoerrors.NewInfraRetryable(wrappedErr)
 	}
 	return tangoerrors.NewInfra(wrappedErr)
+}
+
+// classifyRunnerError classifies a graph-runner / Bazel computation failure.
+// Recognized infrastructure sentinels (network errors, git timeouts/fatals,
+// context deadline exceeded) are tagged as infra; everything else is assumed
+// to be caused by the repository content (e.g. broken BUILD files, invalid
+// targets) and classified as user.
+func classifyRunnerError(err error) error {
+	switch {
+	case errors.Is(err, bazel.ErrNetwork):
+		return tangoerrors.NewInfraRetryable(err)
+	case errors.Is(err, git.ErrTimeout),
+		errors.Is(err, git.ErrFatal),
+		errors.Is(err, context.DeadlineExceeded):
+		return tangoerrors.NewInfra(err)
+	default:
+		return tangoerrors.NewUser(err)
+	}
 }

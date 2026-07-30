@@ -137,3 +137,55 @@ func TestClassifyBazelClientError(t *testing.T) {
 		})
 	}
 }
+
+func TestClassifyRunnerError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      error
+		wantCode tangoerrors.ErrorCode
+	}{
+		{
+			name:     "network failure is infra retryable",
+			err:      fmt.Errorf("query: %w", bazel.ErrNetwork),
+			wantCode: tangoerrors.ErrorInfraRetryable,
+		},
+		{
+			name:     "git timeout is infra",
+			err:      fmt.Errorf("diff: %w", git.ErrTimeout),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+		{
+			name:     "git fatal is infra",
+			err:      fmt.Errorf("diff: %w", git.ErrFatal),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+		{
+			name:     "context deadline exceeded is infra",
+			err:      fmt.Errorf("query timed out: %w", context.DeadlineExceeded),
+			wantCode: tangoerrors.ErrorInfra,
+		},
+		{
+			name:     "generic bazel error is user (broken BUILD file)",
+			err:      fmt.Errorf("bazel query failed: syntax error in BUILD"),
+			wantCode: tangoerrors.ErrorUser,
+		},
+		{
+			name:     "generic runner error is user",
+			err:      fmt.Errorf("target //foo:bar not found"),
+			wantCode: tangoerrors.ErrorUser,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := classifyRunnerError(tt.err)
+			require.Error(t, got)
+			assert.Equal(t, tt.wantCode, tangoerrors.GetErrorCode(got))
+			assert.ErrorIs(t, got, tt.err)
+		})
+	}
+}
