@@ -151,8 +151,9 @@ func TestGetTargetGraph_InfraError_WiresTangoError(t *testing.T) {
 
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
-			Remote:  "repo:go-code",
-			BaseSha: "sha",
+			Remote:   "repo:go-code",
+			BaseSha:  "sha",
+			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
 		},
 	}, stream)
 	require.Error(t, err)
