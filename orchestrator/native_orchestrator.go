@@ -168,7 +168,8 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, classifyGitError(fmt.Errorf("compute treehash for %s@%s: %w", build.Remote, build.BaseSha, err))
 	}
-	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
+	configHash := cachekey.HashGraphAffectingConfig(repoCfg)
+	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex, configHash)
 	if !req.BypassCache {
 		cacheReadStart := time.Now()
 		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
@@ -222,11 +223,17 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
 	}
-	treehashCachePath := cachekey.GetTreehashCachePath(build)
-	treehashReader := bytes.NewReader([]byte(treehash))
-	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
-	if err != nil {
-		return nil, fmt.Errorf("store treehash mapping at %s: %w", treehashCachePath, err)
+	// Only write the treehash mapping when base_sha is a full 40-hex SHA.
+	// Mutable refs (HEAD, branch names) can move, so caching a mapping keyed
+	// by the literal ref string would serve a stale treehash once the ref
+	// advances.
+	if cachekey.IsFullHexSHA(build.BaseSha) {
+		treehashCachePath := cachekey.GetTreehashCachePath(build)
+		treehashReader := bytes.NewReader([]byte(treehash))
+		err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
+		if err != nil {
+			return nil, fmt.Errorf("store treehash mapping at %s: %w", treehashCachePath, err)
+		}
 	}
 	recordStep(e, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
 	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)

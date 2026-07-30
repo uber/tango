@@ -6,6 +6,7 @@ go_library(
     importpath = "github.com/uber/tango/core/cachekey",
     visibility = ["//visibility:public"],
     deps = [
+        "//config",
         "//entity",
         "//internal/url",
     ],
@@ -20,6 +21,7 @@ go_test(
     ],
     embed = [":cachekey"],
     deps = [
+        "//config",
         "//entity",
         "//internal/url",
         "@com_github_stretchr_testify//assert",

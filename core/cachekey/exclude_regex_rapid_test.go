@@ -34,14 +34,14 @@ func TestExcludeFilesRegex_keyProperties(t *testing.T) {
 		leftPermuted := []string{left[1], left[0]}
 		rightPermuted := []string{right[1], right[0]}
 
-		leftGraph := GetGraphByTreeHash("git@github:uber/tango", "tree", entity.ComputationStrategyNative, left)
-		rightGraph := GetGraphByTreeHash("git@github:uber/tango", "tree", entity.ComputationStrategyNative, right)
-		require.Equal(t, leftGraph, GetGraphByTreeHash("git@github:uber/tango", "tree", entity.ComputationStrategyNative, leftPermuted))
+		leftGraph := GetGraphByTreeHash("git@github:uber/tango", "tree", entity.ComputationStrategyNative, left, "")
+		rightGraph := GetGraphByTreeHash("git@github:uber/tango", "tree", entity.ComputationStrategyNative, right, "")
+		require.Equal(t, leftGraph, GetGraphByTreeHash("git@github:uber/tango", "tree", entity.ComputationStrategyNative, leftPermuted, ""))
 
 		leftCompared := GetComparedTargetsCachePath("git@github:uber/tango", "before", "after", left)
 		rightCompared := GetComparedTargetsCachePath("git@github:uber/tango", "before", "after", right)
 		require.Equal(t, leftCompared, GetComparedTargetsCachePath("git@github:uber/tango", "before", "after", leftPermuted))
-		require.Equal(t, rightGraph, GetGraphByTreeHash("git@github:uber/tango", "tree", entity.ComputationStrategyNative, rightPermuted))
+		require.Equal(t, rightGraph, GetGraphByTreeHash("git@github:uber/tango", "tree", entity.ComputationStrategyNative, rightPermuted, ""))
 		require.Equal(t, rightCompared, GetComparedTargetsCachePath("git@github:uber/tango", "before", "after", rightPermuted))
 		require.Equal(t, leftBefore, left)
 		require.Equal(t, rightBefore, right)

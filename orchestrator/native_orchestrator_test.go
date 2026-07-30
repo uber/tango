@@ -74,7 +74,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	})
 	require.NoError(t, err)
 	reader, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{
-		Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"},
+		Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, reader)
@@ -128,7 +128,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		Config:      testConfig(t),
 	})
 	require.Nil(t, err)
-	reader, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}})
+	reader, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}})
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 	defer reader.Close()
@@ -158,7 +158,7 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
-	resp, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}})
+	resp, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}})
 	require.Error(t, err)
 	require.Nil(t, resp)
 }

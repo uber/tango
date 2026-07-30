@@ -775,12 +775,20 @@ func readTreehashParallel(ctx context.Context, st storage.Storage, first, second
 
 // readTreehash fetches the treehash stored at GetTreehashCachePath for the given build description.
 // Returns ("", nil) on a cache miss (not-found is the normal "not yet computed" state).
+// Returns ("", nil) when base_sha is not a full 40-hex SHA (mutable refs can move,
+// making a cached mapping stale; the caller should recompute).
 // Returns ("", err) on any other storage or read failure so callers can decide whether to
 // surface the error or fall back. Returns (treehash, nil) on a successful read.
 func readTreehash(ctx context.Context, st storage.Storage, buildDescription *pb.BuildDescription, e *metrics.Emitter, op string) (string, error) {
 	entityBuild, err := mapper.ProtoToBuildDescription(buildDescription)
 	if err != nil {
 		return "", err
+	}
+	// Mutable refs (HEAD, branch names) can move after the treehash mapping
+	// was written, making the cached mapping stale. Only use the mapping when
+	// base_sha is a full 40-hex SHA.
+	if !cachekey.IsFullHexSHA(entityBuild.BaseSha) {
+		return "", nil
 	}
 	key := cachekey.GetTreehashCachePath(entityBuild)
 	resp, err := st.Get(ctx, storage.DownloadRequest{Key: key})

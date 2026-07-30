@@ -9,8 +9,14 @@ import (
 
 // ProtoToBuildDescription converts a proto BuildDescription to the domain
 // type. Returns an error if desc is nil or missing a required field (remote,
-// base_sha) — every downstream consumer (cache-key derivation, workspace
+// base_sha) -- every downstream consumer (cache-key derivation, workspace
 // checkout) depends on both being set.
+//
+// base_sha may be any git ref that the remote can resolve: a full 40-hex
+// commit SHA, a short SHA, a branch name, or HEAD. Cache-key helpers treat
+// full 40-hex SHAs as immutable and cache treehash mappings for them;
+// mutable refs bypass the mapping cache so the workspace is materialized
+// and the ref resolved fresh each time. See cachekey.IsFullHexSHA.
 func ProtoToBuildDescription(desc *tangopb.BuildDescription) (entity.BuildDescription, error) {
 	if desc == nil {
 		return entity.BuildDescription{}, errors.New("build description is required")

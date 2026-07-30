@@ -53,22 +53,22 @@ func TestValidateGetChangedTargetsRequest(t *testing.T) {
 		{
 			name: "missing first revision",
 			request: &pb.GetChangedTargetsRequest{
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing second revision",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+				FirstRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing first revision remote",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 			},
 			wantErr: true,
 		},
@@ -76,22 +76,22 @@ func TestValidateGetChangedTargetsRequest(t *testing.T) {
 			name: "missing first revision base_sha",
 			request: &pb.GetChangedTargetsRequest{
 				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing second revision remote",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				SecondRevision: &pb.BuildDescription{BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing second revision base_sha",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code"},
 			},
 			wantErr: true,
@@ -99,23 +99,23 @@ func TestValidateGetChangedTargetsRequest(t *testing.T) {
 		{
 			name: "different remotes",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:other", BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				SecondRevision: &pb.BuildDescription{Remote: "repo:other", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing output_config defaults to no filtering",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 			},
 		},
 		{
 			name: "valid request",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 				OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 			},
 		},
@@ -187,8 +187,8 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
@@ -218,8 +218,8 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
@@ -229,7 +229,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 }
 
 func TestReadTreehash(t *testing.T) {
-	bd := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"}
+	bd := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 
 	t.Run("cache miss returns empty and no error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
@@ -264,6 +264,21 @@ func TestReadTreehash(t *testing.T) {
 		val, err := readTreehash(t.Context(), st, bd, metrics.Nop(), opGetChangedTargets)
 		require.NoError(t, err)
 		assert.Equal(t, "deadbeef", val)
+	})
+
+	t.Run("mutable ref skips mapping cache", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		// No storage expectations — the mapping must be skipped entirely
+		// for non-full-SHA refs.
+		st := storagemock.NewMockStorage(ctrl)
+
+		mutableRefs := []string{"HEAD", "main", "feature/branch", "abc1234"}
+		for _, ref := range mutableRefs {
+			bd := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: ref}
+			val, err := readTreehash(t.Context(), st, bd, metrics.Nop(), opGetChangedTargets)
+			require.NoError(t, err, "ref=%s", ref)
+			assert.Empty(t, val, "ref=%s should return empty treehash", ref)
+		}
 	})
 }
 
@@ -304,8 +319,8 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
@@ -372,9 +387,9 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 			switch {
 			case strings.Contains(req.Key, "compared-targets"):
 				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
-			case strings.Contains(req.Key, "sha1"):
+			case strings.Contains(req.Key, "base-sha-aaaa"):
 				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
-			case strings.Contains(req.Key, "sha2"):
+			case strings.Contains(req.Key, "base-sha-bbbb"):
 				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
 			case strings.Contains(req.Key, "treehash1"):
 				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph1Bytes))}, nil
@@ -399,8 +414,8 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true},
 	}
 
@@ -463,9 +478,9 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 			switch {
 			case strings.Contains(req.Key, "compared-targets"):
 				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
-			case strings.Contains(req.Key, "sha1"):
+			case strings.Contains(req.Key, "base-sha-aaaa"):
 				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
-			case strings.Contains(req.Key, "sha2"):
+			case strings.Contains(req.Key, "base-sha-bbbb"):
 				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
 			case strings.Contains(req.Key, "treehash"):
 				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graphBytes))}, nil
@@ -493,8 +508,8 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
@@ -986,8 +1001,8 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: 1},
 	}
 
@@ -1235,8 +1250,8 @@ func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) 
 
 func changedTargetsRequest() *pb.GetChangedTargetsRequest {
 	return &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 }
@@ -1278,9 +1293,9 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 				switch {
 				case strings.Contains(req.Key, "compared-targets"):
 					return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(truncated))}, nil
-				case strings.Contains(req.Key, "sha1"):
+				case strings.Contains(req.Key, "base-sha-aaaa"):
 					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash1"))}, nil
-				case strings.Contains(req.Key, "sha2"):
+				case strings.Contains(req.Key, "base-sha-bbbb"):
 					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash2"))}, nil
 				default:
 					return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
@@ -1312,9 +1327,9 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 				switch {
 				case strings.Contains(req.Key, "compared-targets"):
 					return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cached))}, nil
-				case strings.Contains(req.Key, "sha1"):
+				case strings.Contains(req.Key, "base-sha-aaaa"):
 					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash1"))}, nil
-				case strings.Contains(req.Key, "sha2"):
+				case strings.Contains(req.Key, "base-sha-bbbb"):
 					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash2"))}, nil
 				default:
 					return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
@@ -1365,7 +1380,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, p entity.GetTargetGraphRequest) (storage.GraphReader, error) {
-				if p.Build.BaseSha == "sha1" {
+				if p.Build.BaseSha == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 					return nil, injected
 				}
 				return newGraphReader(t, entityChunk), nil

@@ -19,6 +19,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/url"
 )
@@ -29,23 +31,45 @@ func TestGetGraphByTreeHash(t *testing.T) {
 	treehash := "abcd1234"
 	strategy := entity.ComputationStrategyNative
 
-	// Nil/empty exclude list ⇒ no suffix.
-	got := GetGraphByTreeHash(remote, treehash, strategy, nil)
+	// Nil/empty exclude list + empty config hash => no suffix (legacy path).
+	got := GetGraphByTreeHash(remote, treehash, strategy, nil, "")
 	assert.Equal(t, filepath.Join("uber/tango", "graphs", treehash, strategy.String()), got)
-	assert.Equal(t, got, GetGraphByTreeHash(remote, treehash, strategy, []string{}))
+	assert.Equal(t, got, GetGraphByTreeHash(remote, treehash, strategy, []string{}, ""))
 
-	// Different strategies ⇒ different keys.
-	assert.NotEqual(t, got, GetGraphByTreeHash(remote, treehash, entity.ComputationStrategyShell, nil))
+	// Different strategies => different keys.
+	assert.NotEqual(t, got, GetGraphByTreeHash(remote, treehash, entity.ComputationStrategyShell, nil, ""))
 
-	// Non-empty list ⇒ suffix appended; different lists ⇒ different keys.
-	withFoo := GetGraphByTreeHash(remote, treehash, strategy, []string{"foo.*"})
+	// Non-empty list => suffix appended; different lists => different keys.
+	withFoo := GetGraphByTreeHash(remote, treehash, strategy, []string{"foo.*"}, "")
 	assert.NotEqual(t, got, withFoo)
-	assert.NotEqual(t, withFoo, GetGraphByTreeHash(remote, treehash, strategy, []string{"bar.*"}))
+	assert.NotEqual(t, withFoo, GetGraphByTreeHash(remote, treehash, strategy, []string{"bar.*"}, ""))
 	// Order-independence: sort before hashing.
 	assert.Equal(t,
-		GetGraphByTreeHash(remote, treehash, strategy, []string{"a", "b"}),
-		GetGraphByTreeHash(remote, treehash, strategy, []string{"b", "a"}),
+		GetGraphByTreeHash(remote, treehash, strategy, []string{"a", "b"}, ""),
+		GetGraphByTreeHash(remote, treehash, strategy, []string{"b", "a"}, ""),
 	)
+}
+
+func TestGetGraphByTreeHash_ConfigHash(t *testing.T) {
+	t.Parallel()
+	remote := "git@github:uber/tango"
+	treehash := "abcd1234"
+	strategy := entity.ComputationStrategyNative
+
+	legacyPath := GetGraphByTreeHash(remote, treehash, strategy, nil, "")
+
+	// Non-empty config hash appends a _repo-config- suffix.
+	withConfig := GetGraphByTreeHash(remote, treehash, strategy, nil, "deadbeef")
+	assert.NotEqual(t, legacyPath, withConfig)
+	assert.Contains(t, withConfig, "_repo-config-deadbeef")
+
+	// Different config hashes produce different keys.
+	assert.NotEqual(t, withConfig, GetGraphByTreeHash(remote, treehash, strategy, nil, "cafebabe"))
+
+	// Config hash and exclude regex are both appended, independently.
+	withBoth := GetGraphByTreeHash(remote, treehash, strategy, []string{"foo"}, "deadbeef")
+	assert.Contains(t, withBoth, "_requests-options-")
+	assert.Contains(t, withBoth, "_repo-config-deadbeef")
 }
 
 func TestGetTreehashCachePath(t *testing.T) {
@@ -68,9 +92,119 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 	got := GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil)
 	assert.Equal(t, filepath.Join("uber/tango", "compared-targets", "abc_def"), got)
 
-	// Nil/empty list ⇒ legacy path.
+	// Nil/empty list => legacy path.
 	assert.Equal(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", []string{}))
 
-	// Different exclude lists ⇒ different keys.
+	// Different exclude lists => different keys.
 	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", []string{"foo.*"}))
+}
+
+func TestIsFullHexSHA(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		s    string
+		want bool
+	}{
+		{name: "valid lowercase", s: "a" + "0123456789abcdef0123456789abcdef0123456", want: true},
+		{name: "valid uppercase", s: "A0123456789ABCDEF0123456789ABCDEF01234567", want: false}, // 41 chars
+		{name: "valid mixed case 40", s: "aAbBcCdDeEfF00112233445566778899aAbBcCdD", want: true},
+		{name: "40 lowercase hex", s: "da39a3ee5e6b4b0d3255bfef95601890afd80709", want: true},
+		{name: "39 chars", s: "da39a3ee5e6b4b0d3255bfef95601890afd8070", want: false},
+		{name: "41 chars", s: "da39a3ee5e6b4b0d3255bfef95601890afd807091", want: false},
+		{name: "HEAD", s: "HEAD", want: false},
+		{name: "branch name", s: "main", want: false},
+		{name: "short sha", s: "da39a3e", want: false},
+		{name: "40 chars with g", s: "ga39a3ee5e6b4b0d3255bfef95601890afd80709", want: false},
+		{name: "empty", s: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsFullHexSHA(tt.s))
+		})
+	}
+}
+
+func TestHashGraphAffectingConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("default config produces empty hash (legacy key)", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, "", HashGraphAffectingConfig(config.RepositoryConfig{}))
+	})
+
+	t.Run("non-graph fields do not affect hash", func(t *testing.T) {
+		t.Parallel()
+		// Remote, QueryTimeout, StreamBazelLogs are non-graph fields.
+		cfg := config.RepositoryConfig{
+			Remote:          "git@github:uber/foo",
+			QueryTimeout:    120,
+			StreamBazelLogs: true,
+		}
+		assert.Equal(t, "", HashGraphAffectingConfig(cfg))
+	})
+
+	t.Run("each graph-affecting field changes the hash", func(t *testing.T) {
+		t.Parallel()
+		base := config.RepositoryConfig{}
+		baseHash := HashGraphAffectingConfig(base)
+
+		fields := []struct {
+			name string
+			cfg  config.RepositoryConfig
+		}{
+			{"BzlmodEnabled", config.RepositoryConfig{BzlmodEnabled: true}},
+			{"ExcludeExternalTargets", config.RepositoryConfig{ExcludeExternalTargets: true}},
+			{"BazelCommand", config.RepositoryConfig{BazelCommand: "/usr/bin/bazel"}},
+			{"BazelExtraArgs", config.RepositoryConfig{BazelExtraArgs: []string{"--foo"}}},
+			{"BazelStartupOptions", config.RepositoryConfig{BazelStartupOptions: []string{"--batch"}}},
+			{"FullHashRepos", config.RepositoryConfig{FullHashRepos: []string{"@com_google_protobuf"}}},
+			{"ExcludedFiles", config.RepositoryConfig{ExcludedFiles: []string{"BUILD.bazel"}}},
+		}
+		hashes := make(map[string]string, len(fields))
+		for _, f := range fields {
+			h := HashGraphAffectingConfig(f.cfg)
+			require.NotEqual(t, baseHash, h, "field %s should change the hash from default", f.name)
+			// Each field should produce a unique hash.
+			for prevName, prevHash := range hashes {
+				assert.NotEqual(t, prevHash, h, "field %s produced same hash as %s", f.name, prevName)
+			}
+			hashes[f.name] = h
+		}
+	})
+
+	t.Run("ordering-insensitivity for slices", func(t *testing.T) {
+		t.Parallel()
+		cfg1 := config.RepositoryConfig{BazelExtraArgs: []string{"--a", "--b", "--c"}}
+		cfg2 := config.RepositoryConfig{BazelExtraArgs: []string{"--c", "--a", "--b"}}
+		assert.Equal(t, HashGraphAffectingConfig(cfg1), HashGraphAffectingConfig(cfg2))
+
+		cfg3 := config.RepositoryConfig{FullHashRepos: []string{"repo-b", "repo-a"}}
+		cfg4 := config.RepositoryConfig{FullHashRepos: []string{"repo-a", "repo-b"}}
+		assert.Equal(t, HashGraphAffectingConfig(cfg3), HashGraphAffectingConfig(cfg4))
+
+		cfg5 := config.RepositoryConfig{BazelStartupOptions: []string{"--z", "--a"}}
+		cfg6 := config.RepositoryConfig{BazelStartupOptions: []string{"--a", "--z"}}
+		assert.Equal(t, HashGraphAffectingConfig(cfg5), HashGraphAffectingConfig(cfg6))
+
+		cfg7 := config.RepositoryConfig{ExcludedFiles: []string{"b.go", "a.go"}}
+		cfg8 := config.RepositoryConfig{ExcludedFiles: []string{"a.go", "b.go"}}
+		assert.Equal(t, HashGraphAffectingConfig(cfg7), HashGraphAffectingConfig(cfg8))
+	})
+
+	t.Run("different values produce different hashes", func(t *testing.T) {
+		t.Parallel()
+		cfg1 := config.RepositoryConfig{BazelCommand: "bazel"}
+		cfg2 := config.RepositoryConfig{BazelCommand: "bazelisk"}
+		assert.NotEqual(t, HashGraphAffectingConfig(cfg1), HashGraphAffectingConfig(cfg2))
+	})
+
+	t.Run("original slice not mutated", func(t *testing.T) {
+		t.Parallel()
+		args := []string{"c", "a", "b"}
+		orig := make([]string, len(args))
+		copy(orig, args)
+		HashGraphAffectingConfig(config.RepositoryConfig{BazelExtraArgs: args})
+		assert.Equal(t, orig, args, "caller's slice must not be reordered")
+	})
 }

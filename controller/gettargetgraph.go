@@ -100,44 +100,53 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 		zap.Any("build_description", req.Build),
 	)
 	if !req.BypassCache {
-		// Look up the the git treehash based on cache path
-		treehashCachePath := cachekey.GetTreehashCachePath(req.Build)
-		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
-		metrics.RecordCacheLookup(e, opGetTargetGraph, metrics.TreehashCacheLookup, err)
-		if err != nil {
-			if storage.IsNotFound(err) {
-				// Cache miss - blob doesn't exist, need to compute and store target graph
-				logger.Debug("getGraph: treehash not found", zap.Error(err))
-			} else {
-				// Other errors (network, infra issues) should be retried
-				return nil, fmt.Errorf("get treehash: %w", err)
-			}
+		// Only use the treehash mapping cache when base_sha is a full 40-hex
+		// SHA. Mutable refs (HEAD, branch names) can move after the mapping was
+		// written, making a cached treehash stale; skip to recompute fresh.
+		if !cachekey.IsFullHexSHA(req.Build.BaseSha) {
+			logger.Debug("getGraph: skipping treehash mapping cache for mutable ref",
+				zap.String("base_sha", req.Build.BaseSha),
+			)
 		} else {
-			defer func() { _ = treehashResponse.ReadCloser.Close() }()
-			treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)
+			// Look up the the git treehash based on cache path
+			treehashCachePath := cachekey.GetTreehashCachePath(req.Build)
+			treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
+			metrics.RecordCacheLookup(e, opGetTargetGraph, metrics.TreehashCacheLookup, err)
 			if err != nil {
-				return nil, fmt.Errorf("read treehash: %w", err)
-			}
-			logger.Info("getGraph: treehash found")
-			treehashPath := cachekey.GetGraphByTreeHash(req.Build.Remote, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
-			// Download the target graph based on treehash.
-			storageStart := time.Now()
-			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
-			if ctx.Err() != nil {
-				err = context.Cause(ctx)
-			}
-			if err != nil {
-				if !storage.IsNotFound(err) {
-					return nil, fmt.Errorf("graph reader: %w", err)
+				if storage.IsNotFound(err) {
+					// Cache miss - blob doesn't exist, need to compute and store target graph
+					logger.Debug("getGraph: treehash not found", zap.Error(err))
+				} else {
+					// Other errors (network, infra issues) should be retried
+					return nil, fmt.Errorf("get treehash: %w", err)
 				}
-				logger.Warn("getGraph: graph not found at treehash path", zap.Error(err))
 			} else {
-				logger.Info("getGraph: loaded graph from storage",
-					zap.Duration("storage_duration", time.Since(storageStart)),
-					zap.Duration("total_duration", time.Since(start)),
-				)
-				e.DurationHistogram(opGetTargetGraph, "download_graph", metrics.SlowDurationBuckets).RecordDuration(time.Since(storageStart))
-				return graphReader, nil
+				defer func() { _ = treehashResponse.ReadCloser.Close() }()
+				treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)
+				if err != nil {
+					return nil, fmt.Errorf("read treehash: %w", err)
+				}
+				logger.Info("getGraph: treehash found")
+				treehashPath := cachekey.GetGraphByTreeHash(req.Build.Remote, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex, c.configHashForRemote(req.Build.Remote))
+				// Download the target graph based on treehash.
+				storageStart := time.Now()
+				graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
+				if ctx.Err() != nil {
+					err = context.Cause(ctx)
+				}
+				if err != nil {
+					if !storage.IsNotFound(err) {
+						return nil, fmt.Errorf("graph reader: %w", err)
+					}
+					logger.Warn("getGraph: graph not found at treehash path", zap.Error(err))
+				} else {
+					logger.Info("getGraph: loaded graph from storage",
+						zap.Duration("storage_duration", time.Since(storageStart)),
+						zap.Duration("total_duration", time.Since(start)),
+					)
+					e.DurationHistogram(opGetTargetGraph, "download_graph", metrics.SlowDurationBuckets).RecordDuration(time.Since(storageStart))
+					return graphReader, nil
+				}
 			}
 		}
 	} else {

@@ -54,7 +54,7 @@ func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
 	req := &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Remote:  "repo:go-code",
-			BaseSha: "sha",
+			BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Requests: []*pb.Request{
 				{Url: "github://repo/1", Commit: "abc111"},
 				{Url: "github://repo/2", Commit: "abc222"},
@@ -79,7 +79,7 @@ func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Remote:  "repo:go-code",
-			BaseSha: "sha",
+			BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Requests: []*pb.Request{
 				{Url: "github://repo/1", Commit: "abc111"},
 				{Url: "github://repo/2", Commit: "abc222"},
@@ -105,7 +105,7 @@ func TestGetTargetGraph_DecodeError_ReturnsError(t *testing.T) {
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Remote:  "repo:go-code",
-			BaseSha: "sha",
+			BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Requests: []*pb.Request{
 				{Url: "github://repo/1", Commit: "abc111"},
 				{Url: "github://repo/2", Commit: "abc222"},
@@ -135,7 +135,7 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Remote:  "repo:go-code",
-			BaseSha: "sha",
+			BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Requests: []*pb.Request{
 				{Url: "github://repo/1", Commit: "abc111"},
 				{Url: "github://repo/2", Commit: "abc222"},
@@ -197,7 +197,7 @@ func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		Orchestrator: orchestrator,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}, stream)
 	require.NoError(t, err)
 }
@@ -214,7 +214,7 @@ func TestGetTargetGraph_TreehashReadError(t *testing.T) {
 		Storage: store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}, stream)
 	assert.Error(t, err)
 }
@@ -234,7 +234,7 @@ func TestGetTargetGraph_GraphFetchError(t *testing.T) {
 		Storage: store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}, stream)
 	require.Error(t, err)
 }
@@ -254,7 +254,7 @@ func TestGetTargetGraph_GraphReadError(t *testing.T) {
 		Storage: store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}, stream)
 	assert.Error(t, err)
 }
@@ -279,7 +279,7 @@ func TestGetTargetGraph_StreamSendError(t *testing.T) {
 		Storage: storagemock,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}, stream)
 	assert.Error(t, err)
 }
@@ -304,7 +304,7 @@ func TestGetTargetGraph_GraphNotFound_FallsThrough(t *testing.T) {
 		Orchestrator: orch,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}, stream)
 	require.NoError(t, err)
 }
@@ -325,7 +325,7 @@ func TestGetTargetGraph_GraphReadCancelled(t *testing.T) {
 		Storage: store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}, stream)
 	require.Error(t, err)
 }
@@ -346,9 +346,33 @@ func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 		Orchestrator: orch,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}, stream)
 	require.Error(t, err)
+}
+
+// Mutable ref (non-40-hex base_sha) skips treehash mapping cache and falls
+// through to the orchestrator without any storage.Get call for the mapping.
+func TestGetTargetGraph_MutableRef_SkipsTreehashMapping(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+	stream.EXPECT().Send(gomock.Any()).Return(nil)
+
+	// No storage.Get expectations — the treehash mapping must be skipped entirely.
+	store := storagemock.NewMockStorage(ctrl)
+	orch := orchestratormock.NewMockOrchestrator(ctrl)
+	graphReader := newGraphReader(t, entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
+	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(graphReader, nil)
+	c := NewController(context.Background(), Params{
+		Logger:       zaptest.NewLogger(t),
+		Storage:      store,
+		Orchestrator: orch,
+	})
+	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "HEAD"},
+	}, stream)
+	require.NoError(t, err)
 }
 
 func newMockReadCloser(data []byte) io.ReadCloser {

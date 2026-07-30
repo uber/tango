@@ -20,6 +20,7 @@ import (
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
+	"github.com/uber/tango/core/cachekey"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/observability/metrics"
 	"github.com/uber/tango/orchestrator"
@@ -34,14 +35,16 @@ type Params struct {
 	Logger          *zap.Logger
 	Storage         storage.Storage
 	Orchestrator    orchestrator.Orchestrator
-	Scope           tally.Scope `optional:"true"`
-	MaxMessageBytes int         `optional:"true"`
+	ConfigProvider  config.RepositoryConfigProvider `optional:"true"`
+	Scope           tally.Scope                     `optional:"true"`
+	MaxMessageBytes int                             `optional:"true"`
 }
 
 type controller struct {
 	logger          *zap.Logger
 	storage         storage.Storage
 	orchestrator    orchestrator.Orchestrator
+	configProvider  config.RepositoryConfigProvider
 	emitter         *metrics.Emitter
 	maxMessageBytes int
 
@@ -63,10 +66,25 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 		logger:          p.Logger,
 		storage:         p.Storage,
 		orchestrator:    p.Orchestrator,
+		configProvider:  p.ConfigProvider,
 		emitter:         emitter,
 		maxMessageBytes: maxMessageBytes,
 		appCtx:          appCtx,
 	}
+}
+
+// configHashForRemote returns the md5 hex digest of graph-affecting config
+// fields for the given remote, or "" when no config provider is set or the
+// remote has no configured overrides (zero/default config => legacy key).
+func (c *controller) configHashForRemote(remote string) string {
+	if c.configProvider == nil {
+		return ""
+	}
+	cfg, ok := c.configProvider.GetRepositoryConfig(remote)
+	if !ok {
+		return ""
+	}
+	return cachekey.HashGraphAffectingConfig(cfg)
 }
 
 // linkRequestCtx returns a context derived from reqCtx that is also cancelled
