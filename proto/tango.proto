@@ -255,6 +255,7 @@ service Tango {
     // Return a set of targets changed between two revisions
     rpc GetChangedTargets(GetChangedTargetsRequest) returns (stream GetChangedTargetsResponse) {}
 
+    // NOT YET IMPLEMENTED — returns Unimplemented.
     // Return a full target graph across two revisions with change indicator for each target. It differs from GetChangedTargets in that a full target graph can be constructed for either base or target revision.
     rpc GetChangedTargetGraph(GetChangedTargetGraphRequest) returns (stream GetChangedTargetGraphResponse) {}
 }
