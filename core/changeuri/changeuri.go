@@ -72,19 +72,7 @@ func Parse(raw string) (PullRequest, error) {
 	if err != nil {
 		return PullRequest{}, fmt.Errorf("parse change URI: %w", err)
 	}
-	if u.Scheme != Scheme {
-		return PullRequest{}, fmt.Errorf("unsupported scheme %q: only %q is supported", u.Scheme, Scheme)
-	}
-	if u.Opaque != "" {
-		return PullRequest{}, fmt.Errorf("change URI must have an authority: %q", raw)
-	}
-	if u.User != nil {
-		return PullRequest{}, fmt.Errorf("change URI must not contain userinfo: %q", raw)
-	}
-	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-		return PullRequest{}, fmt.Errorf("change URI must not contain a query or fragment: %q", raw)
-	}
-	if err := validateHost(u); err != nil {
+	if err := validateURL(raw, u); err != nil {
 		return PullRequest{}, err
 	}
 
@@ -125,6 +113,25 @@ func Parse(raw string) (PullRequest, error) {
 		return PullRequest{}, fmt.Errorf("change URI is not in canonical form: %q", raw)
 	}
 	return p, nil
+}
+
+// validateURL enforces the URI-level canonical-form rules: the github
+// scheme, an authority with a lowercase hostname and an optional
+// digits-only port, and no userinfo, query, or fragment.
+func validateURL(raw string, u *url.URL) error {
+	if u.Scheme != Scheme {
+		return fmt.Errorf("unsupported scheme %q: only %q is supported", u.Scheme, Scheme)
+	}
+	if u.Opaque != "" {
+		return fmt.Errorf("change URI must have an authority: %q", raw)
+	}
+	if u.User != nil {
+		return fmt.Errorf("change URI must not contain userinfo: %q", raw)
+	}
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return fmt.Errorf("change URI must not contain a query or fragment: %q", raw)
+	}
+	return validateHost(u)
 }
 
 // validateHost enforces the RFC host rules: required, lowercase hostname
