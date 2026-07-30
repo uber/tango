@@ -35,7 +35,13 @@ type Params struct {
 	Logger          *zap.Logger
 	Storage         storage.Storage
 	Orchestrator    orchestrator.Orchestrator
-	ConfigProvider  config.RepositoryConfigProvider `optional:"true"`
+	// ConfigProvider supplies per-repository configuration used to derive the
+	// graph cache key's config fingerprint. It MUST be the same config source
+	// the orchestrator uses; otherwise the controller's fast-path cache lookup
+	// will compute a different key than the orchestrator's write path, causing
+	// graph cache misses. When nil, the config fingerprint is empty (legacy
+	// key), which is correct only when all repositories use default config.
+	ConfigProvider config.RepositoryConfigProvider `optional:"true"`
 	Scope           tally.Scope                     `optional:"true"`
 	MaxMessageBytes int                             `optional:"true"`
 }

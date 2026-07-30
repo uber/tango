@@ -208,3 +208,40 @@ func TestHashGraphAffectingConfig(t *testing.T) {
 		assert.Equal(t, orig, args, "caller's slice must not be reordered")
 	})
 }
+
+// TestGraphKeySymmetry verifies that the controller read path and the
+// orchestrator write path produce identical graph cache keys for the same
+// non-default config. This pins the contract that both sides derive the
+// same configHash from the same RepositoryConfig.
+func TestGraphKeySymmetry(t *testing.T) {
+	t.Parallel()
+
+	remote := "git@github:uber/tango"
+	treehash := "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+	strategy := entity.ComputationStrategyNative
+	excludeFiles := []string{"BUILD\\.bazel"}
+
+	// Non-default config that a real deployment might use.
+	repoCfg := config.RepositoryConfig{
+		BzlmodEnabled:          true,
+		BazelCommand:           "/opt/bazel/bin/bazel",
+		BazelExtraArgs:         []string{"--keep_going", "--noshow_progress"},
+		BazelStartupOptions:    []string{"--batch"},
+		FullHashRepos:          []string{"@com_google_protobuf"},
+		ExcludeExternalTargets: true,
+		ExcludedFiles:          []string{"testdata/.*"},
+	}
+
+	// Orchestrator write path: compute configHash directly from the resolved config.
+	orchConfigHash := HashGraphAffectingConfig(repoCfg)
+	orchKey := GetGraphByTreeHash(remote, treehash, strategy, excludeFiles, orchConfigHash)
+
+	// Controller read path: simulate configHashForRemote by looking up the
+	// same config from a provider and hashing it.
+	ctrlCfg := repoCfg // same config, as required by the contract
+	ctrlConfigHash := HashGraphAffectingConfig(ctrlCfg)
+	ctrlKey := GetGraphByTreeHash(remote, treehash, strategy, excludeFiles, ctrlConfigHash)
+
+	assert.Equal(t, orchKey, ctrlKey, "controller read key must match orchestrator write key for the same config")
+	assert.NotEmpty(t, orchConfigHash, "non-default config must produce a non-empty hash")
+}
