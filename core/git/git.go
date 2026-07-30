@@ -156,24 +156,29 @@ func (c *impl) ApplyPatch(ctx context.Context, patch []byte) error {
 
 // RevParse returns the revision hash of a reference.
 func (c *impl) RevParse(ctx context.Context, ref string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
+	defer cancel()
 	args := []string{"rev-parse", ref}
 	out, err := c.runner.output(ctx, c.directory, "git", args...)
 	if err != nil {
-		return "", err
+		return "", wrapError(ctx, args, err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
 // IsAncestor reports whether ancestorRef is an ancestor of descendantRef.
 func (c *impl) IsAncestor(ctx context.Context, ancestorRef, descendantRef string) (bool, error) {
-	_, err := c.runner.output(ctx, c.directory, "git", "merge-base", "--is-ancestor", ancestorRef, descendantRef)
+	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
+	defer cancel()
+	args := []string{"merge-base", "--is-ancestor", ancestorRef, descendantRef}
+	_, err := c.runner.output(ctx, c.directory, "git", args...)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return false, nil
 		}
 		// an exit code other than 1, or a non-ExitError failure (context canceled,
 		// git binary missing, I/O error), indicates the check itself failed.
-		return false, fmt.Errorf("check if ref %s is ancestor of %s: %w", ancestorRef, descendantRef, err)
+		return false, wrapError(ctx, args, err)
 	}
 	return true, nil
 }
@@ -226,18 +231,24 @@ func (c *impl) DiffWithStatus(ctx context.Context, baseRef, targetRef string) ([
 
 // GetCommitTimeSecond returns the commit timestamp of the given ref in Unix seconds.
 func (c *impl) GetCommitTimeSecond(ctx context.Context, ref string) (int64, error) {
-	out, err := c.runner.output(ctx, c.directory, "git", "log", "-1", "--format=%ct", ref)
+	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
+	defer cancel()
+	args := []string{"log", "-1", "--format=%ct", ref}
+	out, err := c.runner.output(ctx, c.directory, "git", args...)
 	if err != nil {
-		return 0, err
+		return 0, wrapError(ctx, args, err)
 	}
 	return strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
 }
 
 // FileHashes gets a mapping of files to their hashes based on `git ls-tree --full-tree -r <ref>`.
 func (c *impl) FileHashes(ctx context.Context, ref string) (map[string][]byte, error) {
-	out, err := c.runner.output(ctx, c.directory, "git", "ls-tree", "--full-tree", "-r", "-z", ref)
+	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
+	defer cancel()
+	args := []string{"ls-tree", "--full-tree", "-r", "-z", ref}
+	out, err := c.runner.output(ctx, c.directory, "git", args...)
 	if err != nil {
-		return nil, err
+		return nil, wrapError(ctx, args, err)
 	}
 
 	fileHashes := make(map[string][]byte)

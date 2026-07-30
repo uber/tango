@@ -35,7 +35,8 @@ import (
 // Sentinel errors for classification by upper layers.
 var (
 	// ErrPoolTimeout indicates that all worker slots were leased and the
-	// caller's context was cancelled while waiting for one to become available.
+	// caller's context was cancelled or its deadline elapsed while waiting
+	// for one to become available.
 	ErrPoolTimeout = errors.New("worker pool timeout")
 )
 
@@ -174,10 +175,7 @@ func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (
 	}
 	recordStep(e, _stepWaitSlot, waitStart, metrics.FastDurationBuckets)
 	if waitErr != nil {
-		if errors.Is(waitErr, context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%w: %w", ErrPoolTimeout, waitErr)
-		}
-		return nil, fmt.Errorf("pool for repo %s: %w", repo, waitErr)
+		return nil, fmt.Errorf("%w: %w", ErrPoolTimeout, waitErr)
 	}
 
 	// Lazily create the worker clone on first use

@@ -300,8 +300,8 @@ func Test_fromProto(t *testing.T) {
 
 	mockHasher := NewMockSourceHasher(ctrl)
 	mockHasher.EXPECT().
-		HashSourceFile(gomock.Any()).
-		DoAndReturn(func(s *buildpb.SourceFile) ([]byte, error) {
+		HashSourceFile(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, s *buildpb.SourceFile) ([]byte, error) {
 			h := newHash()
 			io.WriteString(h, s.GetName())
 			return h.Sum(nil), nil

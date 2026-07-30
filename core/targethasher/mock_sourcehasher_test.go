@@ -5,6 +5,7 @@
 package targethasher
 
 import (
+	context "context"
 	reflect "reflect"
 
 	build_proto "github.com/bazelbuild/buildtools/build_proto"
@@ -35,16 +36,16 @@ func (m *MockSourceHasher) EXPECT() *MockSourceHasherMockRecorder {
 }
 
 // HashSourceFile mocks base method.
-func (m *MockSourceHasher) HashSourceFile(arg0 *build_proto.SourceFile) ([]byte, error) {
+func (m *MockSourceHasher) HashSourceFile(arg0 context.Context, arg1 *build_proto.SourceFile) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "HashSourceFile", arg0)
+	ret := m.ctrl.Call(m, "HashSourceFile", arg0, arg1)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // HashSourceFile indicates an expected call of HashSourceFile.
-func (mr *MockSourceHasherMockRecorder) HashSourceFile(arg0 interface{}) *gomock.Call {
+func (mr *MockSourceHasherMockRecorder) HashSourceFile(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HashSourceFile", reflect.TypeOf((*MockSourceHasher)(nil).HashSourceFile), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HashSourceFile", reflect.TypeOf((*MockSourceHasher)(nil).HashSourceFile), arg0, arg1)
 }

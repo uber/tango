@@ -280,10 +280,11 @@ func TestGetCommitTimeSecond_parsesUnixTimestamp(t *testing.T) {
 }
 
 func TestGetCommitTimeSecond_errorPropagates(t *testing.T) {
-	m := &mockRunner{err: errors.New("git error")}
+	m := &mockRunner{err: assert.AnError}
 	g := &impl{directory: "/repo", runner: m}
 	_, err := g.GetCommitTimeSecond(context.Background(), "HEAD")
 	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestDefaultGit_FileHashes(t *testing.T) {
@@ -314,7 +315,7 @@ func TestDefaultGit_FileHashes(t *testing.T) {
 		},
 		{
 			name:      "git error",
-			wantError: errors.New(""),
+			wantError: assert.AnError,
 		},
 	}
 
@@ -330,7 +331,12 @@ func TestDefaultGit_FileHashes(t *testing.T) {
 			m.out = tt.giveOutput
 			m.err = tt.wantError
 			gotHashes, err := g.FileHashes(ctx, tt.name)
-			require.Equal(t, tt.wantError, err)
+			if tt.wantError != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, tt.wantError)
+			} else {
+				require.NoError(t, err)
+			}
 			assert.Equal(t, tt.wantHashes, gotHashes)
 		})
 	}
@@ -439,4 +445,56 @@ func runGit(t *testing.T, directory string, args ...string) {
 	cmd.Dir = directory
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v: %s", args, output)
+}
+
+func TestFatalExitCode_wrapsErrFatal(t *testing.T) {
+	// A fatal exit (128) from any of the previously-unwrapped methods must
+	// surface as errors.Is(err, ErrFatal) so the orchestrator's
+	// classifyGitError can tag it as an infra failure.
+	fatalErr := exec.Command("sh", "-c", "exit 128").Run()
+	require.Error(t, fatalErr)
+
+	tests := []struct {
+		name string
+		call func(g *impl) error
+	}{
+		{
+			name: "RevParse",
+			call: func(g *impl) error {
+				_, err := g.RevParse(context.Background(), "HEAD")
+				return err
+			},
+		},
+		{
+			name: "IsAncestor",
+			call: func(g *impl) error {
+				_, err := g.IsAncestor(context.Background(), "a", "b")
+				return err
+			},
+		},
+		{
+			name: "GetCommitTimeSecond",
+			call: func(g *impl) error {
+				_, err := g.GetCommitTimeSecond(context.Background(), "HEAD")
+				return err
+			},
+		},
+		{
+			name: "FileHashes",
+			call: func(g *impl) error {
+				_, err := g.FileHashes(context.Background(), "HEAD")
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &mockRunner{err: fatalErr}
+			g := &impl{directory: "/repo", runner: m, logger: zap.NewNop().Sugar()}
+			err := tt.call(g)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrFatal, "fatal exit code must wrap ErrFatal")
+		})
+	}
 }

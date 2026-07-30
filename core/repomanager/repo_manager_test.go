@@ -213,7 +213,7 @@ func TestLease_CtxCanceled(t *testing.T) {
 	cancel()
 	_, err = rm.Lease(ctx, entity.BuildDescription{Remote: remote})
 	require.Error(t, err)
-	assert.False(t, errors.Is(err, ErrPoolTimeout), "cancelled context should not produce ErrPoolTimeout")
+	assert.True(t, errors.Is(err, ErrPoolTimeout), "cancelled context should produce ErrPoolTimeout")
 	assert.True(t, errors.Is(err, context.Canceled), "expected underlying context.Canceled")
 
 	require.NoError(t, ws1.Release())

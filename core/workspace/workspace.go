@@ -17,12 +17,15 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/uber/tango/core/git"
 	"go.uber.org/zap"
 )
 
-// Workspace defines interface for workspace
+// Workspace defines interface for workspace.
+// Release is idempotent: the first call invokes the release callback (if any),
+// and subsequent calls are no-ops.
 type Workspace interface {
 	Path() string
 	Checkout(ctx context.Context, remote string, ref string) error
@@ -31,10 +34,11 @@ type Workspace interface {
 }
 
 type workspace struct {
-	path      string
-	git       git.Interface
-	logger    *zap.SugaredLogger
-	onRelease func() // optional callback invoked on Release
+	path        string
+	git         git.Interface
+	logger      *zap.SugaredLogger
+	onRelease   func() // optional callback invoked on Release
+	releaseOnce sync.Once
 }
 
 type WorkspaceParams struct {
@@ -90,10 +94,13 @@ func (w *workspace) Checkout(ctx context.Context, remote string, ref string) err
 }
 
 // Release invokes the onRelease callback if set (e.g., to return the
-// workspace to a pool), otherwise it's a no-op.
+// workspace to a pool), otherwise it's a no-op. Release is idempotent:
+// only the first call invokes the callback.
 func (w *workspace) Release() error {
-	if w.onRelease != nil {
-		w.onRelease()
-	}
+	w.releaseOnce.Do(func() {
+		if w.onRelease != nil {
+			w.onRelease()
+		}
+	})
 	return nil
 }

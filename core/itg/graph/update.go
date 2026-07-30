@@ -85,7 +85,7 @@ func (g *OptimizedGraph) UpdateGraph(
 		}
 	}
 	// compute hashes for source file, package group, and rule common targets
-	if err := computeAvailableHashes(sourceHasher, targets); err != nil {
+	if err := computeAvailableHashes(ctx, sourceHasher, targets); err != nil {
 		return err
 	}
 
@@ -147,6 +147,7 @@ func (g *OptimizedGraph) upsertExternalRuleTarget(target *targethasher.Target, i
 
 // computeAvailableHashes computes hashes that are available without dep traversal.
 func computeAvailableHashes(
+	ctx context.Context,
 	hasher targethasher.SourceHasher,
 	targets map[string]*targethasher.Target,
 ) error {
@@ -161,7 +162,7 @@ func computeAvailableHashes(
 			h.Write([]byte(name))
 			hash = h.Sum(nil)
 		case targethasher.SourceFileType:
-			h, err := hasher.HashSourceFile(target.SourceFile)
+			h, err := hasher.HashSourceFile(ctx, target.SourceFile)
 			if err != nil {
 				return err
 			}

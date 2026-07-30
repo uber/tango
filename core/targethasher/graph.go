@@ -643,7 +643,7 @@ func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 
 	switch target.RuleType {
 	case SourceFileType:
-		h, err := p.Hasher.HashSourceFile(target.SourceFile)
+		h, err := p.Hasher.HashSourceFile(ctx, target.SourceFile)
 		if err != nil {
 			return nil, err
 		}

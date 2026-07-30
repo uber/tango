@@ -115,3 +115,23 @@ func TestWorkspace_Release(t *testing.T) {
 	err := w.Release()
 	require.NoError(t, err)
 }
+
+func TestWorkspace_Release_Idempotent(t *testing.T) {
+	// The onRelease callback must be invoked exactly once even if Release
+	// is called multiple times (e.g. double-release must not push the same
+	// slot back into a pool twice).
+	calls := make(chan struct{}, 2)
+	w := NewWorkspace(WorkspaceParams{
+		Path: "/tmp/ws",
+		Git:  gitmock.NewMockInterface(gomock.NewController(t)),
+		OnRelease: func() {
+			calls <- struct{}{}
+		},
+	})
+
+	require.NoError(t, w.Release())
+	require.NoError(t, w.Release())
+
+	// Exactly one callback invocation expected.
+	assert.Len(t, calls, 1, "onRelease must be called exactly once")
+}
