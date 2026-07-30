@@ -30,9 +30,6 @@ message Request {
     // orchestrators may accept formats of their own. The URL participates
     // in cache keys as an opaque string.
     string url = 1;
-    // commit was the SHA to apply; it is now embedded in the URI.
-    reserved 2;
-    reserved "commit";
 }
 
 // BuildDescription defines a Storage state by a primary revision string and
