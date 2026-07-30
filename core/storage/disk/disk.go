@@ -54,7 +54,7 @@ func New(rootDir string) (storage.Storage, error) {
 // Get retrieves a blob by key. Returns an error wrapping storage.ErrNotFound if not found.
 func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 	if ctx.Err() != nil {
-		return storage.DownloadResponse{}, ctx.Err()
+		return storage.DownloadResponse{}, context.Cause(ctx)
 	}
 	path := d.keyPath(req.Key)
 	file, err := os.Open(path)
@@ -70,7 +70,7 @@ func (d *diskStorage) Get(ctx context.Context, req storage.DownloadRequest) (sto
 // Put stores a blob with the given key.
 func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error {
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return context.Cause(ctx)
 	}
 	if req.Reader == nil {
 		return errors.New("nil reader")
@@ -102,7 +102,7 @@ func (d *diskStorage) Put(ctx context.Context, req storage.UploadRequest) error 
 // Exists checks whether a blob exists in the storage.
 func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
 	if ctx.Err() != nil {
-		return false, ctx.Err()
+		return false, context.Cause(ctx)
 	}
 	_, err := os.Stat(d.keyPath(key))
 	if err == nil {
@@ -117,7 +117,7 @@ func (d *diskStorage) Exists(ctx context.Context, key string) (bool, error) {
 // List returns all keys whose name starts with the given prefix.
 func (d *diskStorage) List(ctx context.Context, prefix string) ([]string, error) {
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, context.Cause(ctx)
 	}
 	walkRoot := filepath.Join(d.rootDir, _objectsDir)
 	var keys []string

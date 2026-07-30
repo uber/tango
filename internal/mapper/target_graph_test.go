@@ -65,11 +65,15 @@ func TestProtoToGetTargetGraphRequest(t *testing.T) {
 		{
 			name: "output config is dropped",
 			req: &tangopb.GetTargetGraphRequest{
-				BuildDescription: &tangopb.BuildDescription{Remote: "remote", BaseSha: "abc123"},
-				OutputConfig:     &tangopb.OutputConfig{},
+				BuildDescription: &tangopb.BuildDescription{
+					Remote:   "remote",
+					BaseSha:  "abc123",
+					Strategy: tangopb.COMPUTATION_STRATEGY_UNSET,
+				},
+				OutputConfig: &tangopb.OutputConfig{},
 			},
 			want: entity.GetTargetGraphRequest{
-				Build: entity.BuildDescription{Remote: "remote", BaseSha: "abc123", Strategy: entity.ComputationStrategyInvalid},
+				Build: entity.BuildDescription{Remote: "remote", BaseSha: "abc123", Strategy: entity.ComputationStrategyUnset},
 			},
 		},
 	}

@@ -2,7 +2,9 @@ package mapper
 
 import (
 	"errors"
+	"fmt"
 
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/tangopb"
 )
@@ -21,11 +23,15 @@ func ProtoToBuildDescription(desc *tangopb.BuildDescription) (entity.BuildDescri
 	if desc.GetBaseSha() == "" {
 		return entity.BuildDescription{}, errors.New("build description base_sha is required")
 	}
+	strategy, err := validateComputationStrategy(desc.GetStrategy())
+	if err != nil {
+		return entity.BuildDescription{}, err
+	}
 	return entity.BuildDescription{
 		Remote:         desc.GetRemote(),
 		BaseSha:        desc.GetBaseSha(),
 		ChangeRequests: toChangeRequests(desc.GetRequests()),
-		Strategy:       toComputationStrategy(desc.GetStrategy()),
+		Strategy:       strategy,
 	}, nil
 }
 
@@ -43,16 +49,21 @@ func toChangeRequests(requests []*tangopb.Request) []entity.ChangeRequest {
 	return out
 }
 
-// toComputationStrategy converts a proto ComputationStrategy to the domain ComputationStrategy.
-func toComputationStrategy(s tangopb.ComputationStrategy) entity.ComputationStrategy {
+// validateComputationStrategy converts a proto ComputationStrategy to the
+// domain type. Supported strategies are preserved so the orchestrator can
+// select the requested runner; invalid or unknown values return a
+// user-classified error.
+func validateComputationStrategy(s tangopb.ComputationStrategy) (entity.ComputationStrategy, error) {
 	switch s {
 	case tangopb.COMPUTATION_STRATEGY_UNSET:
-		return entity.ComputationStrategyUnset
+		return entity.ComputationStrategyUnset, nil
 	case tangopb.COMPUTATION_STRATEGY_SHELL:
-		return entity.ComputationStrategyShell
+		return entity.ComputationStrategyShell, nil
 	case tangopb.COMPUTATION_STRATEGY_NATIVE:
-		return entity.ComputationStrategyNative
+		return entity.ComputationStrategyNative, nil
 	default:
-		return entity.ComputationStrategyInvalid
+		return entity.ComputationStrategyInvalid, tangoerrors.NewUser(
+			fmt.Errorf("unknown computation strategy: %d", int32(s)),
+		)
 	}
 }

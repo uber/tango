@@ -53,8 +53,9 @@ func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
 	})
 	req := &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
-			Remote:  "repo:go-code",
-			BaseSha: "sha",
+			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+			Remote:   "repo:go-code",
+			BaseSha:  "sha",
 			Requests: []*pb.Request{
 				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
 				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
@@ -78,8 +79,9 @@ func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
-			Remote:  "repo:go-code",
-			BaseSha: "sha",
+			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+			Remote:   "repo:go-code",
+			BaseSha:  "sha",
 			Requests: []*pb.Request{
 				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
 				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
@@ -104,8 +106,9 @@ func TestGetTargetGraph_DecodeError_ReturnsError(t *testing.T) {
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
-			Remote:  "repo:go-code",
-			BaseSha: "sha",
+			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+			Remote:   "repo:go-code",
+			BaseSha:  "sha",
 			Requests: []*pb.Request{
 				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
 				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
@@ -134,8 +137,9 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
-			Remote:  "repo:go-code",
-			BaseSha: "sha",
+			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+			Remote:   "repo:go-code",
+			BaseSha:  "sha",
 			Requests: []*pb.Request{
 				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
 				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
@@ -156,7 +160,8 @@ func TestGetTargetGraph_BuildDescriptionMissingRequiredFields_ReturnsError(t *te
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
-			Remote: "repo:go-code",
+			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+			Remote:   "repo:go-code",
 			Requests: []*pb.Request{
 				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
 				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
@@ -197,7 +202,7 @@ func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		Orchestrator: orchestrator,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.NoError(t, err)
 }
@@ -214,7 +219,7 @@ func TestGetTargetGraph_TreehashReadError(t *testing.T) {
 		Storage: store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	assert.Error(t, err)
 }
@@ -234,7 +239,7 @@ func TestGetTargetGraph_GraphFetchError(t *testing.T) {
 		Storage: store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.Error(t, err)
 }
@@ -254,7 +259,7 @@ func TestGetTargetGraph_GraphReadError(t *testing.T) {
 		Storage: store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	assert.Error(t, err)
 }
@@ -279,7 +284,7 @@ func TestGetTargetGraph_StreamSendError(t *testing.T) {
 		Storage: storagemock,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	assert.Error(t, err)
 }
@@ -304,7 +309,7 @@ func TestGetTargetGraph_GraphNotFound_FallsThrough(t *testing.T) {
 		Orchestrator: orch,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.NoError(t, err)
 }
@@ -325,7 +330,7 @@ func TestGetTargetGraph_GraphReadCancelled(t *testing.T) {
 		Storage: store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.Error(t, err)
 }
@@ -346,7 +351,7 @@ func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 		Orchestrator: orch,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.Error(t, err)
 }

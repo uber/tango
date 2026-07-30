@@ -130,6 +130,49 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 	}, capturedArgs)
 }
 
+func TestExecuteQueryInternal_DrainsStreamsBeforeWait(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ctrl := gomock.NewController(t)
+	mockCmd := commandermock.NewMockcommander(ctrl)
+
+	prStdout, pwStdout := io.Pipe()
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		time.Sleep(20 * time.Millisecond)
+		_ = pwStdout.Close()
+	}()
+
+	gomock.InOrder(
+		mockCmd.EXPECT().StdoutPipe().Return(prStdout, nil),
+		mockCmd.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil),
+		mockCmd.EXPECT().Start().Return(nil),
+		mockCmd.EXPECT().Wait().DoAndReturn(func() error {
+			select {
+			case <-writerDone:
+				return nil
+			default:
+				return errors.New("wait called before stdout was drained")
+			}
+		}),
+	)
+
+	client, err := NewBazelClient(context.Background(), Params{
+		BazelCommand:  "bazel",
+		WorkspacePath: "/tmp/test",
+		EnvVarsMap:    map[string]string{},
+		Logger:        zap.NewNop().Sugar(),
+		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+			return mockCmd
+		},
+	})
+	require.NoError(t, err)
+
+	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
 func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
@@ -171,8 +214,79 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
 	require.Nil(t, result)
 	require.Error(t, err)
-	// Should get timeout or deadline exceeded error
-	assert.Contains(t, err.Error(), "deadline exceeded")
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestExecuteQueryInternal_StreamTimeoutWithoutWaitError(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ctrl := gomock.NewController(t)
+	mockCmd := commandermock.NewMockcommander(ctrl)
+
+	prStdout, pwStdout := io.Pipe()
+	prStderr, pwStderr := io.Pipe()
+
+	gomock.InOrder(
+		mockCmd.EXPECT().StdoutPipe().Return(prStdout, nil),
+		mockCmd.EXPECT().StderrPipe().Return(prStderr, nil),
+		mockCmd.EXPECT().Start().Return(nil),
+		// The process itself exits cleanly right at the deadline, but the
+		// stream-reading goroutines are still blocked mid-read when their
+		// context is canceled.
+		mockCmd.EXPECT().Wait().Return(nil),
+	)
+
+	client, err := NewBazelClient(context.Background(), Params{
+		BazelCommand:  "bazel",
+		WorkspacePath: "/tmp/test",
+		Logger:        zap.NewNop().Sugar(),
+		EnvVarsMap:    map[string]string{},
+		QueryTimeout:  10 * time.Millisecond, // Short timeout for test
+		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+			// Simulate process behavior: when context is cancelled, close pipes
+			// to unblock the stream-reading goroutines.
+			go func() {
+				<-ctx.Done()
+				pwStdout.Close()
+				pwStderr.Close()
+			}()
+			return mockCmd
+		},
+	})
+	require.NoError(t, err)
+	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
+	require.Nil(t, result)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestExecuteQueryInternal_WaitFailureWithoutTimeout(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ctrl := gomock.NewController(t)
+	mockCmd := commandermock.NewMockcommander(ctrl)
+
+	gomock.InOrder(
+		mockCmd.EXPECT().StdoutPipe().Return(io.NopCloser(strings.NewReader("")), nil),
+		mockCmd.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil),
+		mockCmd.EXPECT().Start().Return(nil),
+		mockCmd.EXPECT().Wait().Return(errors.New("exit status 1")),
+	)
+
+	client, err := NewBazelClient(context.Background(), Params{
+		BazelCommand:  "bazel",
+		WorkspacePath: "/tmp/test",
+		Logger:        zap.NewNop().Sugar(),
+		EnvVarsMap:    map[string]string{},
+		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+			return mockCmd
+		},
+	})
+	require.NoError(t, err)
+	_, err = client.executeQueryInternal(context.Background(), "//...", nil)
+	require.Error(t, err)
+	// A plain wait failure without the query's own context deadline elapsing
+	// (e.g. a parent cancellation, or bazel exiting non-zero) is not a
+	// timeout.
+	assert.NotErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func TestExecuteQueryInternal_Failures(t *testing.T) {

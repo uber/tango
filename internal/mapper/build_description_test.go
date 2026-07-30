@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/tangopb"
 )
@@ -75,22 +76,53 @@ func TestProtoToBuildDescription(t *testing.T) {
 	}
 }
 
-func TestToComputationStrategy(t *testing.T) {
+func TestValidateComputationStrategy(t *testing.T) {
 	tests := []struct {
-		name string
-		in   tangopb.ComputationStrategy
-		want entity.ComputationStrategy
+		name     string
+		in       tangopb.ComputationStrategy
+		want     entity.ComputationStrategy
+		wantErr  bool
+		wantCode tangoerrors.ErrorCode
 	}{
-		{"unset", tangopb.COMPUTATION_STRATEGY_UNSET, entity.ComputationStrategyUnset},
-		{"shell", tangopb.COMPUTATION_STRATEGY_SHELL, entity.ComputationStrategyShell},
-		{"native", tangopb.COMPUTATION_STRATEGY_NATIVE, entity.ComputationStrategyNative},
-		{"invalid", tangopb.COMPUTATION_STRATEGY_INVALID, entity.ComputationStrategyInvalid},
-		{"out-of-range", tangopb.ComputationStrategy(99), entity.ComputationStrategyInvalid},
+		{
+			name: "unset is accepted",
+			in:   tangopb.COMPUTATION_STRATEGY_UNSET,
+			want: entity.ComputationStrategyUnset,
+		},
+		{
+			name: "shell is accepted",
+			in:   tangopb.COMPUTATION_STRATEGY_SHELL,
+			want: entity.ComputationStrategyShell,
+		},
+		{
+			name: "native is accepted",
+			in:   tangopb.COMPUTATION_STRATEGY_NATIVE,
+			want: entity.ComputationStrategyNative,
+		},
+		{
+			name:     "invalid is rejected",
+			in:       tangopb.COMPUTATION_STRATEGY_INVALID,
+			wantErr:  true,
+			wantCode: tangoerrors.ErrorUser,
+		},
+		{
+			name:     "out-of-range is rejected",
+			in:       tangopb.ComputationStrategy(99),
+			wantErr:  true,
+			wantCode: tangoerrors.ErrorUser,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, toComputationStrategy(tt.in))
+			got, err := validateComputationStrategy(tt.in)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, tt.wantCode, tangoerrors.GetErrorCode(err))
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

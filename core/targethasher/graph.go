@@ -262,7 +262,7 @@ func convertProtosToTargets(ctx context.Context, protos []*buildpb.Target) ([]*T
 	for i, t := range protos {
 		g.Go(func() error {
 			if gctx.Err() != nil {
-				return gctx.Err()
+				return context.Cause(gctx)
 			}
 			target, tError := toTarget(t)
 			if tError != nil {
@@ -487,7 +487,7 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 // Additionally, this function needs to honor context cancellation
 func ToposortRecursively(ctx context.Context, targetHashes map[string]*Target, name string, targets []string, visited map[string]struct{}) ([]string, error) {
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, context.Cause(ctx)
 	}
 
 	if _, ok := visited[name]; ok {
@@ -541,7 +541,7 @@ type HashParam struct {
 // Additionally, this function needs to honor context cancellation
 func HashRecursively(ctx context.Context, p HashParam) ([]byte, error) {
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, context.Cause(ctx)
 	}
 
 	if t, ok := p.Targets[p.TargetName]; ok && t.Hash != nil {

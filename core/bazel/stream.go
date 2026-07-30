@@ -24,38 +24,19 @@ import (
 )
 
 func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
-	done := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(dst, src)
-		done <- err
-	}()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
-		return err
+	_, err := io.Copy(dst, src)
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
 	}
+	return err
 }
 
 func streamAndParseTargets(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb.QueryResult, error) {
-	type result struct {
-		queryResult *buildpb.QueryResult
-		err         error
+	queryResult, err := getQueryResult(ctx, src, dst)
+	if cause := context.Cause(ctx); cause != nil {
+		return nil, cause
 	}
-	done := make(chan result, 1)
-
-	go func() {
-		queryResult, err := getQueryResult(ctx, src, dst)
-		done <- result{queryResult: queryResult, err: err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case res := <-done:
-		return res.queryResult, res.err
-	}
+	return queryResult, err
 }
 
 // cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.
@@ -77,7 +58,7 @@ func getQueryResult(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb
 	for i := 0; ; i++ {
 		if i%cancelCheckInterval == 0 {
 			if err := ctx.Err(); err != nil {
-				return result, err
+				return result, context.Cause(ctx)
 			}
 		}
 		var target buildpb.Target

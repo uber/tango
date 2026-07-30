@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
@@ -79,13 +80,13 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 func (c *controller) linkRequestCtx(reqCtx context.Context) (context.Context, context.CancelFunc) {
 	// Derive a per-request ctx whose cancel only affects this ctx and its
 	// children — it never propagates up to reqCtx.
-	ctx, cancel := context.WithCancel(reqCtx)
+	ctx, cancel := context.WithCancelCause(reqCtx)
 	// Register a one-shot watcher that cancels the derived ctx if appCtx fires.
 	// AfterFunc only observes appCtx; it never cancels it. stop() deregisters
 	// the watcher so the closure is not retained past the request.
-	stop := context.AfterFunc(c.appCtx, cancel)
+	stop := context.AfterFunc(c.appCtx, func() { cancel(errors.New("app context canceled")) })
 	return ctx, func() {
 		stop()
-		cancel()
+		cancel(nil)
 	}
 }

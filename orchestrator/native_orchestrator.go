@@ -189,24 +189,30 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	// Compute the target graph and store it in storage.
 	runner := b.graphRunner
 	if runner == nil {
-		client, err := bazel.NewBazelClient(ctx, bazel.Params{
-			WorkspacePath: ws.Path(),
-			Logger:        b.logger,
-			BazelCommand:  repoCfg.BazelCommand,
-			QueryTimeout:  time.Duration(repoCfg.QueryTimeout) * time.Second,
-			StreamLogs:    repoCfg.StreamBazelLogs,
-		})
-		if err != nil {
-			return nil, classifyBazelClientError(err)
+		switch build.Strategy {
+		case entity.ComputationStrategyShell:
+			runner = graphrunner.NewShellGraphRunner(graphrunner.ShellGraphRunnerParams{})
+		case entity.ComputationStrategyUnset, entity.ComputationStrategyNative:
+			client, err := bazel.NewBazelClient(ctx, bazel.Params{
+				WorkspacePath: ws.Path(),
+				Logger:        b.logger,
+				BazelCommand:  repoCfg.BazelCommand,
+				QueryTimeout:  time.Duration(repoCfg.QueryTimeout) * time.Second,
+				StreamLogs:    repoCfg.StreamBazelLogs,
+			})
+			if err != nil {
+				return nil, classifyBazelClientError(err)
+			}
+			runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
+				BazelClient:        client,
+				GitClient:          gitModule,
+				Config:             repoCfg,
+				ExtraExcludedFiles: req.ExcludeFilesRegex,
+				Scope:              b.scope,
+			})
+		default:
+			return nil, tangoerrors.NewUser(fmt.Errorf("unknown computation strategy: %d", build.Strategy))
 		}
-		// Use default native graph runner
-		runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
-			BazelClient:        client,
-			GitClient:          gitModule,
-			Config:             repoCfg,
-			ExtraExcludedFiles: req.ExcludeFilesRegex,
-			Scope:              b.scope,
-		})
 	}
 	computeStart := time.Now()
 	result, err := runner.Compute(ctx, ws)

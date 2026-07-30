@@ -15,15 +15,24 @@
 package controller
 
 import (
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
+	"go.uber.org/yarpc/yarpcerrors"
 )
 
 // GetChangedTargetGraph is the streaming RPC that will return the subgraph
-// induced by the changed targets between two revisions. It is currently a
-// stub: it records the start/finish lifecycle and returns no data.
+// induced by the changed targets between two revisions. NOT YET IMPLEMENTED:
+// returns a YARPC Unimplemented error so callers get an explicit failure
+// instead of a silent empty stream.
 func (c *controller) GetChangedTargetGraph(request *pb.GetChangedTargetGraphRequest, stream pb.TangoServiceGetChangedTargetGraphYARPCServer) (retErr error) {
 	op := metrics.Begin(c.emitter, opGetChangedTargetGraph, metrics.SlowDurationBuckets)
-	defer func() { op.Complete(retErr) }()
-	return nil
+	retErr = tangoerrors.NewInfra(
+		yarpcerrors.Newf(yarpcerrors.CodeUnimplemented, "GetChangedTargetGraph is not yet implemented"),
+	)
+	defer func() {
+		op.Complete(retErr)
+		emitFailureMetric(c.emitter, opGetChangedTargetGraph, retErr)
+	}()
+	return retErr
 }

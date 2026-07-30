@@ -86,6 +86,7 @@ func main() {
 		}
 		req := &pb.GetTargetGraphRequest{
 			BuildDescription: &pb.BuildDescription{
+				Strategy: pb.COMPUTATION_STRATEGY_UNSET,
 				Remote:   *remote,
 				BaseSha:  *baseSHA,
 				Requests: requests,
@@ -126,11 +127,13 @@ func main() {
 		}
 		req := &pb.GetChangedTargetsRequest{
 			FirstRevision: &pb.BuildDescription{
+				Strategy: pb.COMPUTATION_STRATEGY_UNSET,
 				Remote:   *remote,
 				BaseSha:  *baseSHA,
 				Requests: requests,
 			},
 			SecondRevision: &pb.BuildDescription{
+				Strategy: pb.COMPUTATION_STRATEGY_UNSET,
 				Remote:   *remote,
 				BaseSha:  *newBaseSHA,
 				Requests: newRequests,

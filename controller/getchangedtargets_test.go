@@ -53,69 +53,69 @@ func TestValidateGetChangedTargetsRequest(t *testing.T) {
 		{
 			name: "missing first revision",
 			request: &pb.GetChangedTargetsRequest{
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing second revision",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+				FirstRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing first revision remote",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, BaseSha: "sha1"},
+				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing first revision base_sha",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code"},
+				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing second revision remote",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, BaseSha: "sha2"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing second revision base_sha",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code"},
+				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "different remotes",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:other", BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:other", BaseSha: "sha2"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "missing output_config defaults to no filtering",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 			},
 		},
 		{
 			name: "valid request",
 			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 				OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 			},
 		},
@@ -139,7 +139,7 @@ func TestCompareTargetGraphs(t *testing.T) {
 	firstGraph := entity.GetTargetGraphResponse{Metadata: &entity.Metadata{}}
 	secondGraph := entity.GetTargetGraphResponse{Metadata: &entity.Metadata{}}
 
-	response, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), []entity.GetTargetGraphResponse{firstGraph}, []entity.GetTargetGraphResponse{secondGraph}, -1)
+	response, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), []entity.GetTargetGraphResponse{firstGraph}, []entity.GetTargetGraphResponse{secondGraph})
 	require.NoError(t, err)
 	require.NotNil(t, response)
 }
@@ -187,8 +187,8 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
@@ -218,8 +218,8 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
@@ -229,7 +229,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 }
 
 func TestReadTreehash(t *testing.T) {
-	bd := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"}
+	bd := &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"}
 
 	t.Run("cache miss returns empty and no error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
@@ -304,8 +304,8 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
@@ -399,8 +399,8 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true},
 	}
 
@@ -493,8 +493,8 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
@@ -568,7 +568,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 	cs := res[0].ChangedTargets
@@ -628,7 +628,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -692,7 +692,7 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	// Hash-only change on a rule with no own-config change and no reachable
 	// seed: under "trust the hasher" semantics, an orphan CHANGED rule with
 	// no upstream explanation becomes a distance-0 seed itself.
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -747,7 +747,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -820,7 +820,7 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -890,7 +890,7 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -986,8 +986,8 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	})
 
 	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: 1},
 	}
 
@@ -1064,7 +1064,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -1137,7 +1137,7 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -1184,7 +1184,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, -1)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -1235,8 +1235,8 @@ func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) 
 
 func changedTargetsRequest() *pb.GetChangedTargetsRequest {
 	return &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 }

@@ -92,23 +92,33 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	g.Go(func() error {
 		return streamOutput(gCtx, stderr, stderrSink)
 	})
-	waitErr := cmd.Wait()
 	streamErr := g.Wait()
+	// Wait closes the StdoutPipe and StderrPipe after observing process exit.
+	// Drain both streams first so a fast-exiting Bazel process cannot close a
+	// pipe while a reader is still consuming its buffered output.
+	waitErr := cmd.Wait()
 	if waitErr != nil {
-		return queryResults, b.wrapQueryFailure("bazel query failed", waitErr, &stderrBuf)
+		return queryResults, b.wrapQueryFailure(cmdCtx, "bazel query failed", waitErr, &stderrBuf)
 	}
 	if streamErr != nil {
-		return nil, b.wrapQueryFailure("stream processing failed", streamErr, &stderrBuf)
+		return nil, b.wrapQueryFailure(cmdCtx, "stream processing failed", streamErr, &stderrBuf)
 	}
 	b.logger.Debugw("Parsed targets from bazel query", zap.Int("target_count", len(queryResults.Target)))
 	return queryResults, nil
 }
 
-// wrapQueryFailure logs the failure and returns a wrapped error. When stderr
-// was captured (streamLogs off), its contents are appended so the failure is
-// self-contained. When streamLogs is on the operator has already seen stderr
-// live, so it's omitted.
-func (b *BazelClient) wrapQueryFailure(msg string, cause error, stderrBuf *bytes.Buffer) error {
+// wrapQueryFailure logs the failure and returns a wrapped error. ctx is the
+// query's own timeout context (not a parent cancellation): if it has hit its
+// deadline, cause is additionally wrapped with ctx.Err() (context.DeadlineExceeded)
+// so callers can identify via errors.Is that this failure was the query's own
+// timeout elapsing, as opposed to the caller disconnecting, without a
+// dedicated sentinel error. When stderr was captured (streamLogs off), its
+// contents are appended so the failure is self-contained. When streamLogs is
+// on the operator has already seen stderr live, so it's omitted.
+func (b *BazelClient) wrapQueryFailure(ctx context.Context, msg string, cause error, stderrBuf *bytes.Buffer) error {
+	if ctxErr := ctx.Err(); ctxErr == context.DeadlineExceeded {
+		cause = fmt.Errorf("%w: %w", ctxErr, cause)
+	}
 	tail := ""
 	if !b.streamLogs {
 		tail = "\nstderr:\n" + stderrBuf.String()

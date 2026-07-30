@@ -28,14 +28,17 @@ import (
 // TestControllerMetricsPathShape drives the stub GetChangedTargetGraph handler
 // through a TestScope-backed emitter and asserts the start/finish lifecycle
 // lands under <controller-scope>.<op>.<metric> with the outcome tag.
+// The handler returns Unimplemented (classified as an infrastructure error),
+// so the finish histogram carries result=infra rather than result=success.
 func TestControllerMetricsPathShape(t *testing.T) {
 	ts := tally.NewTestScope("controller", nil)
 	e := metrics.New(ts)
 
 	c := &controller{logger: zap.NewNop(), emitter: e, appCtx: context.Background()}
-	require.NoError(t, c.GetChangedTargetGraph(nil, nil))
+	require.Error(t, c.GetChangedTargetGraph(nil, nil))
 
 	snap := ts.Snapshot()
 	assert.Contains(t, snap.Counters(), "controller.get_changed_target_graph.start+")
-	assert.Contains(t, snap.Histograms(), "controller.get_changed_target_graph.finish+result=success")
+	assert.Contains(t, snap.Histograms(), "controller.get_changed_target_graph.finish+result=infra")
+	assert.Contains(t, snap.Counters(), "controller.get_changed_target_graph.failures+error_code=infra")
 }
