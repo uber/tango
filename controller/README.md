@@ -38,16 +38,13 @@ behavior:
   not concern itself with the underlying medium.
 - **Orchestrator** — invoked on cache misses to compute a target graph from
   a build description. The controller treats it as an opaque graph source.
-- **Config** — supplies per-repository defaults (for example the BFS
-  distance cap) and stream chunk sizes. Both are optional; sensible defaults
-  apply when unset.
 - **Protobuf types** — the controller speaks the generated service and
   message types directly; it does not introduce its own domain model.
 
 ## Construction
 
 The controller is built once at startup with its logger, storage,
-orchestrator, optional metrics scope, optional chunking configuration, and
-an optional per-repository config provider. The constructor returns the
+orchestrator, optional metrics scope, and optional max-message-bytes
+configuration. The constructor returns the
 generated server interface, so the controller can be registered with a
 YARPC dispatcher without additional adaptation.
