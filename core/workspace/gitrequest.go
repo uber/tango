@@ -24,43 +24,88 @@ import (
 )
 
 type gitRequest struct {
-	git       git.Interface
-	requestID string
-	baseRef   string
-	commit    string
-	logger    *zap.SugaredLogger
+	git            git.Interface
+	requestID      string
+	baseRef        string
+	commit         string
+	upstreamRemote string
+	logger         *zap.SugaredLogger
 }
 
-func NewGitRequest(git git.Interface, requestPath string, baseRef string, commit string, logger *zap.SugaredLogger) Request {
+// NewGitRequest creates a Request that applies a GitHub pull request.
+//
+// upstreamRemote is the real remote URL (e.g. the GitHub HTTPS/SSH URL)
+// from which PR refs are fetched. Worker clones created with --local have
+// their "origin" pointing at the pool's local origin directory, which does
+// not expose pull/* refs, so fetches must target the upstream directly.
+//
+// commit pins the content that is applied: the diff is computed between
+// baseRef and commit (not the floating PR head), and commit must be an
+// ancestor of the current PR head as a sanity check. This ensures the
+// materialized tree is stable for a given (URL, commit) cache key even as
+// the PR advances.
+func NewGitRequest(git git.Interface, requestPath string, baseRef string, commit string, upstreamRemote string, logger *zap.SugaredLogger) Request {
 	// get the last part of the request path
 	requestID := filepath.Base(requestPath)
 	return &gitRequest{
-		git:       git,
-		requestID: requestID,
-		baseRef:   baseRef,
-		commit:    commit,
-		logger:    logger,
+		git:            git,
+		requestID:      requestID,
+		baseRef:        baseRef,
+		commit:         commit,
+		upstreamRemote: upstreamRemote,
+		logger:         logger,
 	}
 }
 
 // Apply applies the change request to the workspace.
+//
+// PR refs are fetched from upstreamRemote (the real GitHub URL) rather than
+// "origin", because worker clones created with --local have their origin
+// pointing at the pool's local directory which lacks pull/* refs.
+//
+// The diff is computed between baseRef and the pinned commit (not the
+// floating PR head). The commit must be an ancestor of the current PR head
+// as a sanity check, but the actual content applied is always the pinned
+// commit so the materialized tree is deterministic for a given cache key.
 func (r *gitRequest) Apply(ctx context.Context) error {
-	r.logger.Infow("gitRequest: Applying PR", zap.String("request_id", r.requestID), zap.String("base_ref", r.baseRef), zap.String("commit", r.commit))
-	ref := fmt.Sprintf("+pull/%s/head:pull/%s/head", r.requestID, r.requestID)
-	err := r.git.Fetch(ctx, "origin", ref, "--force", "--no-tags")
+	r.logger.Infow("gitRequest: Applying PR",
+		zap.String("request_id", r.requestID),
+		zap.String("base_ref", r.baseRef),
+		zap.String("commit", r.commit),
+		zap.String("upstream_remote", r.upstreamRemote),
+	)
+
+	// Fetch the PR head ref from the upstream remote (not "origin") so the
+	// ancestor check can verify the pinned commit belongs to this PR.
+	prRef := fmt.Sprintf("pull/%s/head", r.requestID)
+	fetchRef := fmt.Sprintf("+refs/%s:refs/%s", prRef, prRef)
+	err := r.git.Fetch(ctx, r.upstreamRemote, fetchRef, "--force", "--no-tags")
 	if err != nil {
-		return fmt.Errorf("fetch PR %s: %w", r.requestID, err)
+		return fmt.Errorf("fetch PR %s from upstream: %w", r.requestID, err)
 	}
-	if r.commit != "" {
-		isAncestor, err := r.git.IsAncestor(ctx, r.commit, fmt.Sprintf("pull/%s/head", r.requestID))
-		if err != nil {
-			return fmt.Errorf("failed to read PR commit history: %w", err)
-		}
-		if !isAncestor {
-			return fmt.Errorf("commit %q is not an ancestor of PR %s", r.commit, r.requestID)
-		}
+
+	// Also fetch the pinned commit itself; it may not be reachable from the
+	// local clone's refs when the PR was force-pushed after the commit was
+	// recorded.
+	err = r.git.Fetch(ctx, r.upstreamRemote, r.commit, "--force", "--no-tags")
+	if err != nil {
+		return fmt.Errorf("fetch pinned commit %s from upstream: %w", r.commit, err)
 	}
-	patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
+
+	// Sanity-check: the pinned commit must be an ancestor of the current PR
+	// head. This catches stale or bogus commit values without silently
+	// applying unrelated content.
+	isAncestor, err := r.git.IsAncestor(ctx, r.commit, prRef)
+	if err != nil {
+		return fmt.Errorf("failed to read PR commit history: %w", err)
+	}
+	if !isAncestor {
+		return fmt.Errorf("commit %q is not an ancestor of PR %s", r.commit, r.requestID)
+	}
+
+	// Diff against the pinned commit, not the floating PR head. This makes
+	// the materialized tree deterministic for the (URL, commit) cache key.
+	patch, err := r.git.Diff(ctx, r.baseRef, r.commit, "--binary", "--merge-base")
 	if err != nil {
 		return fmt.Errorf("compute diff for PR %s: %w", r.requestID, err)
 	}

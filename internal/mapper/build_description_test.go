@@ -38,6 +38,17 @@ func TestProtoToBuildDescription(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "request missing commit",
+			desc: &tangopb.BuildDescription{
+				Remote:  "git@example.com:org/repo",
+				BaseSha: "abc123",
+				Requests: []*tangopb.Request{
+					{Url: "https://example.com/pr/1"},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "full",
 			desc: &tangopb.BuildDescription{
 				Remote:  "git@example.com:org/repo",

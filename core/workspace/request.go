@@ -29,14 +29,19 @@ type Request interface {
 }
 
 // NewRequest creates a new request based on the request URL.
-func NewRequest(rawURL string, g git.Interface, baseRef string, commit string, logger *zap.SugaredLogger) (Request, error) {
+//
+// upstreamRemote is the real remote URL (e.g. GitHub HTTPS/SSH) from which
+// PR refs are fetched. It is threaded through to the underlying request
+// implementation (e.g. gitRequest) so fetches target the upstream rather
+// than the worker clone's local "origin".
+func NewRequest(rawURL string, g git.Interface, baseRef string, commit string, upstreamRemote string, logger *zap.SugaredLogger) (Request, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
 	}
 	switch u.Scheme {
 	case "github":
-		return NewGitRequest(g, u.Path, baseRef, commit, logger), nil
+		return NewGitRequest(g, u.Path, baseRef, commit, upstreamRemote, logger), nil
 	}
 	return nil, fmt.Errorf("unsupported scheme: %v", u.Scheme)
 }

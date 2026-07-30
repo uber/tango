@@ -149,7 +149,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 
 	gitModule := gitFactory(ws.Path())
 	for _, req := range build.ChangeRequests {
-		request, err := workspace.NewRequest(req.URL, gitModule, build.BaseSha, req.Commit, logger)
+		request, err := workspace.NewRequest(req.URL, gitModule, build.BaseSha, req.Commit, build.Remote, logger)
 		if err != nil {
 			return nil, fmt.Errorf("create request for %q: %w", req.URL, err)
 		}

@@ -2,6 +2,7 @@ package mapper
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/tangopb"
@@ -21,27 +22,36 @@ func ProtoToBuildDescription(desc *tangopb.BuildDescription) (entity.BuildDescri
 	if desc.GetBaseSha() == "" {
 		return entity.BuildDescription{}, errors.New("build description base_sha is required")
 	}
+	changeRequests, err := toChangeRequests(desc.GetRequests())
+	if err != nil {
+		return entity.BuildDescription{}, err
+	}
 	return entity.BuildDescription{
 		Remote:         desc.GetRemote(),
 		BaseSha:        desc.GetBaseSha(),
-		ChangeRequests: toChangeRequests(desc.GetRequests()),
+		ChangeRequests: changeRequests,
 		Strategy:       toComputationStrategy(desc.GetStrategy()),
 	}, nil
 }
 
 // toChangeRequests converts a slice of proto Request to domain ChangeRequests.
-func toChangeRequests(requests []*tangopb.Request) []entity.ChangeRequest {
+// Returns an error if any request is missing its commit field, since commit
+// participates in the cache key and must pin the applied content.
+func toChangeRequests(requests []*tangopb.Request) ([]entity.ChangeRequest, error) {
 	if len(requests) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]entity.ChangeRequest, len(requests))
 	for i, r := range requests {
+		if r.GetCommit() == "" {
+			return nil, fmt.Errorf("request %d (%s): commit is required — it pins the applied content and forms the cache key", i, r.GetUrl())
+		}
 		out[i] = entity.ChangeRequest{
 			URL:    r.GetUrl(),
 			Commit: r.GetCommit(),
 		}
 	}
-	return out
+	return out, nil
 }
 
 // toComputationStrategy converts a proto ComputationStrategy to the domain ComputationStrategy.
