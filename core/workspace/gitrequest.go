@@ -58,7 +58,9 @@ func (r *gitRequest) Apply(ctx context.Context) error {
 	if !isAncestor {
 		return fmt.Errorf("head SHA %q is not an ancestor of PR %s", r.headSHA, r.requestID)
 	}
-	patch, err := r.git.Diff(ctx, r.baseRef, fmt.Sprintf("pull/%s/head", r.requestID), "--binary", "--merge-base")
+	// Diff against the pinned head SHA so the materialized tree is
+	// deterministic for a given change URI even as the PR advances.
+	patch, err := r.git.Diff(ctx, r.baseRef, r.headSHA, "--binary", "--merge-base")
 	if err != nil {
 		return fmt.Errorf("compute diff for PR %s: %w", r.requestID, err)
 	}

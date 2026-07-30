@@ -70,3 +70,17 @@ func TestGitRequest_Apply_IsAncestorFails_ReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read PR commit history")
 }
+
+func TestGitRequest_Apply_DiffsAgainstPinnedHeadSHA(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	git := gitmock.NewMockInterface(ctrl)
+	git.EXPECT().Fetch(gomock.Any(), "origin", gomock.Any(), gomock.Any()).Return(nil)
+	git.EXPECT().IsAncestor(gomock.Any(), "pinnedsha", "pull/10/head").Return(true, nil)
+	git.EXPECT().Diff(gomock.Any(), "baseRef", "pinnedsha", "--binary", "--merge-base").Return([]byte("patch"), nil)
+	git.EXPECT().ApplyPatch(gomock.Any(), []byte("patch")).Return(nil)
+	git.EXPECT().Commit(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	git.EXPECT().SubmoduleUpdate(gomock.Any()).Return(nil)
+	req := NewGitRequest(git, "10", "baseRef", "pinnedsha", zap.NewNop().Sugar())
+	err := req.Apply(context.Background())
+	require.NoError(t, err)
+}
