@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/config"
+	"github.com/uber/tango/core/cachekey"
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
@@ -271,4 +272,120 @@ func TestNative_GetTargetGraph_LeaseGenericError_Infra(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Equal(t, tangoerrors.ErrorInfra, tangoerrors.GetErrorCode(err))
+}
+
+// TestNative_GetTargetGraph_CacheWritePolicy verifies the two-tier cache write
+// policy: graph-blob writes are load-bearing (failure fails the request), while
+// treehash-mapping writes are best-effort (failure is logged but the computed
+// result is still served).
+func TestNative_GetTargetGraph_CacheWritePolicy(t *testing.T) {
+	storageErr := errors.New("storage unavailable")
+
+	tests := []struct {
+		name           string
+		graphWriteFail bool
+		treehashFail   bool
+		wantErr        bool
+	}{
+		{
+			name:           "treehash put failure is best-effort",
+			graphWriteFail: false,
+			treehashFail:   true,
+			wantErr:        false,
+		},
+		{
+			name:           "graph write failure is load-bearing",
+			graphWriteFail: true,
+			treehashFail:   false,
+			wantErr:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			build := entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}
+			treehashCacheKey := cachekey.GetTreehashCachePath(build)
+
+			st := storagemock.NewMockStorage(ctrl)
+
+			// First Get: cache miss on treehash lookup triggers compute path.
+			st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(
+				storage.DownloadResponse{}, storage.NewNotFoundError("missing"),
+			)
+
+			// Put calls: graph blob write(s) and treehash mapping write.
+			st.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(
+				func(_ context.Context, req storage.UploadRequest) error {
+					// Drain the reader so the write doesn't block.
+					_, _ = io.Copy(io.Discard, req.Reader)
+					if tt.graphWriteFail && req.Key != treehashCacheKey {
+						return storageErr
+					}
+					if tt.treehashFail && req.Key == treehashCacheKey {
+						return storageErr
+					}
+					return nil
+				},
+			).AnyTimes()
+
+			if !tt.wantErr {
+				// On success path, the graph is read back from storage.
+				var buf bytes.Buffer
+				_ = json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{
+					Targets: []entity.OptimizedTarget{},
+				})
+				st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
+					ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
+				}, nil)
+			}
+
+			g := gitmock.NewMockInterface(ctrl)
+			g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th", nil)
+
+			ws := workspacemock.NewMockWorkspace(ctrl)
+			ws.EXPECT().Path().Return("/tmp/ws")
+			ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+			ws.EXPECT().ApplyRequests(gomock.Any(), gomock.Any()).Return(nil)
+			ws.EXPECT().Release().Return(nil)
+
+			rm := repomanagermock.NewMockRepoManager(ctrl)
+			rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
+
+			graphRunner := graphmock.NewMockGraphRunner(ctrl)
+			graphRunner.EXPECT().Compute(gomock.Any(), gomock.Any()).Return(targethasher.Result{
+				Targets: map[string]*targethasher.Target{
+					"//:a": {Name: "//:a", RuleType: "go_library"},
+				},
+			}, nil)
+
+			o, err := NewNativeOrchestrator(context.Background(), Params{
+				Storage:     st,
+				RepoManager: rm,
+				Logger:      zaptest.NewLogger(t).Sugar(),
+				GitFactory:  func(dir string) git.Interface { return g },
+				GraphRunner: graphRunner,
+				Config:      testConfig(t),
+			})
+			require.NoError(t, err)
+
+			reader, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{
+				Build: build,
+			})
+
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Nil(t, reader)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, reader)
+				defer reader.Close()
+				chunk, rerr := reader.Read()
+				require.NoError(t, rerr)
+				require.NotNil(t, chunk.Targets)
+			}
+		})
+	}
 }

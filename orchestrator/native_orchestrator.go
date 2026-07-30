@@ -217,6 +217,13 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("convert target graph: %w", err)
 	}
+	// Cache write policy:
+	//   - Graph blob write is load-bearing: the response is read back from
+	//     storage immediately below, so a failure here must fail the request.
+	//   - Treehash-mapping write is a pure cache optimization (maps
+	//     (remote, base sha, requests) -> treehash so future requests can skip
+	//     workspace materialization). Its failure must NOT fail the request;
+	//     log a warning and continue serving the computed result.
 	cacheWriteStart := time.Now()
 	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, chunks)
 	if err != nil {
@@ -224,9 +231,11 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	treehashCachePath := cachekey.GetTreehashCachePath(build)
 	treehashReader := bytes.NewReader([]byte(treehash))
-	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
-	if err != nil {
-		return nil, fmt.Errorf("store treehash mapping at %s: %w", treehashCachePath, err)
+	if err := b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader}); err != nil {
+		logger.Warnw("GetTargetGraph: failed to store treehash mapping (best-effort cache optimization)",
+			"key", treehashCachePath,
+			"error", err,
+		)
 	}
 	recordStep(e, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
 	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
