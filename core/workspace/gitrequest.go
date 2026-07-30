@@ -84,12 +84,21 @@ func (r *gitRequest) Apply(ctx context.Context) error {
 		return fmt.Errorf("fetch PR %s from upstream: %w", r.requestID, err)
 	}
 
-	// Also fetch the pinned commit itself; it may not be reachable from the
-	// local clone's refs when the PR was force-pushed after the commit was
-	// recorded.
-	err = r.git.Fetch(ctx, r.upstreamRemote, r.commit, "--force", "--no-tags")
-	if err != nil {
-		return fmt.Errorf("fetch pinned commit %s from upstream: %w", r.commit, err)
+	// Check whether the pinned commit object is already present locally.
+	// It almost always will be, since commit must be an ancestor of the PR
+	// head we just fetched. Only when the object is missing (e.g. shallow
+	// clone, or unusual ref topology) do we attempt a bare-SHA fetch as a
+	// best-effort fallback. Many git servers refuse bare-SHA fetches unless
+	// uploadpack.allowReachableSHA1InWant is enabled, so this path must not
+	// be required for the normal case.
+	if _, revErr := r.git.RevParse(ctx, r.commit+"^{commit}"); revErr != nil {
+		r.logger.Infow("gitRequest: pinned commit not found locally, attempting bare-SHA fetch",
+			zap.String("commit", r.commit),
+			zap.Error(revErr),
+		)
+		if fetchErr := r.git.Fetch(ctx, r.upstreamRemote, r.commit, "--force", "--no-tags"); fetchErr != nil {
+			return fmt.Errorf("pinned commit %s is not available locally or from upstream: %w", r.commit, fetchErr)
+		}
 	}
 
 	// Sanity-check: the pinned commit must be an ancestor of the current PR

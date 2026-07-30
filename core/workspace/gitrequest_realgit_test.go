@@ -216,3 +216,44 @@ func TestGitRequest_PinnedCommit_RejectsStaleCommit(t *testing.T) {
 	err := req.Apply(ctx)
 	require.Error(t, err)
 }
+
+// TestGitRequest_NoBareShAFetch_WhenCommitReachable verifies that Apply
+// succeeds without ever issuing a bare-SHA fetch when the pinned commit is
+// an ancestor of the PR head (the normal case). This matters because many
+// git servers refuse bare-SHA fetches unless uploadpack.allowAnySHA1InWant
+// or allowReachableSHA1InWant is enabled.
+//
+// The test uses a --local clone chain (bare -> origin -> worker) where the
+// worker's "origin" is the intermediate clone, NOT the bare repo. Since
+// the pinned commit is reachable from the PR head that we fetch from the
+// bare repo, RevParse finds it in the local odb and the fallback fetch
+// path is never exercised.
+func TestGitRequest_NoBareShAFetch_WhenCommitReachable(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	logger := zap.NewNop().Sugar()
+
+	bareDir, baseSHA, prSHA := setupBareRepoWithPR(t, "reachable-content")
+
+	// Clone chain: bare -> origin -> worker (--local)
+	originDir := filepath.Join(t.TempDir(), "origin")
+	runGit(t, t.TempDir(), "clone", bareDir, originDir)
+
+	workerDir := filepath.Join(t.TempDir(), "worker")
+	runGit(t, t.TempDir(), "clone", "--local", originDir, workerDir)
+	runGit(t, workerDir, "checkout", baseSHA)
+
+	// Apply with the pinned commit that is an ancestor of the PR head.
+	// The commit object arrives as part of the PR-head ref fetch, so no
+	// separate bare-SHA fetch is needed.
+	g := git.New(workerDir, logger)
+	req := workspace.NewGitRequest(g, "1", baseSHA, prSHA, bareDir, logger)
+	err := req.Apply(ctx)
+	require.NoError(t, err)
+
+	// Verify the correct content was applied.
+	content, err := os.ReadFile(filepath.Join(workerDir, "pr.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "reachable-content", string(content))
+}
