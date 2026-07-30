@@ -92,8 +92,11 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	g.Go(func() error {
 		return streamOutput(gCtx, stderr, stderrSink)
 	})
-	waitErr := cmd.Wait()
 	streamErr := g.Wait()
+	// Wait closes the StdoutPipe and StderrPipe after observing process exit.
+	// Drain both streams first so a fast-exiting Bazel process cannot close a
+	// pipe while a reader is still consuming its buffered output.
+	waitErr := cmd.Wait()
 	if waitErr != nil {
 		return queryResults, b.wrapQueryFailure(cmdCtx, "bazel query failed", waitErr, &stderrBuf)
 	}

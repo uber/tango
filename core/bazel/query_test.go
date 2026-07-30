@@ -130,6 +130,49 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 	}, capturedArgs)
 }
 
+func TestExecuteQueryInternal_DrainsStreamsBeforeWait(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	ctrl := gomock.NewController(t)
+	mockCmd := commandermock.NewMockcommander(ctrl)
+
+	prStdout, pwStdout := io.Pipe()
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		time.Sleep(20 * time.Millisecond)
+		_ = pwStdout.Close()
+	}()
+
+	gomock.InOrder(
+		mockCmd.EXPECT().StdoutPipe().Return(prStdout, nil),
+		mockCmd.EXPECT().StderrPipe().Return(io.NopCloser(strings.NewReader("")), nil),
+		mockCmd.EXPECT().Start().Return(nil),
+		mockCmd.EXPECT().Wait().DoAndReturn(func() error {
+			select {
+			case <-writerDone:
+				return nil
+			default:
+				return errors.New("wait called before stdout was drained")
+			}
+		}),
+	)
+
+	client, err := NewBazelClient(context.Background(), Params{
+		BazelCommand:  "bazel",
+		WorkspacePath: "/tmp/test",
+		EnvVarsMap:    map[string]string{},
+		Logger:        zap.NewNop().Sugar(),
+		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
+			return mockCmd
+		},
+	})
+	require.NoError(t, err)
+
+	result, err := client.executeQueryInternal(context.Background(), "//...", nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
 func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)
