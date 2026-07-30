@@ -106,9 +106,10 @@ func run() error {
 	// Controller (YARPC server implementation). appCtx is forwarded so the
 	// controller's background goroutines are tied to process lifetime.
 	ctrl := controller.NewController(appCtx, controller.Params{
-		Logger:       zl,
-		Storage:      store,
-		Orchestrator: orch,
+		Logger:          zl,
+		Storage:         store,
+		Orchestrator:    orch,
+		MaxMessageBytes: cfg.Service.MaxMessageBytes,
 	})
 
 	// YARPC transports and dispatcher
@@ -142,19 +143,16 @@ func run() error {
 }
 
 // newStorage creates a Storage implementation based on the provided configuration.
+// Storage type and disk.root_path are validated by config.Parse, so the switch
+// only needs to handle the known types.
 func newStorage(cfg config.StorageConfig) (storage.Storage, error) {
 	switch cfg.Type {
-	case config.StorageTypeMemory, "":
+	case config.StorageTypeMemory:
 		return storage.NewMemoryStorage(), nil
 	case config.StorageTypeDisk:
-		if cfg.Disk == nil {
-			return nil, fmt.Errorf("disk storage requires 'disk' configuration")
-		}
-		if cfg.Disk.RootPath == "" {
-			return nil, fmt.Errorf("disk storage requires 'root_path' to be set")
-		}
 		return disk.New(cfg.Disk.RootPath)
 	default:
+		// Unreachable after config.Parse validation, but kept for safety.
 		return nil, fmt.Errorf("unsupported storage type: %q", cfg.Type)
 	}
 }

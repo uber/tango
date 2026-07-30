@@ -15,6 +15,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,17 +51,35 @@ func Parse(configFilePath string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseBytes(yamlBytes)
+}
+
+// ParseBytes parses the full configuration from raw YAML bytes.
+// Unknown YAML fields are rejected.
+func ParseBytes(yamlBytes []byte) (*Config, error) {
 	var config Config
-	if err := yaml.Unmarshal(yamlBytes, &config); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(yamlBytes), yaml.DisallowUnknownField())
+	if err := dec.Decode(&config); err != nil {
 		return nil, err
 	}
-	// Default to memory storage if not specified
-	if config.Storage.Type == "" {
+
+	// --- storage validation ---
+	switch config.Storage.Type {
+	case StorageTypeMemory, "":
 		config.Storage.Type = StorageTypeMemory
+	case StorageTypeDisk:
+		if config.Storage.Disk == nil || config.Storage.Disk.RootPath == "" {
+			return nil, fmt.Errorf("storage.disk.root_path must be set when storage type is %q", StorageTypeDisk)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported storage type: %q (supported: %q, %q)", config.Storage.Type, StorageTypeMemory, StorageTypeDisk)
 	}
+
+	// --- service validation and defaults ---
 	if config.Service.WorkerRootPath != "" && config.Service.RepoManagerClonePath == "" {
 		return nil, fmt.Errorf("service.repo_manager_clone_path must be set when worker_root_path is specified")
 	}
+	// Default: os.TempDir()/tango-repo-manager.
 	if config.Service.RepoManagerClonePath == "" {
 		config.Service.RepoManagerClonePath = filepath.Join(os.TempDir(), "tango-repo-manager")
 	}
@@ -73,6 +92,8 @@ func Parse(configFilePath string) (*Config, error) {
 	if config.Service.MaxMessageBytes <= 0 {
 		config.Service.MaxMessageBytes = DefaultMaxMessageBytes
 	}
+
+	// --- repository validation and defaults ---
 	config.repositoryByRemote = make(map[string]*RepositoryConfig, len(config.Repository))
 	for i := range config.Repository {
 		remote := config.Repository[i].Remote
@@ -81,6 +102,11 @@ func Parse(configFilePath string) (*Config, error) {
 		}
 		if _, exists := config.repositoryByRemote[remote]; exists {
 			return nil, fmt.Errorf("duplicate repository remote %q", remote)
+		}
+		// Default query_timeout: 900 seconds (15 minutes), matching the
+		// core/bazel package's _queryTimeout constant.
+		if config.Repository[i].QueryTimeout <= 0 {
+			config.Repository[i].QueryTimeout = DefaultQueryTimeoutSeconds
 		}
 		config.repositoryByRemote[remote] = &config.Repository[i]
 	}

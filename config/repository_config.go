@@ -14,6 +14,10 @@
 
 package config
 
+// DefaultQueryTimeoutSeconds is the default query_timeout applied when the
+// field is unset or zero (15 minutes), matching core/bazel's _queryTimeout.
+const DefaultQueryTimeoutSeconds int64 = 900
+
 // RepositoryConfig holds configuration for a single repository.
 type RepositoryConfig struct {
 	Remote                 string   `yaml:"remote"`
@@ -22,8 +26,9 @@ type RepositoryConfig struct {
 	ExcludeExternalTargets bool     `yaml:"exclude_external_targets"`
 	BzlmodEnabled          bool     `yaml:"bzlmod_enabled"`
 	BazelCommand           string   `yaml:"bazel_command"`
-	QueryTimeout           int64    `yaml:"query_timeout"` // in seconds
-	BazelExtraArgs         []string `yaml:"bazel_extra_args"`
+	// QueryTimeout is the Bazel query timeout in seconds. Defaults to DefaultQueryTimeoutSeconds (900, i.e. 15 minutes).
+	QueryTimeout   int64    `yaml:"query_timeout"`
+	BazelExtraArgs []string `yaml:"bazel_extra_args"`
 	// BazelStartupOptions are Bazel startup flags placed before the `query` subcommand (e.g. "--batch"); empty by default.
 	BazelStartupOptions []string `yaml:"bazel_startup_options"`
 	StreamBazelLogs     bool     `yaml:"stream_bazel_logs"`
