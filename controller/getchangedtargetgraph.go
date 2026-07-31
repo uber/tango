@@ -32,7 +32,6 @@ func (c *controller) GetChangedTargetGraph(request *pb.GetChangedTargetGraphRequ
 	)
 	defer func() {
 		op.Complete(retErr)
-		emitFailureMetric(c.emitter, opGetChangedTargetGraph, retErr)
 	}()
 	return retErr
 }

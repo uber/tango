@@ -160,21 +160,16 @@ A `context.DeadlineExceeded` without a `TangoError` wrapper is classified as `in
 
 Operation names are *not* centralized here — each consuming package declares its own op-name consts in its `metrics.go`, snake_cased after the interface method they measure (e.g. `get_target_graph`, `compute`, `lease`).
 
-### Failure counters
-
-In addition to the `finish` histogram, the controller emits a `<scope>.<op>.failures` counter on every error, tagged with `error_code` carrying the same `ErrorCode.String()` value (`cancelled`, `user`, `infra`, `infra_retryable`). This counter is emitted by `emitFailureMetric` in `controller/errors.go` and supplements the `result`-tagged histogram when per-error-code alerting is needed without histogram math.
-
 ### Cache-lookup counters
 
-Three cache-lookup counters track per-layer hit rates under their parent RPC op:
+Cache users may record a lookup counter under their parent operation with
+`RecordCacheLookup(e, parentOp, name, err)`. The caller owns the bounded metric
+name; the shared helper owns the result semantics:
 
-| Counter name | Layer | Emitted by |
-|---|---|---|
-| `treehash_cache_lookup` | treehash-by-BuildDescription lookup | controller |
-| `graph_cache_lookup` | graph-by-treehash download | controller + orchestrator |
-| `compared_targets_cache_lookup` | compared-targets-by-treehash lookup | controller |
-
-Each is a `result`-tagged counter (`hit` or `miss`) emitted via `RecordCacheLookup(e, parentOp, name, err)`. The semantics: a nil error is a `hit`, a `storage.NotFoundError` is a `miss`, and any other error (infra failure) emits **nothing** — an infra error is not a cache miss and must not skew the hit rate. Infra errors are already tracked by the `failures` counter.
+- a nil error emits `result=hit`;
+- a `storage.NotFoundError` emits `result=miss`;
+- any other error emits nothing, because an infrastructure failure is not a
+  cache miss and must not skew the hit rate.
 
 The `result` tag on the `finish` histogram is the primary outcome signal. Success and error-class counts are derived from the `finish` histogram by summing its buckets grouped by `result`.
 
@@ -208,17 +203,13 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
 }
 ```
 
-A sub-operation uses `Begin`/`Complete` for the `start`/`finish` duration exactly like the request handlers, reusing the repo-tagged emitter the caller already holds. Cache lookups within a sub-operation record a `RecordCacheLookup` counter alongside the duration.
+A sub-operation uses `Begin`/`Complete` for the `start`/`finish` duration exactly like the request handlers, reusing the repo-tagged emitter the caller already holds. Cache lookups within an operation can record a result-tagged counter alongside the duration.
 
 ```go
-// In the orchestrator's GetTargetGraph, after computing the treehash:
-cacheReadStart := time.Now()
-graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
-recordStep(e, "cache_read_duration", cacheReadStart, metrics.FastDurationBuckets)
-metrics.RecordCacheLookup(e, _opGetTargetGraph, metrics.GraphCacheLookup, err)
+value, err := cache.Get(ctx, key)
+metrics.RecordCacheLookup(e, parentOp, cacheLookupMetric, err)
 if err == nil {
-    // cache hit — return early
-    return graphReader, nil
+    return value, nil
 }
 ```
 
@@ -228,7 +219,7 @@ if err == nil {
 # operation rate
 fetch service:tango name:controller.get_changed_targets.start
 
-# success / failure / cancelled counts
+# success and classified error counts
 fetch service:tango name:controller.get_changed_targets.finish | sum by (result)
 
 # P95 latency of successful requests
@@ -244,4 +235,3 @@ fetch service:tango name:controller.get_changed_targets.target_count | histogram
 ## Request-specific tags
 
 Each distinct tag value is a new series, so tag values must be bounded — never request IDs, commit hashes, paths, or raw repo URLs. `repo` is safe only with an explicit cardinality budget and a normalized, allow-listed value; the handlers above apply it that way (`ToShortRemote`).
-

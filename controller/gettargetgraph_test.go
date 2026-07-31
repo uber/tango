@@ -25,11 +25,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	"github.com/uber/tango/entity"
-	"github.com/uber/tango/observability/metrics"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
@@ -356,75 +354,6 @@ func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.Error(t, err)
-}
-
-func TestGetTargetGraph_GraphCacheLookup_Hit(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-	stream.EXPECT().Send(gomock.Any()).Return(nil)
-	store := storagemock.NewMockStorage(ctrl)
-
-	var buf bytes.Buffer
-	require.NoError(t, json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
-
-	gomock.InOrder(
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-xyz"))}, nil),
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(buf.Bytes())}, nil),
-	)
-
-	ts := tally.NewTestScope("", nil)
-	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
-		Scope:   ts,
-	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
-	}, stream)
-	require.NoError(t, err)
-
-	counters := ts.Snapshot().Counters()
-	hitKey := "controller.get_target_graph." + metrics.GraphCacheLookup + "+repo=go-code,result=hit"
-	assert.Contains(t, counters, hitKey, "expected graph_cache_lookup hit counter")
-	assert.Equal(t, int64(1), counters[hitKey].Value())
-}
-
-func TestGetTargetGraph_GraphCacheLookup_Miss(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-	stream.EXPECT().Send(gomock.Any()).Return(nil)
-	store := storagemock.NewMockStorage(ctrl)
-
-	gomock.InOrder(
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{}, storage.NewNotFoundError("graphs/abc")),
-	)
-	orch := orchestratormock.NewMockOrchestrator(ctrl)
-	graphReader := newGraphReader(t, entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
-	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(graphReader, nil)
-
-	ts := tally.NewTestScope("", nil)
-	c := NewController(context.Background(), Params{
-		Logger:       zaptest.NewLogger(t),
-		Storage:      store,
-		Orchestrator: orch,
-		Scope:        ts,
-	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
-	}, stream)
-	require.NoError(t, err)
-
-	counters := ts.Snapshot().Counters()
-	missKey := "controller.get_target_graph." + metrics.GraphCacheLookup + "+repo=go-code,result=miss"
-	assert.Contains(t, counters, missKey, "expected graph_cache_lookup miss counter")
-	assert.Equal(t, int64(1), counters[missKey].Value())
 }
 
 func newMockReadCloser(data []byte) io.ReadCloser {

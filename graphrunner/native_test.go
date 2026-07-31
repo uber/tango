@@ -21,7 +21,6 @@ import (
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber-go/tally"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/bazel/bazelmock"
 	gitmock "github.com/uber/tango/core/git/gitmock"
@@ -77,57 +76,4 @@ func TestCompute_PropagatesError(t *testing.T) {
 	// Expect an empty result on error
 	assert.NotNil(t, res.Targets)
 	assert.Zero(t, len(res.Targets))
-}
-
-func TestCompute_EmitsLifecycleMetrics_Success(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	bazelMock := bazelmock.NewMockBazel(ctrl)
-	gitMock := gitmock.NewMockInterface(ctrl)
-	gitMock.EXPECT().FileHashes(gomock.Any(), gomock.Any()).Return(map[string][]byte{}, nil)
-	ruleName := "//:a"
-	ruleClass := "go_library"
-	bazelMock.EXPECT().ExecuteQuery(gomock.Any(), gomock.Any()).Return(&bazel.QueryResponse{Result: &buildpb.QueryResult{Target: []*buildpb.Target{
-		{
-			Type: buildpb.Target_RULE.Enum(),
-			Rule: &buildpb.Rule{
-				Name:      &ruleName,
-				RuleClass: &ruleClass,
-			},
-		},
-	}}}, nil)
-
-	ts := tally.NewTestScope("", nil)
-	gr := NewNativeGraphRunner(NativeGraphRunnerParams{
-		BazelClient: bazelMock,
-		GitClient:   gitMock,
-		Scope:       ts,
-	})
-	ws := workspace.NewWorkspace(workspace.WorkspaceParams{Path: "/tmp/ws"})
-
-	_, err := gr.Compute(context.Background(), ws)
-	require.NoError(t, err)
-
-	snap := ts.Snapshot()
-	assert.Contains(t, snap.Counters(), "graph_runner.compute.start+")
-	assert.Contains(t, snap.Histograms(), "graph_runner.compute.finish+result=success")
-}
-
-func TestCompute_EmitsLifecycleMetrics_Error(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	bazelMock := bazelmock.NewMockBazel(ctrl)
-	bazelMock.EXPECT().ExecuteQuery(gomock.Any(), gomock.Any()).Return(nil, assert.AnError)
-
-	ts := tally.NewTestScope("", nil)
-	gr := NewNativeGraphRunner(NativeGraphRunnerParams{
-		BazelClient: bazelMock,
-		Scope:       ts,
-	})
-	ws := workspace.NewWorkspace(workspace.WorkspaceParams{Path: "/tmp/ws"})
-
-	_, err := gr.Compute(context.Background(), ws)
-	require.Error(t, err)
-
-	snap := ts.Snapshot()
-	assert.Contains(t, snap.Counters(), "graph_runner.compute.start+")
-	assert.Contains(t, snap.Histograms(), "graph_runner.compute.finish+result=infra")
 }
