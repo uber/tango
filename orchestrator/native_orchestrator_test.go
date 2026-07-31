@@ -89,14 +89,16 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
 	st := storagemock.NewMockStorage(ctrl)
 	// First attempt returns NotFound to trigger compute path.
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
-	// Expect writes (graph list and treehash cache mapping)
+	// Expect writes (graph stream and background treehash-mapping upload).
 	st.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.UploadRequest) error {
 		_, err := io.Copy(io.Discard, req.Reader)
 		return err
-	}).MinTimes(2)
+	}).MinTimes(1).MaxTimes(3)
 	// After compute, second read returns a valid delimited stream with one message
 	var buf bytes.Buffer
 	_ = json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
@@ -119,7 +121,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 			RuleType: "go_library",
 		},
 	}}, nil)
-	o, err := NewNativeOrchestrator(context.Background(), Params{
+	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
 		RepoManager: rm,
 		Logger:      zaptest.NewLogger(t).Sugar(),
@@ -140,19 +142,23 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 func TestNative_GetTargetGraph_UnknownStrategy_UserError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
 
 	st := storagemock.NewMockStorage(ctrl)
+	// The background treehash-mapping goroutine fires before the strategy check.
+	st.EXPECT().Put(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	g := gitmock.NewMockInterface(ctrl)
 	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th", nil)
 	ws := workspacemock.NewMockWorkspace(ctrl)
-	ws.EXPECT().Path().Return("/tmp/ws")
+	ws.EXPECT().Path().Return("/tmp/ws").AnyTimes()
 	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 	ws.EXPECT().ApplyRequests(gomock.Any(), gomock.Any()).Return(nil)
 	ws.EXPECT().Release().Return(nil)
 	rm := repomanagermock.NewMockRepoManager(ctrl)
 	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
 
-	o, err := NewNativeOrchestrator(context.Background(), Params{
+	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
 		RepoManager: rm,
 		Logger:      zaptest.NewLogger(t).Sugar(),

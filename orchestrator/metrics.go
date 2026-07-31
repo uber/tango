@@ -16,3 +16,6 @@ package orchestrator
 
 // opGetTargetGraph is snake_cased after the Orchestrator.GetTargetGraph method.
 const _opGetTargetGraph = "get_target_graph"
+
+// _opTreehashCacheWrite tracks treehash mapping upload that runs before graph computation.
+const _opTreehashCacheWrite = "treehash_cache_write"

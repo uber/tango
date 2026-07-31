@@ -186,6 +186,26 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	} else {
 		logger.Infow("GetTargetGraph: bypass_cache=true, computing target graph")
 	}
+	// Store the treehash mapping in the background before the (potentially
+	// slow) graph computation so concurrent or subsequent requests can
+	// resolve it without waiting for the graph to finish.
+	go func() {
+		bgOp := metrics.Begin(e, _opTreehashCacheWrite, metrics.FastDurationBuckets)
+		thCachePath := cachekey.GetTreehashCachePath(build)
+		putErr := b.storage.Put(b.appCtx, storage.UploadRequest{
+			Key:    thCachePath,
+			Reader: bytes.NewReader([]byte(treehash)),
+		})
+		bgOp.Complete(putErr)
+		if putErr != nil {
+			logger.Warnw("GetTargetGraph: Failed to eagerly store treehash mapping",
+				zap.String("path", thCachePath), zap.Error(putErr))
+		} else {
+			logger.Infow("GetTargetGraph: Eagerly stored treehash mapping",
+				zap.String("path", thCachePath), zap.String("treehash", treehash))
+		}
+	}()
+
 	// Compute the target graph and store it in storage.
 	runner := b.graphRunner
 	if runner == nil {
@@ -228,12 +248,6 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, chunks)
 	if err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
-	}
-	treehashCachePath := cachekey.GetTreehashCachePath(build)
-	treehashReader := bytes.NewReader([]byte(treehash))
-	err = b.storage.Put(ctx, storage.UploadRequest{Key: treehashCachePath, Reader: treehashReader})
-	if err != nil {
-		return nil, fmt.Errorf("store treehash mapping at %s: %w", treehashCachePath, err)
 	}
 	recordStep(e, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
 	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
