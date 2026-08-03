@@ -38,9 +38,8 @@ const (
 	_defaultSourceFileVisibility = "//visibility:private"
 )
 
-// cancelCheckInterval is how often the directory walk checks for cancellation,
-// measured in files hashed. Matches the convention used elsewhere in the
-// codebase (controller, mapper, bazel/stream).
+// cancelCheckInterval is the number of files hashed between cancellation
+// checks during a directory walk.
 const cancelCheckInterval = 1024
 
 // SourceHasher provides hashes for source nodes in the target graph. These
