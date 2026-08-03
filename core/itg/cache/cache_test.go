@@ -16,6 +16,8 @@ package cache
 
 import (
 	"context"
+	"encoding/base64"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -55,6 +57,13 @@ func TestStorageCacheRoundTrip(t *testing.T) {
 				BaseCommitTimeSecond: 1700000000,
 				BaseSha:              "abc123",
 			}
+			storageKey := key.toStorageKey()
+			keyParts := strings.Split(storageKey, "/")
+			require.Len(t, keyParts, 4)
+			assert.Equal(t, keyPrefix, keyParts[0])
+			decodedRemote, err := base64.RawURLEncoding.DecodeString(keyParts[1])
+			require.NoError(t, err)
+			assert.Equal(t, tt.remote, string(decodedRemote))
 
 			og := &graph.OptimizedGraph{
 				OptimizedTargets: map[int]*graph.OptimizedTarget{
@@ -63,7 +72,7 @@ func TestStorageCacheRoundTrip(t *testing.T) {
 			}
 
 			// Write entry via Put.
-			err := c.Put(ctx, og, key)
+			err = c.Put(ctx, og, key)
 			require.NoError(t, err)
 
 			// FloorKey must discover the entry we just wrote.

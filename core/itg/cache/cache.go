@@ -17,8 +17,10 @@ package cache
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/gob"
 	"fmt"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,7 +30,7 @@ import (
 	"github.com/uber/tango/core/storage"
 )
 
-const keyPrefix = "itg/"
+const keyPrefix = "itg"
 
 // Cache is an interface for caching optimized graphs.
 type Cache interface {
@@ -63,15 +65,16 @@ var CompareKeyFunc = func(a Key, b Key) int {
 // EmptyKey means no cache found.
 var EmptyKey = Key{}
 
-// toStorageKey converts a cache key to its storage key: itg/{remote}/{date}/{committime}_{sha}
-//
-// Keys are built with string concatenation, not filepath.Join, because storage
-// keys are opaque strings and filepath.Join would collapse double slashes in
-// URL-style remotes (e.g. "https://github.com/x" -> "https:/github.com/x")
-// and use platform-dependent separators.
+// toStorageKey converts a cache key to its storage key:
+// itg/{encoded_remote}/{date}/{committime}_{sha}.
 func (k *Key) toStorageKey() string {
 	date := time.Unix(k.BaseCommitTimeSecond, 0).UTC().Format("2006-01-02")
-	return keyPrefix + k.Remote + "/" + date + "/" + fmt.Sprintf("%d_%s", k.BaseCommitTimeSecond, k.BaseSha)
+	return path.Join(keyPrefix, encodeRemote(k.Remote), date, fmt.Sprintf("%d_%s", k.BaseCommitTimeSecond, k.BaseSha))
+}
+
+// encodeRemote returns a filesystem-safe, reversible remote key component.
+func encodeRemote(remote string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(remote))
 }
 
 // NewStorageCache creates a new cache backed by a storage.Storage implementation.
@@ -121,7 +124,7 @@ func (c *storageCache) Get(ctx context.Context, key Key) (*graph.OptimizedGraph,
 }
 
 func (c *storageCache) FloorKey(ctx context.Context, remote string, targetTimeSecond int64) (Key, error) {
-	remotePrefix := keyPrefix + remote + "/"
+	remotePrefix := path.Join(keyPrefix, encodeRemote(remote)) + "/"
 	allKeys, err := c.storage.List(ctx, remotePrefix)
 	if err != nil {
 		return EmptyKey, err
