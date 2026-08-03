@@ -17,9 +17,9 @@ package cache
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/gob"
 	"fmt"
+	"net/url"
 	"path"
 	"slices"
 	"strconv"
@@ -72,9 +72,9 @@ func (k *Key) toStorageKey() string {
 	return path.Join(keyPrefix, encodeRemote(k.Remote), date, fmt.Sprintf("%d_%s", k.BaseCommitTimeSecond, k.BaseSha))
 }
 
-// encodeRemote returns a filesystem-safe, reversible remote key component.
+// encodeRemote returns a readable, filesystem-safe, reversible remote key component.
 func encodeRemote(remote string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(remote))
+	return url.PathEscape(remote)
 }
 
 // NewStorageCache creates a new cache backed by a storage.Storage implementation.

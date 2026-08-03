@@ -16,7 +16,7 @@ package cache
 
 import (
 	"context"
-	"encoding/base64"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -29,20 +29,24 @@ import (
 
 func TestStorageCacheRoundTrip(t *testing.T) {
 	tests := []struct {
-		name   string
-		remote string
+		name          string
+		remote        string
+		encodedRemote string
 	}{
 		{
-			name:   "URL remote with double slash",
-			remote: "https://github.com/uber/tango",
+			name:          "URL remote with double slash",
+			remote:        "https://github.com/uber/tango",
+			encodedRemote: "https:%2F%2Fgithub.com%2Fuber%2Ftango",
 		},
 		{
-			name:   "plain path remote",
-			remote: "uber/tango",
+			name:          "plain path remote",
+			remote:        "uber/tango",
+			encodedRemote: "uber%2Ftango",
 		},
 		{
-			name:   "SSH remote",
-			remote: "git@github.com:uber/tango.git",
+			name:          "SSH remote",
+			remote:        "git@github.com:uber/tango.git",
+			encodedRemote: "git@github.com:uber%2Ftango.git",
 		},
 	}
 
@@ -61,9 +65,10 @@ func TestStorageCacheRoundTrip(t *testing.T) {
 			keyParts := strings.Split(storageKey, "/")
 			require.Len(t, keyParts, 4)
 			assert.Equal(t, keyPrefix, keyParts[0])
-			decodedRemote, err := base64.RawURLEncoding.DecodeString(keyParts[1])
+			assert.Equal(t, tt.encodedRemote, keyParts[1])
+			decodedRemote, err := url.PathUnescape(keyParts[1])
 			require.NoError(t, err)
-			assert.Equal(t, tt.remote, string(decodedRemote))
+			assert.Equal(t, tt.remote, decodedRemote)
 
 			og := &graph.OptimizedGraph{
 				OptimizedTargets: map[int]*graph.OptimizedTarget{
