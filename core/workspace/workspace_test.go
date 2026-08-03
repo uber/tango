@@ -17,6 +17,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -114,4 +115,55 @@ func TestWorkspace_Release(t *testing.T) {
 	w := &workspace{}
 	err := w.Release()
 	require.NoError(t, err)
+}
+
+func TestWorkspace_Release_Idempotent(t *testing.T) {
+	tests := []struct {
+		name    string
+		release func(t *testing.T, w Workspace)
+	}{
+		{
+			name: "sequential calls",
+			release: func(t *testing.T, w Workspace) {
+				require.NoError(t, w.Release())
+				require.NoError(t, w.Release())
+			},
+		},
+		{
+			name: "concurrent calls",
+			release: func(t *testing.T, w Workspace) {
+				const callers = 16
+				var wg sync.WaitGroup
+				errs := make(chan error, callers)
+				wg.Add(callers)
+				for range callers {
+					go func() {
+						defer wg.Done()
+						errs <- w.Release()
+					}()
+				}
+				wg.Wait()
+				close(errs)
+				for err := range errs {
+					require.NoError(t, err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := make(chan struct{}, 16)
+			w := NewWorkspace(WorkspaceParams{
+				Path: "/tmp/ws",
+				Git:  gitmock.NewMockInterface(gomock.NewController(t)),
+				OnRelease: func() {
+					calls <- struct{}{}
+				},
+			})
+
+			tt.release(t, w)
+			assert.Len(t, calls, 1, "onRelease must be called exactly once")
+		})
+	}
 }
