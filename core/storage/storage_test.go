@@ -17,7 +17,9 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,6 +42,21 @@ func (discardStorage) Exists(context.Context, string) (bool, error) { return fal
 
 func (discardStorage) List(context.Context, string) ([]string, error) { return nil, nil }
 
+type terminalErrorReadCloser struct {
+	*bytes.Reader
+	err error
+}
+
+func (r *terminalErrorReadCloser) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err == io.EOF {
+		return 0, r.err
+	}
+	return n, err
+}
+
+func (r *terminalErrorReadCloser) Close() error { return nil }
+
 func TestWriteStreamReturnsWriterError(t *testing.T) {
 	err := writeStream(
 		context.Background(),
@@ -49,6 +66,28 @@ func TestWriteStreamReturnsWriterError(t *testing.T) {
 	)
 
 	require.Error(t, err)
+}
+
+func TestReaderPropagatesStorageTerminationError(t *testing.T) {
+	terminalErr := errors.New("download terminated")
+	rc := &terminalErrorReadCloser{
+		Reader: bytes.NewReader([]byte("{\"value\":1}\n")),
+		err:    terminalErr,
+	}
+	r := &reader[struct {
+		Value int `json:"value"`
+	}]{
+		rc:  rc,
+		dec: json.NewDecoder(rc),
+	}
+
+	value, err := r.Read()
+	require.NoError(t, err)
+	assert.Equal(t, 1, value.Value)
+
+	_, err = r.Read()
+	require.ErrorIs(t, err, terminalErr)
+	assert.NotErrorIs(t, err, io.EOF)
 }
 
 func TestMemoryStorage_List(t *testing.T) {

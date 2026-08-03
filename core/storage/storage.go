@@ -56,8 +56,11 @@ type UploadRequest struct {
 // or segments. Any structure (e.g. "/"-delimited paths) is a convention of the
 // caller, and implementations MUST NOT impose path semantics of their own.
 type Storage interface {
-	// Get downloads a blob from the storage. On success the returned DownloadResponse.ReadCloser
-	// is non-nil and the caller owns closing it. Returns an error wrapping ErrNotFound when the blob is not found.
+	// Get downloads a blob from the storage. On success the returned
+	// DownloadResponse.ReadCloser is non-nil and the caller owns closing it.
+	// The reader MUST return io.EOF only after delivering the complete blob; if
+	// the download terminates early, it MUST return a non-EOF error. Returns an
+	// error wrapping ErrNotFound when the blob is not found.
 	Get(ctx context.Context, req DownloadRequest) (DownloadResponse, error)
 	// Put uploads a blob to the storage
 	Put(ctx context.Context, req UploadRequest) error

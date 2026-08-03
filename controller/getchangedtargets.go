@@ -156,9 +156,9 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 		return false, nil
 	}
 
-	// Buffer all responses before sending any. A concurrent goroutine write may have
-	// left a partial blob in storage; buffering lets us detect corruption and fall
-	// through to recompute before we've sent anything to the client.
+	// Buffer all responses before sending any. If JSON decoding fails or the
+	// storage reader reports that the download terminated unsuccessfully, fall
+	// through to recompute before sending anything to the client.
 	var cached []entity.GetChangedTargetsResponse
 	var readErr error
 	for {
@@ -181,8 +181,8 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 	_ = cachedReader.Close()
 
 	if readErr != nil {
-		// Blob is corrupt (likely an incomplete write); recompute.
-		logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
+		// The cached stream is malformed or could not be downloaded completely.
+		logger.Warn("GetChangedTargets: Cached result could not be read completely, recomputing", zap.Error(readErr))
 		return false, nil
 	}
 
