@@ -280,10 +280,11 @@ func TestGetCommitTimeSecond_parsesUnixTimestamp(t *testing.T) {
 }
 
 func TestGetCommitTimeSecond_errorPropagates(t *testing.T) {
-	m := &mockRunner{err: errors.New("git error")}
+	m := &mockRunner{err: assert.AnError}
 	g := &impl{directory: "/repo", runner: m}
 	_, err := g.GetCommitTimeSecond(context.Background(), "HEAD")
 	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestDefaultGit_FileHashes(t *testing.T) {
@@ -314,7 +315,7 @@ func TestDefaultGit_FileHashes(t *testing.T) {
 		},
 		{
 			name:      "git error",
-			wantError: errors.New(""),
+			wantError: assert.AnError,
 		},
 	}
 
@@ -330,7 +331,12 @@ func TestDefaultGit_FileHashes(t *testing.T) {
 			m.out = tt.giveOutput
 			m.err = tt.wantError
 			gotHashes, err := g.FileHashes(ctx, tt.name)
-			require.Equal(t, tt.wantError, err)
+			if tt.wantError != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, tt.wantError)
+			} else {
+				require.NoError(t, err)
+			}
 			assert.Equal(t, tt.wantHashes, gotHashes)
 		})
 	}
@@ -439,4 +445,117 @@ func runGit(t *testing.T, directory string, args ...string) {
 	cmd.Dir = directory
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v: %s", args, output)
+}
+
+type gitErrorMethodCase struct {
+	name string
+	call func(context.Context, *impl) error
+}
+
+func gitErrorMethodCases() []gitErrorMethodCase {
+	return []gitErrorMethodCase{
+		{
+			name: "RevParse",
+			call: func(ctx context.Context, g *impl) error {
+				_, err := g.RevParse(ctx, "HEAD")
+				return err
+			},
+		},
+		{
+			name: "IsAncestor",
+			call: func(ctx context.Context, g *impl) error {
+				_, err := g.IsAncestor(ctx, "a", "b")
+				return err
+			},
+		},
+		{
+			name: "GetCommitTimeSecond",
+			call: func(ctx context.Context, g *impl) error {
+				_, err := g.GetCommitTimeSecond(ctx, "HEAD")
+				return err
+			},
+		},
+		{
+			name: "FileHashes",
+			call: func(ctx context.Context, g *impl) error {
+				_, err := g.FileHashes(ctx, "HEAD")
+				return err
+			},
+		},
+	}
+}
+
+func TestReadMethods_FatalExitCodeWrapsErrFatal(t *testing.T) {
+	fatalErr := exec.Command("sh", "-c", "exit 128").Run()
+	require.Error(t, fatalErr)
+
+	for _, tt := range gitErrorMethodCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &mockRunner{err: fatalErr}
+			g := &impl{directory: "/repo", runner: m, logger: zap.NewNop().Sugar()}
+			err := tt.call(context.Background(), g)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrFatal)
+		})
+	}
+}
+
+func TestReadMethods_WrapContextErrors(t *testing.T) {
+	contextCases := []struct {
+		name        string
+		newContext  func() (context.Context, context.CancelFunc)
+		wantCause   error
+		wantTimeout bool
+	}{
+		{
+			name: "expired deadline",
+			newContext: func() (context.Context, context.CancelFunc) {
+				return context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+			},
+			wantCause:   context.DeadlineExceeded,
+			wantTimeout: true,
+		},
+		{
+			name: "parent cancellation",
+			newContext: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, func() {}
+			},
+			wantCause: context.Canceled,
+		},
+	}
+
+	for _, contextCase := range contextCases {
+		t.Run(contextCase.name, func(t *testing.T) {
+			for _, methodCase := range gitErrorMethodCases() {
+				t.Run(methodCase.name, func(t *testing.T) {
+					ctx, cancel := contextCase.newContext()
+					defer cancel()
+					m := &mockRunner{returnCtxErr: true}
+					g := &impl{directory: "/repo", runner: m, logger: zap.NewNop().Sugar()}
+
+					err := methodCase.call(ctx, g)
+					require.Error(t, err)
+					assert.ErrorIs(t, err, contextCase.wantCause)
+					if contextCase.wantTimeout {
+						assert.ErrorIs(t, err, ErrTimeout)
+					} else {
+						assert.NotErrorIs(t, err, ErrTimeout)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestIsAncestor_ExitCodeOneMeansNotAncestor(t *testing.T) {
+	notAncestorErr := exec.Command("sh", "-c", "exit 1").Run()
+	require.Error(t, notAncestorErr)
+	g := &impl{directory: "/repo", runner: &mockRunner{err: notAncestorErr}}
+
+	isAncestor, err := g.IsAncestor(context.Background(), "a", "b")
+
+	require.NoError(t, err)
+	assert.False(t, isAncestor)
 }
