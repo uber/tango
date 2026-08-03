@@ -1,4 +1,4 @@
-# Tango (Target Analyzer) Repository Guide for Claude
+# Tango (Target Analyzer) Repository Guide
 
 ## Key Concepts
 
@@ -11,10 +11,12 @@ It is designed to run independently of the monorepo it analyzes — the only inp
 
 ### Core design properties
 
-1. **Content-addressable caching** — graphs and change results are keyed by the git **treehash** of the materialized workspace, not by the SHA. Two requests that resolve to the same tree share the same cache entry, even if they came from different branches or commit chains. The treehash itself is also cached by `BuildDescription` so cache lookups don't require re-materializing a workspace.
-3. **Streaming, chunked responses** — target graphs and change results are split into chunks to stay within gRPC per-message limits. Metadata mappings (target IDs → names, rule types, tags, attributes) may also span multiple chunks; consumers must merge them before use.
-4. **ID-mapped payloads** — over the wire, targets reference each other (and their rule types, tags, attributes) by `int32` IDs into per-stream metadata maps. Comparison code re-maps both inputs into a canonical per-call namespace and prunes unreferenced metadata entries before sending. IDs are not guaranteed to be consistent across multiple target graphs.
-5. **Always-on cancellation** — Both request-bound and application-bound cancellation signals are honored. Every long-running loop (graph walk, BFS, metadata merge) checks `ctx.Err()` on a fixed cadence. A client disconnect cancels the stream's context and unwinds the work.
+1. **Content identity and deterministic computation** — the materialized git treehash identifies source content, while cache keys also include the computation-affecting inputs represented by each artifact's key schema. Canonical change URIs pin change requests to exact commits. Any new input that can change computed output requires a cache-key review; output-only options stay outside cache keys and are applied while sending.
+2. **Value-oriented identities and safe handoffs** — repository identities and computed results should be treated as immutable after they are handed to another layer or goroutine. Tango still uses mutable workspaces, graph builders, slices, and maps internally; copy mutable collections before normalization or concurrent use when the caller may retain them.
+3. **Scoped eventual consistency** — eventual consistency applies to the asynchronous, best-effort compared-target cache. Graph and treehash writes that occur while storing a computed graph are synchronous and request-bound, so they must succeed before that graph is returned.
+4. **Streaming, chunked responses** — target graphs and change results are split into chunks to stay within gRPC per-message limits. Metadata mappings (target IDs → names, rule types, tags, attributes) may also span multiple chunks; consumers must merge them before use.
+5. **ID-mapped payloads** — over the wire, targets reference each other (and their rule types, tags, attributes) by `int32` IDs into per-stream metadata maps. Comparison code re-maps both inputs into a canonical per-call namespace and prunes unreferenced metadata entries before sending. IDs are not guaranteed to be consistent across multiple target graphs.
+6. **Always-on cancellation** — both request-bound and application-bound cancellation signals are honored. Long-running loops whose iteration count can be large check `ctx.Err()` periodically. A client disconnect cancels request work, while application shutdown cancels both request work and application-lifetime background work.
 
 ## Architecture
 
@@ -28,7 +30,7 @@ tango/                              # repo root (Go module github.com/uber/tango
 ├── controller/                     # YARPC service implementation (business logic, transport-adjacent)
 ├── orchestrator/                   # Cross-component coordinator: workspace lease, checkout, graph compute, cache I/O
 │   └── orchestratormock/
-├── graphrunner/                    # Strategy-pluggable target-graph computation (native / shell)
+├── graphrunner/                    # Strategy-pluggable target-graph computation
 │   └── mock/
 ├── entity/                         # Domain value types (BuildDescription, ChangedTargets, TargetGraph, etc.)
 ├── mapper/                         # Proto-to-entity and entity-to-proto conversion
@@ -56,62 +58,77 @@ tango/                              # repo root (Go module github.com/uber/tango
 └── tools/                          # Bazelisk wrapper and tooling
 ```
 
-The top-level split is by **responsibility**, not by domain: `controller/` handles the RPC surface, `orchestrator/` drives the end-to-end pipeline, `graphrunner/` owns the strategy for computing a graph, and `core/` holds reusable building blocks that no other layer should bypass. Every concrete dependency that crosses a layer boundary (storage, git, bazel, graph runner) is an interface so it can be mocked or swapped per repository / per deployment.
+The top-level split is by **responsibility**, not by domain: `controller/` handles the RPC surface, `orchestrator/` drives workspace materialization and graph production, `graphrunner/` computes a graph from a materialized workspace, and `core/` holds reusable infrastructure. Interfaces are used at behavioral extension seams so implementations can be mocked or replaced without forcing every cross-layer dependency into an interface.
+
+### Responsibility and artifact ownership
+
+| Concern or artifact | Owner | Contract |
+|---|---|---|
+| Wire validation and mapping | Controller and `internal/mapper` | Validate required repository identity fields and convert protobuf requests into entity values. |
+| Output configuration | Controller | Filter fields and distances only while sending; never let output-only options affect cached full payloads. |
+| Repository identity | Controller → orchestrator | Pass a validated `BuildDescription`; the orchestrator resolves it into a materialized workspace. |
+| Workspace lifecycle | Orchestrator | Lease, checkout, apply ordered change requests, and release. |
+| Treehash mapping | Controller reads; orchestrator computes and writes | The controller uses the mapping for fast paths; the orchestrator writes it synchronously when storing a newly computed graph. |
+| Target-graph cache | Controller and orchestrator | The controller performs an initial fast-path read; the orchestrator performs a second read after computing the treehash and synchronously writes misses. |
+| Compared-target cache | Controller | Read with corruption fallback; write asynchronously and best-effort using the application-lifetime context. |
+| Computation strategy | Orchestrator | Select the requested computation implementation after the workspace is materialized. |
+| Graph comparison and canonical IDs | Controller with `internal/targetdiff` and mappers | Decode both graphs, compare semantic targets, and build a per-call ID namespace. |
+| Response streaming | Controller | Apply output filtering and send graph or comparison chunks. |
+| Backend selection | Composition root | Construct concrete storage, repository, and orchestrator implementations and inject their interfaces. |
 
 ### Controllers
 
-The controller is the YARPC service implementation. It owns the transport-adjacent concerns: request validation, response chunking, cancellation handling, fan-out across revisions, and metrics emission. It does **not** own workspace creation, git operations, or graph computation — those belong to the orchestrator and below.
+The controller is the YARPC service implementation. It owns transport-adjacent concerns: request validation, metrics, cancellation linkage, response streaming, output filtering, comparison fan-out, and compared-target caching. It does **not** own workspace creation, git operations, or graph computation.
 
-Each RPC method follows the same shape:
-1. Call `metrics.Begin(emitter, op, buckets)` to record a start counter and capture the start time. Defer `op.Complete(err)` which records a finish-duration histogram tagged `result` with the outcome (one of `success`, `cancelled`, `user`, `infra`, `infra_retryable`).
-2. Validate the request; reject with a `TangoError` classified `ErrorUser` on bad input.
-3. Attempt to serve the response from cache (read-through). On a cache miss, drive the orchestrator to compute the target graph(s).
-4. Stream the result to the client.
+Every RPC starts a standard metrics lifecycle with `metrics.Begin` and defers `op.Complete(err)`, which records the finish-duration histogram tagged with the final `result`. RPCs also classify invalid input as a user error, preserve error chains, and convert the final error at the wire boundary. The graph RPC and comparison RPC have distinct cache flows:
+
+- **`GetTargetGraph`** validates and maps the request, attempts the treehash/graph fast path, delegates a miss to the orchestrator, then streams the returned reader.
+- **`GetChangedTargets`** first attempts the compared-target fast path, fetches both target graphs concurrently on a miss, compares them, starts a best-effort background cache write, and streams the filtered result.
 
 ### Orchestrator
 
-The orchestrator's sole purpose is to **produce a target graph for a given revision** — given a `BuildDescription` (remote + base SHA + optional change requests), return either a cached graph or one freshly computed against a materialized workspace. Everything above it (controller, RPC fan-out, comparison) treats the orchestrator as an opaque "give me the graph for this revision" call.
+The orchestrator is the repository-identity resolution and workspace-materialization boundary. Given a `BuildDescription`, it produces a target graph by resolving the repository state, leasing and preparing a workspace, deriving its treehash, consulting the graph cache, invoking a graph runner on a miss, and synchronously storing the graph and treehash mapping.
 
-The bundled `nativeOrchestrator` (under `orchestrator/native_orchestrator.go`) is an **example implementation** intended for standalone / OSS use. It leases a workspace from the local `RepoManager`, checks out the base SHA, applies each change request via the `workspace.Request` abstraction, computes the treehash, consults the cache, and falls through to `graphrunner` on a miss. It exists primarily to make the OSS build runnable end-to-end and to anchor tests.
-
-**Most production monorepo setups will need to provide their own `Orchestrator` implementation** that integrates with the host CI system (e.g. Buildkite, internal build infrastructure) instead of managing local clones. CI-driven environments already own:
-
-- the materialized source tree at the target revision (no need to clone or apply patches locally),
-- distributed caches keyed by content hashes that should be consulted before recomputing,
-- worker pools, retry policies, and timeouts that differ from the in-process model used by `nativeOrchestrator`.
-
-A custom orchestrator satisfies the same `orchestrator.Orchestrator` interface and is wired into the controller in place of the native one. It is the right seam to plug in remote build execution, CI-managed checkouts, or organization-specific caching — the controller and `graphrunner` stay unchanged.
-
-Whichever implementation is used, the orchestrator is responsible for **classifying** errors by wrapping them with `tangoerrors.NewInfra`, `tangoerrors.NewInfraRetryable`, or `tangoerrors.NewUser` (from `core/errors`) so the metrics pipeline can tag the finish histogram with a stable `result`. Per-cause classifiers in `orchestrator/errors.go` (e.g. `classifyLeaseError`, `classifyGitError`, `classifyBazelClientError`) map component-level sentinels (`repomanager.ErrPoolTimeout`, `git.ErrTimeout`, `bazel.ErrNetwork`) to the appropriate error code.
+The bundled `nativeOrchestrator` implements this contract with local repository workers. Custom orchestrators are the supported integration seam for CI-managed checkouts, remote execution, organization-specific caches, or different worker and retry policies. A replacement satisfies `orchestrator.Orchestrator` and is injected into the controller without moving workspace concerns upward.
 
 ### Graphrunner
 
-`graphrunner.GraphRunner` is the **interface a CI-integrated `Orchestrator` implementation calls to compute a target graph** from an already-materialized workspace. The orchestrator's job is to obtain the source tree (via local clones, CI-managed checkouts, or remote execution); the graphrunner's job is to turn that tree into a per-target hashed `Result`. The split keeps tree provisioning and graph computation independently swappable.
+`graphrunner.GraphRunner` computes a target graph from an already-materialized `workspace.Workspace`. The orchestrator resolves repository identity and owns cache behavior; the graph runner turns the resulting source tree into a `targethasher.Result` without knowing about storage, transport, or the triggering request.
 
-The contract is intentionally narrow: given a `workspace.Workspace`, return `(targethasher.Result, error)`. A graphrunner does not know about cache keys, storage, transport, or the request that triggered it — those concerns live in the orchestrator. This is what lets a CI-driven orchestrator reuse the same `GraphRunner` implementations the OSS path uses, while replacing every other moving part around it.
+Keep the contract narrow and strategy-agnostic. New computation implementations satisfy the same interface and receive all required dependencies through construction rather than reaching into controller or storage concerns.
 
-New strategies plug in by satisfying the same interface. Keep them strategy-agnostic about how the workspace was assembled and what will be done with the result.
+### Entity guidelines
+
+Entities are Tango's request, result, and storage data models; they are not persistent versioned aggregates.
+
+1. **Describe data, not choreography** — comments state what a type or field means, its units, optionality, identity, and invariants. Component ownership and write paths belong in the architecture sections.
+2. **Prefer values for identities and configuration** — use value structs for `BuildDescription`, requests, configs, and constructor params. Pointers are appropriate for optional payloads, mutation, or shared ownership.
+3. **Treat slices and maps as mutable** — copy them before sorting, normalization, mutation, or concurrent handoff when the caller may retain or modify the original.
+4. **Scope ID references to compact representations** — `OptimizedTarget` uses IDs and metadata maps for streamed and stored payloads; do not require every domain relationship to use IDs.
+5. **Keep wire conversion at the mapper boundary** — protobuf validation and proto/entity conversion belong in `internal/mapper` or `mapper`, not in the orchestrator or graph algorithms.
 
 ### Extensions and interfaces
 
-Pluggable interfaces live in their own package with a single responsibility:
+Behavioral interfaces live with the capability they describe and have a single responsibility:
 
 - `core/storage.Storage` — blob get/put/exists/list keyed by string
 - `core/git.Interface` — git CLI operations
 - `core/repomanager.RepoManager` — workspace lease/release
 - `core/workspace.Workspace` + `core/workspace.Request` — checkout, apply
 - `graphrunner.GraphRunner` — compute a graph from a workspace
-- `orchestrator.Orchestrator` — top-level entry point
+- `orchestrator.Orchestrator` — repository identity to target graph
 
 **Design interfaces for the technology *space*, not the implementation in front of you.** The contract must be cheaply satisfiable by every plausible backend, not just the one being built today. For example, the `Storage` interface offers `Get`/`Put`/`Exists`/`List` keyed by a string — primitives that a disk, an in-memory map, S3, GCS, or a CDN can all satisfy without contortion.
 
 Common over-constraints to avoid:
-- **Server-side filters / queries** — push filtering and aggregation to the caller; keep storage responsible only for "get/put by key" semantics.
-- **Batch atomicity** (multi-blob writes as one transaction) — many backends can't do this. Prefer single-blob primitives + caller loops + content-addressable keys for idempotency.
-- **Strict ordering / exactly-once** for any background work — make consumers (and cache writes) idempotent by deriving keys from content (treehashes), not request order.
-- **Synchronous, low-latency calls** for things that may run remotely — design for retry/backoff and timeouts. **Per-operation deadlines are the backend's responsibility, not the controller's** — the controller is backend-agnostic and must not encode any one implementation's I/O budget.
+- **Server-side filters or queries** — push filtering and aggregation to the caller; keep storage responsible only for get/put-by-key semantics.
+- **Batch atomicity** — many backends cannot provide multi-blob transactions. Prefer single-blob primitives, caller loops, and deterministic content identities.
+- **Strict ordering or exactly-once background work** — make cache writes retry-safe and deterministic instead of depending on execution order.
+- **Assumed-local latency** — design remote-capable operations for cancellation, retry classification, and backend-owned timeouts. The controller must not encode one backend's I/O budget.
 
-When in doubt, ask: *"If the next implementation were S3 / GCS / a remote RPC service / an in-memory map, could it satisfy this signature without contortion?"* If the answer is no, simplify the contract.
+Concrete backend construction and deployment-level routing belong in the composition root, such as `example/main.go`, which has the configuration and lifecycle context needed to choose implementations. Per-request computation selection remains orchestrator behavior because the requested strategy is part of `BuildDescription`.
+
+When in doubt, ask: *"If the next implementation were S3, GCS, a remote RPC service, or an in-memory map, could it satisfy this signature without contortion?"* If the answer is no, simplify the contract.
 
 ### Import Paths
 
@@ -206,13 +223,13 @@ CI builds and tests every PR via GitHub Actions. Before committing, validate loc
 
 If you modified `.proto` files or interface signatures, also run `make proto` and regenerate the relevant mocks.
 
-**Commit and PR titles must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.** Use a type prefix (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`) followed by an optional scope and a short imperative subject — e.g. `feat(orchestrator): support remote build execution`, `fix(controller): surface readTreehash errors`, `docs: add CLAUDE.md`. Breaking changes use `!` after the type/scope (e.g. `feat(storage)!: ...`) and explain the break in the body. This keeps the commit history machine-parseable for changelogs and release automation.
+**Commit and PR titles must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.** Use a type prefix (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`) followed by an optional scope and a short imperative subject — e.g. `feat(orchestrator): support remote build execution`, `fix(controller): surface readTreehash errors`, `docs: update AGENTS.md`. Breaking changes use `!` after the type/scope (e.g. `feat(storage)!: ...`) and explain the break in the body. This keeps the commit history machine-parseable for changelogs and release automation.
 
 ### Code Style
 
 1. **Structured logging** — `zap.SugaredLogger` with `Debugw`/`Infow`/`Warnw`/`Errorw(msg, key, val, ...)` or `zap.Logger` with explicit `zap.Field`s. Never log via `Printf` or unstructured `fmt`.
 2. **Interfaces for behavior, structs for data** — interfaces for behavioral contracts (`Storage`, `RepoManager`, `Workspace`, `GraphRunner`, `Orchestrator`). Structs for data containers, configs, and params (`Config`, `Params`, `WorkspaceParams`).
-3. **Value types over pointers** — prefer value types for structs, configs, and return values. Use `(T, bool)` to signal absence instead of `*T`. Pointers only when mutation or shared ownership is needed.
+3. **Value-oriented identities and configuration** — prefer values for identity structs, configs, params, and ordinary results. Use `(T, bool)` for optional value results when practical; pointers remain appropriate for optional payloads, mutation, or shared ownership.
 4. **`Params` structs** — every non-trivial constructor takes a `Params` value (e.g. `controller.Params`, `orchestrator.Params`, `repomanager.Params`). New optional fields go on `Params` with a documented default, not as constructor overloads.
 5. **Errors for failures, not control flow** — reserve `error` for unexpected or infrastructure failures. For expected outcomes use result types or `(T, bool)`. Avoid sentinel errors that represent non-failure states; `storage.ErrNotFound` exists specifically because "not found" is a legitimate cache-miss signal that callers must distinguish from real failures via `storage.IsNotFound(err)`.
 
@@ -226,17 +243,29 @@ Errors are classified by **origin** (user vs infra) for metrics. The contract li
 
 **Key rules:**
 
-1. **Wrap at the failure site** with the appropriate constructor (`NewUser`, `NewInfra`, `NewInfraRetryable`) so the finish histogram carries a stable `result`. The `GetErrorCode` function extracts the code from any error chain; context cancellations are detected automatically.
-2. **The deepest layer that knows the classification wraps the error.** Lower layers (storage, git, bazel) return plain errors with their own sentinels (`storage.ErrNotFound`, `git.ErrTimeout`, `git.ErrFatal`, `bazel.ErrNetwork`, `repomanager.ErrPoolTimeout`). The orchestrator decides whether a given failure is user-caused or infra-caused — per-cause classifiers in `orchestrator/errors.go` (`classifyLeaseError`, `classifyGitError`, `classifyBazelClientError`) handle this mapping.
-3. **The controller completes the standard lifecycle metric.** `metrics.Op.Complete` derives the finish histogram's `result` tag from `tangoerrors.GetErrorCode(err).String()`. The `errors.Fields` helper separately produces structured zap fields (`error` + `error_code`) for log lines.
-4. **Errors flow through `errors.Is` / `errors.As`** — `TangoError` implements `Unwrap`, so wrapping preserves the underlying sentinels (e.g. callers can still `errors.Is(err, storage.ErrNotFound)` through a `TangoError` wrapper).
+1. **Classify at the deepest boundary with semantic context.** Request validation and mapping classify bad client input as user errors. Orchestrator classifiers map known lease, git, and Bazel causes to user, infra, or retryable infra outcomes. Lower capability packages return plain wrapped errors and sentinels.
+2. **Unclassified errors default to infrastructure failures.** Retryability must be supported by a known transient cause; do not mark an error retryable merely because repeating the request is convenient.
+3. **Preserve the chain with `%w`.** `TangoError` implements `Unwrap`, so `errors.Is` and `errors.As` continue to find lower-level sentinels through classification wrappers.
+4. **Complete the standard metrics lifecycle and convert errors at the wire boundary.** `metrics.Op.Complete` derives the finish histogram's `result` tag from `tangoerrors.GetErrorCode(err).String()`. The controller maps the final classified error to the RPC boundary, while `errors.Fields` provides structured log fields.
+
 ### Caching and Treehashes
 
-The cache is the single most performance-sensitive piece of Tango. Key rules:
+The cache is the single most performance-sensitive piece of Tango. Cache identity and ownership are artifact-specific:
 
-1. **Cache keys are content-addressable, derived from the git treehash** of the materialized workspace (base + applied requests). This is what makes the cache safe across branches and PR retargets: identical trees share entries regardless of how they were assembled. Helpers in `core/cachekey` (`GetGraphByTreeHash`, `GetComparedTargetsCachePath`, `GetTreehashCachePath`) own the key shape — never construct cache paths inline.
-2. **The controller owns read-through caching.** The controller (not only the orchestrator) reads cached treehashes, downloads cached graph blobs, and reads/writes compared-targets results. The orchestrator is invoked only on a cache miss.
-3. **Two-tier failure policy.** Identity-bearing reads (treehash mapping, graph blob download) are deliberately fail-fast: a storage error that disables the cache surfaces as a visible request failure rather than silently degrading to recompute (see rationale comments in `controller/getchangedtargets.go`). Compared-targets cache reads and writes are best-effort: a miss or write failure is logged but does not fail the request.
+| Artifact | Current key dimensions | Read/write ownership |
+|---|---|---|
+| Treehash mapping | Short remote, base SHA, ordered change-request URL list | Controller reads for fast paths; orchestrator writes synchronously when storing a newly computed graph. |
+| Target graph | Short remote, treehash, computation strategy, sorted extra exclusion regexes | Controller performs the initial read; orchestrator reads again after deriving the treehash and synchronously writes a computed miss. |
+| Compared targets | Short remote, ordered treehash pair, sorted extra exclusion regexes | Controller reads with corruption fallback and writes asynchronously, best-effort. |
+
+Key rules:
+
+1. **Use `core/cachekey` helpers exclusively.** Never construct cache paths inline. When a new input changes computed graph or comparison output, update or version the relevant key and add tests. Current keys do not encode every repository configuration or algorithm/schema version, so such changes require deliberate compatibility or invalidation decisions.
+2. **Keep output-only options outside cache identities.** Store full graph and comparison payloads, then apply distance and field filtering while sending so presentation choices cannot poison shared entries.
+3. **Distinguish misses from failures.** A not-found result is an expected cache miss. Infrastructure failures on identity-bearing treehash or graph reads are fail-fast; compared-target cache reads and writes are best-effort and fall back to recomputation or logging.
+4. **Expect duplicate work on concurrent misses.** Tango does not promise singleflight, compare-and-swap, or exactly-once computation. Deterministic computation plus complete content keys makes repeated overwrites converge on the same value.
+5. **Reject incomplete compared-target blobs before streaming.** Buffer cached comparison responses first; if decoding fails, discard the entry and recompute before sending any partial result.
+6. **`bypass_cache` skips reads, not writes.** It forces recomputation and overwrites the existing entry under the deterministic key.
 
 ### Cancellation and Background Work
 
@@ -250,7 +279,7 @@ The cache is the single most performance-sensitive piece of Tango. Key rules:
 - **Avoid asserting on error messages** — assert on error type or use `require.Error`. Do not `assert.Contains(t, err.Error(), message)`.
 - **No change detector tests** — don't assert on internal structure, field-for-field equality of generated types, or defaults that can shift without behavior changing. Test what the code *does*.
 - **No `time.Sleep` for synchronization** — use channels, callbacks, condition variables.
-- **Use testify** — `assert` / `require` instead of `t.Fatal()`.
+- **Use testify for value assertions** — use `assert` / `require` for values and errors; `t.Fatal` remains appropriate for test control flow such as failed setup or timeout/select guards.
 - **Mocks via `go.uber.org/mock`** — generated mocks (`*mock` subpackages) for interface-driven dependencies. Inline test doubles only when the interface is small and used by exactly one test.
 - **Goroutine leaks** — long-running tests should use `goleak.VerifyNone(t)` (or `goleak.VerifyTestMain`) to catch leaked goroutines from fan-out or background cache writes.
 
@@ -275,7 +304,12 @@ The cache is the single most performance-sensitive piece of Tango. Key rules:
 2. Add a `ComputationStrategy` enum value in `proto/tango.proto`, `make proto`.
 3. Wire selection in the orchestrator's runner construction.
 
-**Add a new entity / config field:**
+**Add a new entity field:**
 
-1. Add the field to the relevant struct in `config/` with a YAML tag, a Go comment, and validation in `config.Parse` (or the relevant validator).
-2. If the field has a default, document it on the field and set it in `Parse` — do not let callers see an unset zero value.
+1. Add a comment describing the field's data semantics, optionality, units, and invariants.
+2. Update proto and mapper boundaries if the field crosses the RPC surface, then add behavior-focused tests for every affected path.
+
+**Add a new config field:**
+
+1. Add the field to the relevant struct in `config/` with a YAML tag, a Go comment, and validation in `config.Parse` or the relevant validator.
+2. If the field has a default, document it on the field and set it during parsing so callers do not observe an ambiguous zero value.
