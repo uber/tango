@@ -22,7 +22,7 @@ enum ErrorCode {
 
 message TangoError {
     ErrorCode code = 1;
-    String message = 2;
+    string message = 2;
 }
 ```
 
@@ -48,6 +48,7 @@ Package `errors` defines `TangoError`, Tango's internal error type. It provides 
   - [func (\*TangoError) Error() string](#func-tangoerror-error)
   - [func (\*TangoError) Unwrap() error](#func-tangoerror-unwrap)
 - [func GetErrorCode(err error) ErrorCode](#func-geterrorcode)
+- [func Fields(err error) \[\]zap.Field](#func-fields)
 
 ### type ErrorCode
 
@@ -76,7 +77,7 @@ const (
 func (code ErrorCode) String() string
 ```
 
-String returns the string form of the code: `"cancelled"`, `"user"`, `"infra_retryable"`, or `"infra"` as the default.
+String returns the string form of the code: `"infra"`, `"cancelled"`, `"user"`, `"infra_retryable"`, or `"unknown"` for out-of-range codes.
 
 ### type TangoError
 
@@ -139,13 +140,21 @@ func GetErrorCode(err error) ErrorCode
 
 GetErrorCode extracts the `ErrorCode` from err. If err is `context.Canceled`, `ErrorCancelled` is returned. If err wraps a `TangoError`, its code is returned. Otherwise `ErrorInfra` is returned.
 
+### func Fields
+
+```go
+func Fields(err error) []zap.Field
+```
+
+Fields returns zap fields describing err: the error message and its `ErrorCode`. Used by controller logging to attach structured error context.
+
 ## Usage
 
 The constructors are meant to be used only in top level layers (controller, orchestrator, graphrunner) that call components (git, bazel, targethasher, storage, etc). The components used by these layers are responsible for providing sentinel errors if they can be classified as user or infra-retryable. Plain errors will be classified as infra by default in the controller.
 
 ```go
 // bazel
-var ErrDownloadBazeliskNetwork = errors.New("download bazelisk network failure")
+var ErrNetwork = errors.New("network failure")
 
 func ensureBazelisk(...) (..., error) {
 	...
@@ -153,7 +162,7 @@ func ensureBazelisk(...) (..., error) {
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) {
-			return "", fmt.Errorf("%w: %w", ErrDownloadBazeliskNetwork, err)
+			return "", fmt.Errorf("%w: %w", ErrNetwork, err)
 		}
 		return "", err
 	}
@@ -163,11 +172,11 @@ func ensureBazelisk(...) (..., error) {
 // orchestrator
 func classifyBazelClientError(err error) error {
 	wrappedErr := fmt.Errorf("create bazel client: %w", err)
-	if errors.Is(wrappedErr, bazel.ErrDownloadBazeliskNetwork) {
+	if errors.Is(wrappedErr, bazel.ErrNetwork) {
 		return tangoerrors.NewInfraRetryable(wrappedErr)
 	}
 	// check other sentinels if any
-	return wrappedErr
+	return tangoerrors.NewInfra(wrappedErr)
 }
 
 func (b *nativeOrchestrator) GetTargetGraph(...) (..., error) {

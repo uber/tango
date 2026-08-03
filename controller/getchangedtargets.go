@@ -60,7 +60,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		op.Complete(retErr)
 		if retErr != nil {
 			logger.Error("GetChangedTargets failed", tangoerrors.Fields(retErr)...)
-			emitFailureMetric(e, opGetChangedTargets, retErr)
 			retErr = toWireError(retErr)
 		}
 	}()

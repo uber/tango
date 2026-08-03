@@ -17,10 +17,10 @@
 //
 // Usage:
 //
-//	bazel run //cmd/query-bench -- --workspace /path/to/repo
-//	bazel run //cmd/query-bench -- --workspace /path/to/repo --bazel bazelisk --runs 3
-//	bazel run //cmd/query-bench -- --workspace /path/to/repo --exclude-external
-//	bazel run //cmd/query-bench -- --workspace /path/to/repo --query '//...:all-targets'
+//	bazel run //example/cmd/query-bench -- --workspace /path/to/repo
+//	bazel run //example/cmd/query-bench -- --workspace /path/to/repo --bazel bazelisk --runs 3
+//	bazel run //example/cmd/query-bench -- --workspace /path/to/repo --exclude-external
+//	bazel run //example/cmd/query-bench -- --workspace /path/to/repo --query '//...:all-targets'
 package main
 
 import (

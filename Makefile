@@ -1,4 +1,4 @@
-.PHONY: build cover test test-integration bench lint proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets help
+.PHONY: build cover test test-integration bench lint proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets version help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel

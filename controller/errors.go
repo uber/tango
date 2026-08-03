@@ -15,9 +15,7 @@
 package controller
 
 import (
-	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/internal/mapper"
-	"github.com/uber/tango/observability/metrics"
 )
 
 // toWireError converts err into a YARPC error carrying a TangoError detail so
@@ -27,12 +25,4 @@ import (
 // docs/errors/errors.md. Nil errors pass through unchanged.
 func toWireError(err error) error {
 	return mapper.ToProtoError(err)
-}
-
-// emitFailureMetric tags the failure counter with err's ErrorCode. e should
-// already carry the repo tag; op is the operation subscope the counter lands under.
-func emitFailureMetric(e *metrics.Emitter, op string, err error) {
-	e.Tagged(map[string]string{
-		"error_code": tangoerrors.GetErrorCode(err).String(),
-	}).Counter(op, "failures").Inc(1)
 }

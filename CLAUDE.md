@@ -63,7 +63,7 @@ The top-level split is by **responsibility**, not by domain: `controller/` handl
 The controller is the YARPC service implementation. It owns the transport-adjacent concerns: request validation, response chunking, cancellation handling, fan-out across revisions, and metrics emission. It does **not** own workspace creation, git operations, or graph computation — those belong to the orchestrator and below.
 
 Each RPC method follows the same shape:
-1. Call `metrics.Begin(emitter, op, buckets)` to record a start counter and capture the start time. Defer `op.Complete(err)` which records a finish-duration histogram tagged `result` with the outcome (one of `success`, `cancelled`, `user`, `infra`, `infra_retryable`). On failure, also emit a `failures` counter tagged with `error_code` via `emitFailureMetric`.
+1. Call `metrics.Begin(emitter, op, buckets)` to record a start counter and capture the start time. Defer `op.Complete(err)` which records a finish-duration histogram tagged `result` with the outcome (one of `success`, `cancelled`, `user`, `infra`, `infra_retryable`).
 2. Validate the request; reject with a `TangoError` classified `ErrorUser` on bad input.
 3. Attempt to serve the response from cache (read-through). On a cache miss, drive the orchestrator to compute the target graph(s).
 4. Stream the result to the client.
@@ -82,7 +82,7 @@ The bundled `nativeOrchestrator` (under `orchestrator/native_orchestrator.go`) i
 
 A custom orchestrator satisfies the same `orchestrator.Orchestrator` interface and is wired into the controller in place of the native one. It is the right seam to plug in remote build execution, CI-managed checkouts, or organization-specific caching — the controller and `graphrunner` stay unchanged.
 
-Whichever implementation is used, the orchestrator is responsible for **classifying** errors by wrapping them with `tangoerrors.NewInfra`, `tangoerrors.NewInfraRetryable`, or `tangoerrors.NewUser` (from `core/errors`) so the metrics pipeline can tag failures with a stable `error_code`. Per-cause classifiers in `orchestrator/errors.go` (e.g. `classifyLeaseError`, `classifyGitError`, `classifyBazelClientError`) map component-level sentinels (`repomanager.ErrPoolTimeout`, `git.ErrTimeout`, `bazel.ErrNetwork`) to the appropriate error code.
+Whichever implementation is used, the orchestrator is responsible for **classifying** errors by wrapping them with `tangoerrors.NewInfra`, `tangoerrors.NewInfraRetryable`, or `tangoerrors.NewUser` (from `core/errors`) so the metrics pipeline can tag the finish histogram with a stable `result`. Per-cause classifiers in `orchestrator/errors.go` (e.g. `classifyLeaseError`, `classifyGitError`, `classifyBazelClientError`) map component-level sentinels (`repomanager.ErrPoolTimeout`, `git.ErrTimeout`, `bazel.ErrNetwork`) to the appropriate error code.
 
 ### Graphrunner
 
@@ -226,9 +226,9 @@ Errors are classified by **origin** (user vs infra) for metrics. The contract li
 
 **Key rules:**
 
-1. **Wrap at the failure site** with the appropriate constructor (`NewUser`, `NewInfra`, `NewInfraRetryable`) so the metric tag carries a stable `error_code`. The `GetErrorCode` function extracts the code from any error chain; context cancellations are detected automatically.
+1. **Wrap at the failure site** with the appropriate constructor (`NewUser`, `NewInfra`, `NewInfraRetryable`) so the finish histogram carries a stable `result`. The `GetErrorCode` function extracts the code from any error chain; context cancellations are detected automatically.
 2. **The deepest layer that knows the classification wraps the error.** Lower layers (storage, git, bazel) return plain errors with their own sentinels (`storage.ErrNotFound`, `git.ErrTimeout`, `git.ErrFatal`, `bazel.ErrNetwork`, `repomanager.ErrPoolTimeout`). The orchestrator decides whether a given failure is user-caused or infra-caused — per-cause classifiers in `orchestrator/errors.go` (`classifyLeaseError`, `classifyGitError`, `classifyBazelClientError`) handle this mapping.
-3. **The controller emits the `error_code` metric tag.** `controller/errors.go` provides `emitFailureMetric`, which calls `tangoerrors.GetErrorCode(err).String()` to tag the `failures` counter. The `errors.Fields` helper produces structured zap fields (`error` + `error_code`) for log lines.
+3. **The controller completes the standard lifecycle metric.** `metrics.Op.Complete` derives the finish histogram's `result` tag from `tangoerrors.GetErrorCode(err).String()`. The `errors.Fields` helper separately produces structured zap fields (`error` + `error_code`) for log lines.
 4. **Errors flow through `errors.Is` / `errors.As`** — `TangoError` implements `Unwrap`, so wrapping preserves the underlying sentinels (e.g. callers can still `errors.Is(err, storage.ErrNotFound)` through a `TangoError` wrapper).
 ### Caching and Treehashes
 

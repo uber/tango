@@ -40,5 +40,4 @@ func TestControllerMetricsPathShape(t *testing.T) {
 	snap := ts.Snapshot()
 	assert.Contains(t, snap.Counters(), "controller.get_changed_target_graph.start+")
 	assert.Contains(t, snap.Histograms(), "controller.get_changed_target_graph.finish+result=infra")
-	assert.Contains(t, snap.Counters(), "controller.get_changed_target_graph.failures+error_code=infra")
 }

@@ -1,5 +1,5 @@
 # Tango OSS
-Tango OSS (Target Analyzer in Go) provides APIs for fetching and comparing target graphs and services. It is a standalone library that can be used and executed independently of the monorepo.
+Tango OSS (Target Analyzer in Go) provides APIs for fetching and comparing target graphs. It is a standalone library that can be used and executed independently of the monorepo.
 
 ## Quick Start
 
@@ -109,7 +109,7 @@ mockgen -destination=<source file> <package path> <Interface><Interface>
 # Run in the current package
 mockgen -destination=<source file> . <Interface><Interface>
 # Example
-mockgen -package=tangopbmock  -self_package=tangopbmock  -destination=tangopbmock/tangopbmock.go . TangoServiceGetChangedServicesYARPCServer,TangoServiceGetChangedTargetGraphYARPCServer,TangoServiceGetChangedTargetsYARPCServer,TangoServiceGetTargetGraphYARPCServer
+mockgen -package=tangopbmock  -self_package=tangopbmock  -destination=tangopbmock/tangopbmock.go . TangoServiceGetChangedTargetsYARPCServer,TangoServiceGetTargetGraphYARPCServer
 ```
 
 ### Update new module version

@@ -125,43 +125,36 @@ The only tag reused across an operation's metrics is `repo`, so the caller bakes
 
 Metric and operation names are declared by the package that owns each operation, while the *outcome vocabulary* is shared: tag keys and result values live in `metrics/names.go` and every operation draws from them. Buckets are shared too — each callsite passes one of the `Fast`/`Slow`/`LargeCount` sets from `buckets.go` by timescale.
 
-```go
-package metrics
+### Outcome vocabulary
 
-// Tag keys.
-const (
-    TagRepo   = "repo"
-    TagResult = "result"
-)
+`Outcome(err)` maps an error to a `result` tag value for the `finish` histogram. A nil error is `success`; any non-nil error delegates to `tangoerrors.GetErrorCode(err).String()`, which classifies by `ErrorCode`:
 
-// Result values for TagResult.
-const (
-    ResultSuccess   = "success"
-    ResultFailure   = "failure"
-    ResultCancelled = "cancelled"
-    ResultHit       = "hit"
-    ResultMiss      = "miss"
-)
-```
+| `result` value | When | Source |
+|---|---|---|
+| `success` | `err == nil` | hardcoded |
+| `cancelled` | `errors.Is(err, context.Canceled)` | `ErrorCancelled.String()` |
+| `user` | error wraps a `TangoError` with `ErrorUser` | `ErrorUser.String()` |
+| `infra` | unclassified error or `ErrorInfra` | `ErrorInfra.String()` |
+| `infra_retryable` | error wraps a `TangoError` with `ErrorInfraRetryable` | `ErrorInfraRetryable.String()` |
 
-Operation names are *not* centralized here — each consuming package declares its own op-name consts in its `metrics.go`, named after the interface method they measure (e.g. `get_target_graph`, `compute`, `lease`).
-```go
-// Outcome maps an error to a result tag value. Only an explicitly cancelled
-// context (client disconnect or shutdown) is `cancelled`; a deadline exceeded
-// is a genuine timeout and counts as `failure` (tagged infra on the
-// failure_type axis).
-func Outcome(err error) string {
-    switch {
-    case err == nil:
-        return ResultSuccess
-    case errors.Is(err, context.Canceled):
-        return ResultCancelled
-    default:
-        return ResultFailure
-    }
-}
-```
-The `result` tag is the sole outcome signal. Success, failure, and cancelled counts are derived from the `finish` histogram by summing its buckets grouped by `result`.
+Note: `"failure"` is **not** a valid outcome value. Dashboards should filter on the concrete values above (`cancelled`, `user`, `infra`, `infra_retryable`) rather than a single `failure` bucket.
+
+A `context.DeadlineExceeded` without a `TangoError` wrapper is classified as `infra` (a genuine timeout), not `cancelled` — only an explicit `context.Canceled` (client disconnect or shutdown) maps to `cancelled`.
+
+Operation names are *not* centralized here — each consuming package declares its own op-name consts in its `metrics.go`, snake_cased after the interface method they measure (e.g. `get_target_graph`, `compute`, `lease`).
+
+### Cache-lookup counters
+
+Cache users may record a lookup counter under their parent operation with
+`RecordCacheLookup(e, parentOp, name, err)`. The caller owns the bounded metric
+name; the shared helper owns the result semantics:
+
+- a nil error emits `result=hit`;
+- a `storage.NotFoundError` emits `result=miss`;
+- any other error emits nothing, because an infrastructure failure is not a
+  cache miss and must not skew the hit rate.
+
+The `result` tag on the `finish` histogram is the primary outcome signal. Success and error-class counts are derived from the `finish` histogram by summing its buckets grouped by `result`.
 
 ## Usage
 
@@ -193,17 +186,13 @@ func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream 
 }
 ```
 
-A sub-operation uses `Begin`/`Complete` for the `start`/`finish` duration exactly like the request handlers, reusing the repo-tagged emitter the caller already holds.
+A sub-operation uses `Begin`/`Complete` for the `start`/`finish` duration exactly like the request handlers, reusing the repo-tagged emitter the caller already holds. Cache lookups within an operation can record a result-tagged counter alongside the duration.
 
 ```go
-// opCacheRead is an extension op, declared next to the emit site.
-const opCacheRead = "cache_read"
-
-func (c *controller) readGraphCache(ctx context.Context, e *metrics.Emitter, key string) (_ storage.GraphReader, hit bool, retErr error) {
-    op := metrics.Begin(e, opCacheRead, metrics.FastDurationBuckets)
-    defer func() { op.Complete(retErr) }()
-
-    return c.lookupGraph(ctx, key)
+value, err := cache.Get(ctx, key)
+metrics.RecordCacheLookup(e, parentOp, cacheLookupMetric, err)
+if err == nil {
+    return value, nil
 }
 ```
 
@@ -213,7 +202,7 @@ func (c *controller) readGraphCache(ctx context.Context, e *metrics.Emitter, key
 # operation rate
 fetch service:tango name:controller.get_changed_targets.start
 
-# success / failure / cancelled counts
+# success and classified error counts
 fetch service:tango name:controller.get_changed_targets.finish | sum by (result)
 
 # P95 latency of successful requests
@@ -229,4 +218,3 @@ fetch service:tango name:controller.get_changed_targets.target_count | histogram
 ## Request-specific tags
 
 Each distinct tag value is a new series, so tag values must be bounded — never request IDs, commit hashes, paths, or raw repo URLs. `repo` is safe only with an explicit cardinality budget and a normalized, allow-listed value; the handlers above apply it that way (`ToShortRemote`).
-
