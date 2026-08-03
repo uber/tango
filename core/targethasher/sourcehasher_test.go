@@ -15,6 +15,8 @@
 package targethasher
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,7 +43,7 @@ func TestNewSourceHasher_buildsMaps(t *testing.T) {
 func TestNoOpHasher_returnsNil(t *testing.T) {
 	h := &noOpHasher{}
 	sf := &buildpb.SourceFile{Name: strPtr("//:dummy")}
-	got, err := h.HashSourceFile(sf)
+	got, err := h.HashSourceFile(context.Background(), sf)
 	assert.NoError(t, err, "unexpected error: %v", err)
 	assert.Nil(t, got, "expected nil hash, got %v", got)
 }
@@ -68,7 +70,7 @@ func TestDiskHashHelper_KnownFileHashUsed(t *testing.T) {
 		Location:        strPtr(abs + ":1:1"),
 		VisibilityLabel: []string{"//visibility:private"},
 	}
-	got, err := h.HashSourceFile(sf)
+	got, err := h.HashSourceFile(context.Background(), sf)
 	assert.NoError(t, err, "unexpected err: %v", err)
 	assert.Equal(t, string(known), string(got), "expected known hash %q, got %q", known, got)
 }
@@ -94,7 +96,7 @@ func TestDiskHashHelper_NonDefaultVisibilityForcesDiskHash(t *testing.T) {
 		Location:        strPtr(abs + ":1:1"),
 		VisibilityLabel: []string{"//visibility:public"}, // non-default
 	}
-	got, err := h.HashSourceFile(sf)
+	got, err := h.HashSourceFile(context.Background(), sf)
 	assert.NoError(t, err, "unexpected err: %v", err)
 	assert.NotEqual(t, string(got), "KNOWN", "expected disk hash, but got known hash")
 	assert.NotEqual(t, []byte{}, got, "expected non-empty disk hash")
@@ -121,7 +123,7 @@ func TestDiskHashHelper_HashesFileFromDisk(t *testing.T) {
 		Location:        strPtr(abs),
 		VisibilityLabel: []string{"//visibility:private"},
 	}
-	got, err := h.HashSourceFile(sf)
+	got, err := h.HashSourceFile(context.Background(), sf)
 	assert.NoError(t, err, "unexpected err: %v", err)
 	assert.NotEmpty(t, got, "expected non-empty hash from disk")
 }
@@ -150,9 +152,32 @@ func TestDiskHashHelper_HashesDirectory(t *testing.T) {
 		Location:        strPtr(dirAbs),
 		VisibilityLabel: []string{"//visibility:private"},
 	}
-	got, err := h.HashSourceFile(sf)
+	got, err := h.HashSourceFile(context.Background(), sf)
 	assert.NoError(t, err, "unexpected err: %v", err)
 	assert.NotEmpty(t, got, "expected non-empty hash for directory")
 }
 
 func strPtr(s string) *string { return &s }
+
+func TestDiskHashHelper_RespectsContextCancellation(t *testing.T) {
+	tmp := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("x"), 0o644))
+
+	h := &diskHashHelper{
+		workspaceroot:   tmp,
+		knownFileHashes: map[string][]byte{},
+	}
+	sf := &buildpb.SourceFile{
+		Name:            strPtr("//:directory"),
+		Location:        strPtr(tmp),
+		VisibilityLabel: []string{"//visibility:private"},
+	}
+
+	cause := errors.New("stop hashing")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(cause)
+
+	_, err := h.HashSourceFile(ctx, sf)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, cause)
+}

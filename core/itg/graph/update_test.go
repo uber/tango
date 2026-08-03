@@ -29,9 +29,11 @@ import (
 type fakeSourceHasher struct {
 	result []byte
 	err    error
+	ctx    context.Context
 }
 
-func (f *fakeSourceHasher) HashSourceFile(_ *buildpb.SourceFile) ([]byte, error) {
+func (f *fakeSourceHasher) HashSourceFile(ctx context.Context, _ *buildpb.SourceFile) ([]byte, error) {
+	f.ctx = ctx
 	return f.result, f.err
 }
 
@@ -44,6 +46,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 		t.Parallel()
 		expected := []byte{0xAB, 0xCD}
 		hasher := &fakeSourceHasher{result: expected}
+		ctx := context.WithValue(context.Background(), struct{}{}, "source-hash")
 		name := "//pkg:file.go"
 		targets := map[string]*targethasher.Target{
 			name: {
@@ -53,8 +56,9 @@ func TestComputeAvailableHashes(t *testing.T) {
 			},
 		}
 
-		require.NoError(t, computeAvailableHashes(hasher, targets))
+		require.NoError(t, computeAvailableHashes(ctx, hasher, targets))
 		assert.Equal(t, expected, targets[name].Hash)
+		assert.Equal(t, ctx, hasher.ctx)
 	})
 
 	t.Run("package group hashed by name", func(t *testing.T) {
@@ -64,7 +68,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			name: {Name: name, RuleType: targethasher.PackageGroup},
 		}
 
-		require.NoError(t, computeAvailableHashes(&fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
 
 		h := sha1.New()
 		h.Write([]byte(name))
@@ -78,7 +82,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			name: {Name: name, RuleType: targethasher.ExternalRuleType},
 		}
 
-		require.NoError(t, computeAvailableHashes(&fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
 		assert.Nil(t, targets[name].Hash, "external rule targets should not get a hash here")
 	})
 
@@ -89,7 +93,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			name: {Name: name, RuleType: targethasher.GeneratedFileType},
 		}
 
-		require.NoError(t, computeAvailableHashes(&fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
 		assert.Nil(t, targets[name].Hash, "generated file hash is resolved later")
 	})
 
@@ -106,7 +110,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			},
 		}
 
-		require.NoError(t, computeAvailableHashes(&fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
 		assert.NotNil(t, targets[name].HashWithoutDeps, "rule should have HashWithoutDeps after hashing")
 		assert.Nil(t, targets[name].Hash, "full hash is not computed here — deps are needed")
 	})
@@ -118,7 +122,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			"//pkg:f": {Name: "//pkg:f", RuleType: targethasher.SourceFileType, SourceFile: &buildpb.SourceFile{}},
 		}
 
-		err := computeAvailableHashes(hasher, targets)
+		err := computeAvailableHashes(context.Background(), hasher, targets)
 		assert.Error(t, err)
 	})
 }

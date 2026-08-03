@@ -297,11 +297,12 @@ func assertEqualTargetHash(t *testing.T, expected, actual Target) {
 
 func Test_fromProto(t *testing.T) {
 	ctrl := gomock.NewController(t)
+	ctx := context.WithValue(context.Background(), struct{}{}, "source-hash")
 
 	mockHasher := NewMockSourceHasher(ctrl)
 	mockHasher.EXPECT().
-		HashSourceFile(gomock.Any()).
-		DoAndReturn(func(s *buildpb.SourceFile) ([]byte, error) {
+		HashSourceFile(gomock.Eq(ctx), gomock.Any()).
+		DoAndReturn(func(_ context.Context, s *buildpb.SourceFile) ([]byte, error) {
 			h := newHash()
 			io.WriteString(h, s.GetName())
 			return h.Sum(nil), nil
@@ -311,7 +312,7 @@ func Test_fromProto(t *testing.T) {
 	q, err := bazel.FromFile("testdata/test.proto.bin")
 	require.NoError(t, err)
 
-	a, err := fromProto(context.Background(), q, mockHasher, "", set.NewSet[string](), set.NewSet[string](), nil, true)
+	a, err := fromProto(ctx, q, mockHasher, "", set.NewSet[string](), set.NewSet[string](), nil, true)
 	require.NoError(t, err)
 
 	assert.Empty(t, a.Warnings)

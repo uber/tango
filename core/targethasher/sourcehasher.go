@@ -15,6 +15,7 @@
 package targethasher
 
 import (
+	"context"
 	"crypto/sha1"
 	"fmt"
 	"hash"
@@ -37,11 +38,16 @@ const (
 	_defaultSourceFileVisibility = "//visibility:private"
 )
 
+// cancelCheckInterval is how often the directory walk checks for cancellation,
+// measured in files hashed. Matches the convention used elsewhere in the
+// codebase (controller, mapper, bazel/stream).
+const cancelCheckInterval = 1024
+
 // SourceHasher provides hashes for source nodes in the target graph. These
 // can be calculated based on disk contents or form other sources such as a
 // vcs system.
 type SourceHasher interface {
-	HashSourceFile(s *buildpb.SourceFile) ([]byte, error)
+	HashSourceFile(ctx context.Context, s *buildpb.SourceFile) ([]byte, error)
 }
 
 // diskHashHelper is a SourceHasher that provides hashes based on disk
@@ -73,11 +79,11 @@ func NewSourceHasher(p Params) SourceHasher {
 }
 
 // HashSourceFile does a no-op hash for the noOpHasher.
-func (hh *noOpHasher) HashSourceFile(sourceFile *buildpb.SourceFile) ([]byte, error) {
+func (hh *noOpHasher) HashSourceFile(_ context.Context, sourceFile *buildpb.SourceFile) ([]byte, error) {
 	return nil, nil
 }
 
-func (hh *diskHashHelper) HashSourceFile(sourceFile *buildpb.SourceFile) ([]byte, error) {
+func (hh *diskHashHelper) HashSourceFile(ctx context.Context, sourceFile *buildpb.SourceFile) ([]byte, error) {
 	nonDefaultVisibilities := filterVisibilityLabels(sourceFile.GetVisibilityLabel())
 	// The location may look like /foo/decl.go:1:1
 	location, _, _ := strings.Cut(sourceFile.GetLocation(), ":")
@@ -94,7 +100,7 @@ func (hh *diskHashHelper) HashSourceFile(sourceFile *buildpb.SourceFile) ([]byte
 
 	var hash hash.Hash
 	if fi.IsDir() {
-		hash, err = hashDir(location)
+		hash, err = hashDir(ctx, location)
 	} else {
 		hash, err = hashFile(location)
 	}
@@ -131,14 +137,25 @@ func hashFile(path string) (hash.Hash, error) {
 	return hash, nil
 }
 
-func hashDir(root string) (hash.Hash, error) {
+func hashDir(ctx context.Context, root string) (hash.Hash, error) {
+	if err := context.Cause(ctx); err != nil {
+		return nil, err
+	}
+
 	dirHash := newHash()
+	var fileCount int
 	walkDirFunc := func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		if d.Type().IsRegular() {
+			if fileCount%cancelCheckInterval == 0 {
+				if err := context.Cause(ctx); err != nil {
+					return err
+				}
+			}
+			fileCount++
 			fileHash, err := hashFile(path)
 			if err != nil {
 				return err
