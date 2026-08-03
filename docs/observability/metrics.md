@@ -125,23 +125,6 @@ The only tag reused across an operation's metrics is `repo`, so the caller bakes
 
 Metric and operation names are declared by the package that owns each operation, while the *outcome vocabulary* is shared: tag keys and result values live in `metrics/names.go` and every operation draws from them. Buckets are shared too — each callsite passes one of the `Fast`/`Slow`/`LargeCount` sets from `buckets.go` by timescale.
 
-```go
-package metrics
-
-// Tag keys.
-const (
-    TagRepo   = "repo"
-    TagResult = "result"
-)
-
-// Result values for TagResult on the finish histogram.
-const (
-    ResultSuccess = "success"
-    ResultHit     = "hit"
-    ResultMiss    = "miss"
-)
-```
-
 ### Outcome vocabulary
 
 `Outcome(err)` maps an error to a `result` tag value for the `finish` histogram. A nil error is `success`; any non-nil error delegates to `tangoerrors.GetErrorCode(err).String()`, which classifies by `ErrorCode`:
