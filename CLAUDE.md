@@ -60,36 +60,15 @@ tango/                              # repo root (Go module github.com/uber/tango
 
 The top-level split is by **responsibility**, not by domain: `controller/` handles the RPC surface, `orchestrator/` drives workspace materialization and graph production, `graphrunner/` computes a graph from a materialized workspace, and `core/` holds reusable infrastructure. Interfaces are used at behavioral extension seams so implementations can be mocked or replaced without forcing every cross-layer dependency into an interface.
 
-### Responsibility and artifact ownership
-
-| Concern or artifact | Owner | Contract |
-|---|---|---|
-| Wire validation and mapping | Controller and `internal/mapper` | Validate required repository identity fields and convert protobuf requests into entity values. |
-| Output configuration | Controller | Filter fields and distances only while sending; never let output-only options affect cached full payloads. |
-| Repository identity | Controller → orchestrator | Pass a validated `BuildDescription`; the orchestrator resolves it into a materialized workspace. |
-| Workspace lifecycle | Orchestrator | Lease, checkout, apply ordered change requests, and release. |
-| Treehash mapping | Controller reads; orchestrator computes and writes | The controller uses the mapping for fast paths; the orchestrator writes it synchronously when storing a newly computed graph. |
-| Target-graph cache | Controller and orchestrator | The controller performs an initial fast-path read; the orchestrator performs a second read after computing the treehash and synchronously writes misses. |
-| Compared-target cache | Controller | Read with corruption fallback; write asynchronously and best-effort using the application-lifetime context. |
-| Computation strategy | Orchestrator | Select the requested computation implementation after the workspace is materialized. |
-| Graph comparison and canonical IDs | Controller with `internal/targetdiff` and mappers | Decode both graphs, compare semantic targets, and build a per-call ID namespace. |
-| Response streaming | Controller | Apply output filtering and send graph or comparison chunks. |
-| Backend selection | Composition root | Construct concrete storage, repository, and orchestrator implementations and inject their interfaces. |
-
 ### Controllers
 
 The controller is the YARPC service implementation. It owns transport-adjacent concerns: request validation, metrics, cancellation linkage, response streaming, output filtering, comparison fan-out, and compared-target caching. It does **not** own workspace creation, git operations, or graph computation.
 
-Every RPC starts a standard metrics lifecycle with `metrics.Begin` and defers `op.Complete(err)`, which records the finish-duration histogram tagged with the final `result`. RPCs also classify invalid input as a user error, preserve error chains, and convert the final error at the wire boundary. The graph RPC and comparison RPC have distinct cache flows:
-
-- **`GetTargetGraph`** validates and maps the request, attempts the treehash/graph fast path, delegates a miss to the orchestrator, then streams the returned reader.
-- **`GetChangedTargets`** first attempts the compared-target fast path, fetches both target graphs concurrently on a miss, compares them, starts a best-effort background cache write, and streams the filtered result.
+Every RPC records operation metrics, classifies invalid input as a user error, preserves error chains, attempts applicable cache reads before expensive work, delegates graph production to the orchestrator, and converts the final error at the wire boundary.
 
 ### Orchestrator
 
-The orchestrator is the repository-identity resolution and workspace-materialization boundary. Given a `BuildDescription`, it produces a target graph by resolving the repository state, leasing and preparing a workspace, deriving its treehash, consulting the graph cache, invoking a graph runner on a miss, and synchronously storing the graph and treehash mapping.
-
-The bundled `nativeOrchestrator` implements this contract with local repository workers. Custom orchestrators are the supported integration seam for CI-managed checkouts, remote execution, organization-specific caches, or different worker and retry policies. A replacement satisfies `orchestrator.Orchestrator` and is injected into the controller without moving workspace concerns upward.
+The orchestrator provides the target graph, typically by running Bazel. An implementation may perform the work on the local host or delegate it to another stateful subsystem, such as CI infrastructure, that manages checkout and computation.
 
 ### Graphrunner
 
@@ -103,9 +82,7 @@ Entities are Tango's request, result, and storage data models; they are not pers
 
 1. **Describe data, not choreography** — comments state what a type or field means, its units, optionality, identity, and invariants. Component ownership and write paths belong in the architecture sections.
 2. **Prefer values for identities and configuration** — use value structs for `BuildDescription`, requests, configs, and constructor params. Pointers are appropriate for optional payloads, mutation, or shared ownership.
-3. **Treat slices and maps as mutable** — copy them before sorting, normalization, mutation, or concurrent handoff when the caller may retain or modify the original.
-4. **Scope ID references to compact representations** — `OptimizedTarget` uses IDs and metadata maps for streamed and stored payloads; do not require every domain relationship to use IDs.
-5. **Keep wire conversion at the mapper boundary** — protobuf validation and proto/entity conversion belong in `internal/mapper` or `mapper`, not in the orchestrator or graph algorithms.
+3. **Keep wire conversion at the mapper boundary** — protobuf validation and proto/entity conversion belong in `internal/mapper` or `mapper`, not in the orchestrator or graph algorithms.
 
 ### Extensions and interfaces
 
@@ -116,7 +93,7 @@ Behavioral interfaces live with the capability they describe and have a single r
 - `core/repomanager.RepoManager` — workspace lease/release
 - `core/workspace.Workspace` + `core/workspace.Request` — checkout, apply
 - `graphrunner.GraphRunner` — compute a graph from a workspace
-- `orchestrator.Orchestrator` — repository identity to target graph
+- `orchestrator.Orchestrator` — top-level entry point
 
 **Design interfaces for the technology *space*, not the implementation in front of you.** The contract must be cheaply satisfiable by every plausible backend, not just the one being built today. For example, the `Storage` interface offers `Get`/`Put`/`Exists`/`List` keyed by a string — primitives that a disk, an in-memory map, S3, GCS, or a CDN can all satisfy without contortion.
 
@@ -223,7 +200,7 @@ CI builds and tests every PR via GitHub Actions. Before committing, validate loc
 
 If you modified `.proto` files or interface signatures, also run `make proto` and regenerate the relevant mocks.
 
-**Commit and PR titles must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.** Use a type prefix (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`) followed by an optional scope and a short imperative subject — e.g. `feat(orchestrator): support remote build execution`, `fix(controller): surface readTreehash errors`, `docs: update AGENTS.md`. Breaking changes use `!` after the type/scope (e.g. `feat(storage)!: ...`) and explain the break in the body. This keeps the commit history machine-parseable for changelogs and release automation.
+**Commit and PR titles must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.** Use a type prefix (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`) followed by a scope and a short imperative subject — e.g. `feat(orchestrator): support remote build execution`, `fix(controller): surface readTreehash errors`, `docs(architecture): clarify cache ownership`. Breaking changes use `!` after the type/scope (e.g. `feat(storage)!: ...`) and explain the break in the body. This keeps the commit history machine-parseable for changelogs and release automation.
 
 ### Code Style
 
@@ -256,16 +233,15 @@ The cache is the single most performance-sensitive piece of Tango. Cache identit
 |---|---|---|
 | Treehash mapping | Short remote, base SHA, ordered change-request URL list | Controller reads for fast paths; orchestrator writes synchronously when storing a newly computed graph. |
 | Target graph | Short remote, treehash, computation strategy, sorted extra exclusion regexes | Controller performs the initial read; orchestrator reads again after deriving the treehash and synchronously writes a computed miss. |
-| Compared targets | Short remote, ordered treehash pair, sorted extra exclusion regexes | Controller reads with corruption fallback and writes asynchronously, best-effort. |
+| Compared targets | Short remote, ordered treehash pair, sorted extra exclusion regexes | Controller reads with miss/corruption fallback and writes asynchronously, best-effort. |
 
 Key rules:
 
 1. **Use `core/cachekey` helpers exclusively.** Never construct cache paths inline. When a new input changes computed graph or comparison output, update or version the relevant key and add tests. Current keys do not encode every repository configuration or algorithm/schema version, so such changes require deliberate compatibility or invalidation decisions.
 2. **Keep output-only options outside cache identities.** Store full graph and comparison payloads, then apply distance and field filtering while sending so presentation choices cannot poison shared entries.
-3. **Distinguish misses from failures.** A not-found result is an expected cache miss. Infrastructure failures on identity-bearing treehash or graph reads are fail-fast; compared-target cache reads and writes are best-effort and fall back to recomputation or logging.
+3. **Distinguish misses from failures.** A not-found or corrupt entry is an expected recomputation path. Prefer to fail fast when either target-graph or compared-target cache access fails with a genuine infrastructure error rather than silently degrading cache reliability.
 4. **Expect duplicate work on concurrent misses.** Tango does not promise singleflight, compare-and-swap, or exactly-once computation. Deterministic computation plus complete content keys makes repeated overwrites converge on the same value.
-5. **Reject incomplete compared-target blobs before streaming.** Buffer cached comparison responses first; if decoding fails, discard the entry and recompute before sending any partial result.
-6. **`bypass_cache` skips reads, not writes.** It forces recomputation and overwrites the existing entry under the deterministic key.
+5. **`bypass_cache` skips reads, not writes.** It forces recomputation and overwrites the existing entry under the deterministic key.
 
 ### Cancellation and Background Work
 
