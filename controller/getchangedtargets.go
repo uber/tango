@@ -42,7 +42,7 @@ type job struct {
 	cancelled   bool
 	completed   bool
 	ctx         context.Context
-	cancel      context.CancelFunc
+	cancel      context.CancelCauseFunc
 }
 
 // GetChangedTargets returns the changed targets between two revisions. If the
@@ -211,8 +211,8 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 	jobs := make([]*job, 2)
 	for i := 0; i < 2; i++ {
 		// create independent contexts for each job; if one of the jobs fails, the other one should be cancelled to save resources and improve latency
-		ctxNew, cancelNew := context.WithCancel(ctx)
-		defer cancelNew()
+		ctxNew, cancelNew := context.WithCancelCause(ctx)
+		defer cancelNew(nil)
 		jobs[i] = &job{ctx: ctxNew, cancel: cancelNew}
 	}
 
@@ -289,7 +289,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 		if jobs[res.order].err != nil {
 			other := (res.order + 1) % 2
 			if !jobs[other].completed {
-				jobs[other].cancel()
+				jobs[other].cancel(errors.New("sibling graph fetch failed"))
 				// explicitly mark that this job is cancelled, so we can
 				// ignore its error later
 				jobs[other].cancelled = true
