@@ -31,28 +31,22 @@ func TestNewRequest_Github_Success(t *testing.T) {
 	req, err := NewRequest(rawURL, g, "https://github.com/org/repo.git", "baseRef", zap.NewNop().Sugar())
 	require.NoError(t, err)
 	require.NotNil(t, req)
-	gr, ok := req.(*gitRequest)
-	require.True(t, ok, "returned Request should be *gitRequest")
+	gr, ok := req.(*githubPullRequest)
+	require.True(t, ok, "returned Request should be *githubPullRequest")
 	require.Equal(t, "https://github.com/org/repo.git", gr.remote)
-	require.Equal(t, "123", gr.requestID)
-	require.Equal(t, _testHeadSHA, gr.headSHA)
+	require.Equal(t, "123", gr.pr.Number)
+	require.Equal(t, _testHeadSHA, gr.pr.HeadSHA)
 	require.Nil(t, gr.git)
 }
 
 func TestNewRequest_InvalidURL(t *testing.T) {
-	rawURL := "://bad"
-	var g git.Interface = nil
-
-	req, err := NewRequest(rawURL, g, "", "baseRef", zap.NewNop().Sugar())
+	req, err := NewRequest("://bad", nil, "", "baseRef", zap.NewNop().Sugar())
 	require.Error(t, err)
 	require.Nil(t, req)
 }
 
 func TestNewRequest_InvalidScheme(t *testing.T) {
-	rawURL := "phabricator://bad"
-	var g git.Interface = nil
-
-	req, err := NewRequest(rawURL, g, "", "baseRef", zap.NewNop().Sugar())
+	req, err := NewRequest("phabricator://bad", nil, "", "baseRef", zap.NewNop().Sugar())
 	require.Error(t, err)
 	require.Nil(t, req)
 }

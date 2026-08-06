@@ -16,6 +16,7 @@ package workspace_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,8 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"go.uber.org/zap"
 )
+
+const _testSHALen = 40
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -42,6 +45,10 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v in %s failed: %s", args, dir, string(out))
 	return strings.TrimSpace(string(out))
+}
+
+func changeURI(prNumber, headSHA string) string {
+	return fmt.Sprintf("github://github.com/test/repo/pull/%s/%s", prNumber, headSHA)
 }
 
 func setupBareRepoWithPR(t *testing.T, prContent string) (bareDir, baseSHA, prSHA string) {
@@ -76,8 +83,6 @@ func cloneWorker(t *testing.T, bareDir, baseSHA string) string {
 	workerDir := filepath.Join(t.TempDir(), "worker")
 	runGit(t, t.TempDir(), "clone", bareDir, workerDir)
 	runGit(t, workerDir, "checkout", baseSHA)
-	// git.Interface commits need a repo-local identity: the Bazel test
-	// sandbox has no global git config.
 	runGit(t, workerDir, "config", "user.name", "test")
 	runGit(t, workerDir, "config", "user.email", "test@test.com")
 	return workerDir
@@ -95,15 +100,17 @@ func advancePR(t *testing.T, bareDir, newContent string) {
 	runGit(t, advanceDir, "push", bareDir, "HEAD:refs/pull/1/head")
 }
 
-func TestGitRequest_RealGit_AppliesPinnedContent(t *testing.T) {
+func TestGitHubPR_RealGit_AppliesPinnedContent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	logger := zap.NewNop().Sugar()
 
 	bareDir, baseSHA, prSHA := setupBareRepoWithPR(t, "pr-content")
+	require.Len(t, prSHA, _testSHALen)
 	workerDir := cloneWorker(t, bareDir, baseSHA)
 
-	req := workspace.NewGitRequest(git.New(workerDir, logger), bareDir, "1", baseSHA, prSHA, logger)
+	req, err := workspace.NewRequest(changeURI("1", prSHA), git.New(workerDir, logger), bareDir, baseSHA, logger)
+	require.NoError(t, err)
 	require.NoError(t, req.Apply(ctx))
 
 	content, err := os.ReadFile(filepath.Join(workerDir, "pr.txt"))
@@ -111,16 +118,20 @@ func TestGitRequest_RealGit_AppliesPinnedContent(t *testing.T) {
 	assert.Equal(t, "pr-content", string(content))
 }
 
-func TestGitRequest_RealGit_StableTreeAcrossPRAdvance(t *testing.T) {
+func TestGitHubPR_RealGit_StableTreeAcrossPRAdvance(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	logger := zap.NewNop().Sugar()
 
 	bareDir, baseSHA, prSHA1 := setupBareRepoWithPR(t, "version-1")
+	require.Len(t, prSHA1, _testSHALen)
+	uri := changeURI("1", prSHA1)
 
 	worker1 := cloneWorker(t, bareDir, baseSHA)
 	g1 := git.New(worker1, logger)
-	require.NoError(t, workspace.NewGitRequest(g1, bareDir, "1", baseSHA, prSHA1, logger).Apply(ctx))
+	req1, err := workspace.NewRequest(uri, g1, bareDir, baseSHA, logger)
+	require.NoError(t, err)
+	require.NoError(t, req1.Apply(ctx))
 	tree1, err := g1.RevParse(ctx, "HEAD^{tree}")
 	require.NoError(t, err)
 
@@ -128,7 +139,9 @@ func TestGitRequest_RealGit_StableTreeAcrossPRAdvance(t *testing.T) {
 
 	worker2 := cloneWorker(t, bareDir, baseSHA)
 	g2 := git.New(worker2, logger)
-	require.NoError(t, workspace.NewGitRequest(g2, bareDir, "1", baseSHA, prSHA1, logger).Apply(ctx))
+	req2, err := workspace.NewRequest(uri, g2, bareDir, baseSHA, logger)
+	require.NoError(t, err)
+	require.NoError(t, req2.Apply(ctx))
 	tree2, err := g2.RevParse(ctx, "HEAD^{tree}")
 	require.NoError(t, err)
 
@@ -139,7 +152,7 @@ func TestGitRequest_RealGit_StableTreeAcrossPRAdvance(t *testing.T) {
 	assert.Equal(t, "version-1", string(content), "the applied content must be the pinned version, not the advanced head")
 }
 
-func TestGitRequest_RealGit_RejectsNonAncestorSHA(t *testing.T) {
+func TestGitHubPR_RealGit_RejectsNonAncestorSHA(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	logger := zap.NewNop().Sugar()
@@ -156,6 +169,7 @@ func TestGitRequest_RealGit_RejectsNonAncestorSHA(t *testing.T) {
 	runGit(t, sideDir, "push", bareDir, "HEAD:refs/heads/side")
 
 	workerDir := cloneWorker(t, bareDir, baseSHA)
-	req := workspace.NewGitRequest(git.New(workerDir, logger), bareDir, "1", baseSHA, sideSHA, logger)
+	req, err := workspace.NewRequest(changeURI("1", sideSHA), git.New(workerDir, logger), bareDir, baseSHA, logger)
+	require.NoError(t, err)
 	require.Error(t, req.Apply(ctx))
 }

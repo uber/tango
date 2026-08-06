@@ -3,15 +3,15 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "workspace",
     srcs = [
-        "gitrequest.go",
+        "githubpr_request.go",
         "request.go",
         "workspace.go",
     ],
     importpath = "github.com/uber/tango/core/workspace",
     visibility = ["//visibility:public"],
     deps = [
-        "//core/changeuri",
         "//core/git",
+        "//core/workspace/githubpr",
         "@org_uber_go_zap//:zap",
     ],
 )
@@ -19,8 +19,8 @@ go_library(
 go_test(
     name = "workspace_test",
     srcs = [
-        "gitrequest_realgit_test.go",
-        "gitrequest_test.go",
+        "githubpr_request_realgit_test.go",
+        "githubpr_request_test.go",
         "request_test.go",
         "workspace_test.go",
     ],
@@ -28,6 +28,7 @@ go_test(
     deps = [
         "//core/git",
         "//core/git/gitmock",
+        "//core/workspace/githubpr",
         "//core/workspace/requestmock",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",

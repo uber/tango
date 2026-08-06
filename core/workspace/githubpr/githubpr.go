@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package changeuri parses and validates change URIs — the system-wide
-// identity of a code change, per the submitqueue change-URI RFC
-// (https://github.com/uber/submitqueue/blob/main/doc/rfc/change-uri.md).
+// Package githubpr parses and validates GitHub pull request change URIs —
+// the system-wide identity of a code change, per the submitqueue change-URI
+// RFC (https://github.com/uber/submitqueue/blob/main/doc/rfc/change-uri.md).
 //
-// A change URI is an RFC 3986 URI of the form scheme://{host[:port]}/{path}
-// whose path pins the change to an exact code state. Only the GitHub pull
-// request scheme is supported:
+// A GitHub PR change URI is an RFC 3986 URI of the form:
 //
 //	github://{host[:port]}/{org}/{repo}/pull/{pr}/{head_sha}
 //
@@ -27,7 +25,7 @@
 // canonical form and rejects everything else — it never normalizes, because
 // normalization applied at one entry point and skipped at another lets two
 // spellings of one change into the system.
-package changeuri
+package githubpr
 
 import (
 	"fmt"

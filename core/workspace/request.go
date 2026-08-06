@@ -17,32 +17,24 @@ package workspace
 import (
 	"context"
 	"fmt"
-	"net/url"
 
-	"github.com/uber/tango/core/changeuri"
 	"github.com/uber/tango/core/git"
+	"github.com/uber/tango/core/workspace/githubpr"
 	"go.uber.org/zap"
 )
 
-// Request represents a change request type, like Phabricator diff or Github pull request
+// Request represents a change request that can be applied to a workspace.
 type Request interface {
 	Apply(ctx context.Context) error
 }
 
-// NewRequest creates a new request from a canonical change URI, e.g.
-// github://{host[:port]}/{org}/{repo}/pull/{pr}/{head_sha}.
+// NewRequest creates a Request from a canonical change URI and the remote
+// URL of the repository. Currently only GitHub PR URIs are supported
+// (github://{host}/{org}/{repo}/pull/{pr}/{head_sha}).
 func NewRequest(rawURL string, g git.Interface, remote string, baseRef string, logger *zap.SugaredLogger) (Request, error) {
-	u, err := url.Parse(rawURL)
+	pr, err := githubpr.Parse(rawURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid change URI %q: %w", rawURL, err)
 	}
-	switch u.Scheme {
-	case changeuri.Scheme:
-		pr, err := changeuri.Parse(rawURL)
-		if err != nil {
-			return nil, fmt.Errorf("invalid change URI %q: %w", rawURL, err)
-		}
-		return NewGitRequest(g, remote, pr.Number, baseRef, pr.HeadSHA, logger), nil
-	}
-	return nil, fmt.Errorf("unsupported scheme: %v", u.Scheme)
+	return newGitHubPRRequest(g, remote, pr, baseRef, logger), nil
 }
