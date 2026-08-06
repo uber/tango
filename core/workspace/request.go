@@ -31,7 +31,7 @@ type Request interface {
 
 // NewRequest creates a new request from a canonical change URI, e.g.
 // github://{host[:port]}/{org}/{repo}/pull/{pr}/{head_sha}.
-func NewRequest(rawURL string, g git.Interface, baseRef string, logger *zap.SugaredLogger) (Request, error) {
+func NewRequest(rawURL string, g git.Interface, remote string, baseRef string, logger *zap.SugaredLogger) (Request, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
@@ -42,7 +42,7 @@ func NewRequest(rawURL string, g git.Interface, baseRef string, logger *zap.Suga
 		if err != nil {
 			return nil, fmt.Errorf("invalid change URI %q: %w", rawURL, err)
 		}
-		return NewGitRequest(g, pr.Number, baseRef, pr.HeadSHA, logger), nil
+		return NewGitRequest(g, remote, pr.Number, baseRef, pr.HeadSHA, logger), nil
 	}
 	return nil, fmt.Errorf("unsupported scheme: %v", u.Scheme)
 }

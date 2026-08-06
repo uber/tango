@@ -24,6 +24,7 @@ import (
 
 type gitRequest struct {
 	git       git.Interface
+	remote    string
 	requestID string
 	baseRef   string
 	headSHA   string
@@ -33,9 +34,10 @@ type gitRequest struct {
 // NewGitRequest creates a Request that applies a GitHub pull request.
 // requestID and headSHA come from the parsed change URI; see
 // https://github.com/uber/submitqueue/blob/main/doc/rfc/change-uri.md.
-func NewGitRequest(git git.Interface, requestID string, baseRef string, headSHA string, logger *zap.SugaredLogger) Request {
+func NewGitRequest(git git.Interface, remote string, requestID string, baseRef string, headSHA string, logger *zap.SugaredLogger) Request {
 	return &gitRequest{
 		git:       git,
+		remote:    remote,
 		requestID: requestID,
 		baseRef:   baseRef,
 		headSHA:   headSHA,
@@ -47,7 +49,7 @@ func NewGitRequest(git git.Interface, requestID string, baseRef string, headSHA 
 func (r *gitRequest) Apply(ctx context.Context) error {
 	r.logger.Infow("gitRequest: Applying PR", zap.String("request_id", r.requestID), zap.String("base_ref", r.baseRef), zap.String("head_sha", r.headSHA))
 	ref := fmt.Sprintf("+pull/%s/head:pull/%s/head", r.requestID, r.requestID)
-	err := r.git.Fetch(ctx, "origin", ref, "--force", "--no-tags")
+	err := r.git.Fetch(ctx, r.remote, ref, "--force", "--no-tags")
 	if err != nil {
 		return fmt.Errorf("fetch PR %s: %w", r.requestID, err)
 	}

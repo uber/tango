@@ -103,7 +103,7 @@ func TestGitRequest_RealGit_AppliesPinnedContent(t *testing.T) {
 	bareDir, baseSHA, prSHA := setupBareRepoWithPR(t, "pr-content")
 	workerDir := cloneWorker(t, bareDir, baseSHA)
 
-	req := workspace.NewGitRequest(git.New(workerDir, logger), "1", baseSHA, prSHA, logger)
+	req := workspace.NewGitRequest(git.New(workerDir, logger), bareDir, "1", baseSHA, prSHA, logger)
 	require.NoError(t, req.Apply(ctx))
 
 	content, err := os.ReadFile(filepath.Join(workerDir, "pr.txt"))
@@ -120,7 +120,7 @@ func TestGitRequest_RealGit_StableTreeAcrossPRAdvance(t *testing.T) {
 
 	worker1 := cloneWorker(t, bareDir, baseSHA)
 	g1 := git.New(worker1, logger)
-	require.NoError(t, workspace.NewGitRequest(g1, "1", baseSHA, prSHA1, logger).Apply(ctx))
+	require.NoError(t, workspace.NewGitRequest(g1, bareDir, "1", baseSHA, prSHA1, logger).Apply(ctx))
 	tree1, err := g1.RevParse(ctx, "HEAD^{tree}")
 	require.NoError(t, err)
 
@@ -128,7 +128,7 @@ func TestGitRequest_RealGit_StableTreeAcrossPRAdvance(t *testing.T) {
 
 	worker2 := cloneWorker(t, bareDir, baseSHA)
 	g2 := git.New(worker2, logger)
-	require.NoError(t, workspace.NewGitRequest(g2, "1", baseSHA, prSHA1, logger).Apply(ctx))
+	require.NoError(t, workspace.NewGitRequest(g2, bareDir, "1", baseSHA, prSHA1, logger).Apply(ctx))
 	tree2, err := g2.RevParse(ctx, "HEAD^{tree}")
 	require.NoError(t, err)
 
@@ -156,6 +156,6 @@ func TestGitRequest_RealGit_RejectsNonAncestorSHA(t *testing.T) {
 	runGit(t, sideDir, "push", bareDir, "HEAD:refs/heads/side")
 
 	workerDir := cloneWorker(t, bareDir, baseSHA)
-	req := workspace.NewGitRequest(git.New(workerDir, logger), "1", baseSHA, sideSHA, logger)
+	req := workspace.NewGitRequest(git.New(workerDir, logger), bareDir, "1", baseSHA, sideSHA, logger)
 	require.Error(t, req.Apply(ctx))
 }

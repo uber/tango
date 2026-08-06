@@ -28,11 +28,12 @@ func TestNewRequest_Github_Success(t *testing.T) {
 	rawURL := "github://github.com/org/repo/pull/123/" + _testHeadSHA
 	var g git.Interface = nil
 
-	req, err := NewRequest(rawURL, g, "baseRef", zap.NewNop().Sugar())
+	req, err := NewRequest(rawURL, g, "https://github.com/org/repo.git", "baseRef", zap.NewNop().Sugar())
 	require.NoError(t, err)
 	require.NotNil(t, req)
 	gr, ok := req.(*gitRequest)
 	require.True(t, ok, "returned Request should be *gitRequest")
+	require.Equal(t, "https://github.com/org/repo.git", gr.remote)
 	require.Equal(t, "123", gr.requestID)
 	require.Equal(t, _testHeadSHA, gr.headSHA)
 	require.Nil(t, gr.git)
@@ -42,7 +43,7 @@ func TestNewRequest_InvalidURL(t *testing.T) {
 	rawURL := "://bad"
 	var g git.Interface = nil
 
-	req, err := NewRequest(rawURL, g, "baseRef", zap.NewNop().Sugar())
+	req, err := NewRequest(rawURL, g, "", "baseRef", zap.NewNop().Sugar())
 	require.Error(t, err)
 	require.Nil(t, req)
 }
@@ -51,7 +52,7 @@ func TestNewRequest_InvalidScheme(t *testing.T) {
 	rawURL := "phabricator://bad"
 	var g git.Interface = nil
 
-	req, err := NewRequest(rawURL, g, "baseRef", zap.NewNop().Sugar())
+	req, err := NewRequest(rawURL, g, "", "baseRef", zap.NewNop().Sugar())
 	require.Error(t, err)
 	require.Nil(t, req)
 }
@@ -68,7 +69,7 @@ func TestNewRequest_NonCanonicalURI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, err := NewRequest(tt.url, nil, "baseRef", zap.NewNop().Sugar())
+			req, err := NewRequest(tt.url, nil, "", "baseRef", zap.NewNop().Sugar())
 			require.Error(t, err)
 			require.Nil(t, req)
 		})
