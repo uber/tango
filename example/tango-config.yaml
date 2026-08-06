@@ -15,12 +15,12 @@ repository:
       - "^@@?bazel_tools/"
     exclude_external_targets: true
     bzlmod_enabled: true
-    query_timeout: 300
+    query_timeout_seconds: 300
 
 # Service configuration
 service:
-  worker_pool_size: 5
-  # root for origin clones; defaults to os.TempDir()/tango-repo-manager
-  repo_manager_clone_path: "/tmp/tango-repo-manager"
-  # root for worker checkouts; defaults to repo_manager_clone_path/.workers
+  max_worker_pool_size: 5
+  # root for origin clones and worker checkouts; required
+  workspaces_root_path: "/tmp/tango-repo-manager"
+  # root for worker checkouts; defaults to workspaces_root_path/.workers
   worker_root_path: "/tmp/tango/workers"

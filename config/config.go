@@ -76,18 +76,14 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 	}
 
 	// --- service validation and defaults ---
-	if config.Service.WorkerRootPath != "" && config.Service.RepoManagerClonePath == "" {
-		return nil, fmt.Errorf("service.repo_manager_clone_path must be set when worker_root_path is specified")
-	}
-	// Default: os.TempDir()/tango-repo-manager.
-	if config.Service.RepoManagerClonePath == "" {
-		config.Service.RepoManagerClonePath = filepath.Join(os.TempDir(), "tango-repo-manager")
+	if config.Service.WorkspacesRootPath == "" {
+		return nil, fmt.Errorf("service.workspaces_root_path must be set")
 	}
 	if config.Service.WorkerRootPath == "" {
-		config.Service.WorkerRootPath = filepath.Join(config.Service.RepoManagerClonePath, ".workers")
+		config.Service.WorkerRootPath = filepath.Join(config.Service.WorkspacesRootPath, ".workers")
 	}
-	if config.Service.WorkerPoolSize <= 0 {
-		return nil, fmt.Errorf("service.worker_pool_size must be > 0, got %d", config.Service.WorkerPoolSize)
+	if config.Service.MaxWorkerPoolSize <= 0 {
+		return nil, fmt.Errorf("service.max_worker_pool_size must be > 0, got %d", config.Service.MaxWorkerPoolSize)
 	}
 	if config.Service.MaxMessageBytes <= 0 {
 		config.Service.MaxMessageBytes = DefaultMaxMessageBytes
@@ -103,10 +99,12 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 		if _, exists := config.repositoryByRemote[remote]; exists {
 			return nil, fmt.Errorf("duplicate repository remote %q", remote)
 		}
-		// Default query_timeout: 900 seconds (15 minutes), matching the
-		// core/bazel package's _queryTimeout constant.
-		if config.Repository[i].QueryTimeout <= 0 {
-			config.Repository[i].QueryTimeout = DefaultQueryTimeoutSeconds
+		if config.Repository[i].BzlmodEnabled == nil {
+			config.Repository[i].BzlmodEnabled = &_bzlmodEnabledDefault
+		}
+		// Default query_timeout_seconds: 600 seconds (10 minutes).
+		if config.Repository[i].QueryTimeoutSeconds <= 0 {
+			config.Repository[i].QueryTimeoutSeconds = DefaultQueryTimeoutSeconds
 		}
 		config.repositoryByRemote[remote] = &config.Repository[i]
 	}

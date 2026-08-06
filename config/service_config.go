@@ -16,13 +16,17 @@ package config
 
 // ServiceConfig holds operational configuration for the Tango service.
 type ServiceConfig struct {
-	WorkerPoolSize int `yaml:"worker_pool_size"` // number of worker workspaces per repo
-	// RepoManagerClonePath is the root directory for origin repo clones.
-	// Defaults to os.TempDir()/tango-repo-manager.
-	// Must be set explicitly when worker_root_path is specified.
-	RepoManagerClonePath string `yaml:"repo_manager_clone_path"`
+	// MaxWorkerPoolSize is the max number of concurrent requests per repository.
+	// Each worker is a lightweight local clone (hardlinked to the origin, not a
+	// full copy) that handles one request at a time. Must be greater than 0.
+	MaxWorkerPoolSize int `yaml:"max_worker_pool_size"`
+	// WorkspacesRootPath is the root directory where Tango stores repository
+	// clones and worker checkouts. Required.
+	WorkspacesRootPath string `yaml:"workspaces_root_path"`
+	// TODO: WorkerRootPath is not documented in config/README.md. Delete it if
+	// it turns out to be unneeded, otherwise document it there.
 	// WorkerRootPath is the root directory for worker workspace checkouts.
-	// Defaults to repo_manager_clone_path/.workers.
+	// Defaults to workspaces_root_path/.workers.
 	WorkerRootPath  string `yaml:"worker_root_path"`
 	MaxMessageBytes int    `yaml:"max_message_bytes"` // max serialized bytes per streamed gRPC message; 0 → DefaultMaxMessageBytes
 }
