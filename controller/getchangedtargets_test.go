@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	"github.com/uber/tango/entity"
@@ -139,7 +140,7 @@ func TestCompareTargetGraphs(t *testing.T) {
 	firstGraph := entity.GetTargetGraphResponse{Metadata: &entity.Metadata{}}
 	secondGraph := entity.GetTargetGraphResponse{Metadata: &entity.Metadata{}}
 
-	response, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), []entity.GetTargetGraphResponse{firstGraph}, []entity.GetTargetGraphResponse{secondGraph})
+	response, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), []entity.GetTargetGraphResponse{firstGraph}, []entity.GetTargetGraphResponse{secondGraph}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, response)
 }
@@ -568,7 +569,7 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
 	require.Len(t, res, 2)
 	cs := res[0].ChangedTargets
@@ -628,7 +629,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -692,7 +693,7 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	// Hash-only change on a rule with no own-config change and no reachable
 	// seed: under "trust the hasher" semantics, an orphan CHANGED rule with
 	// no upstream explanation becomes a distance-0 seed itself.
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -747,7 +748,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -820,7 +821,7 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -890,7 +891,7 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -1064,7 +1065,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -1137,7 +1138,7 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -1184,7 +1185,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 			},
 		},
 	}
-	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second)
+	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
 	cs := res[0].ChangedTargets
 	require.NotNil(t, cs)
@@ -1432,7 +1433,7 @@ func TestToDiffGraph_SkipsUnresolvedIDs(t *testing.T) {
 		AttributeStringValueMapping: map[int32]string{30: "val_a"},
 	}
 
-	graph, err := toDiffGraph(t.Context(), targetsByID, meta)
+	graph, err := toDiffGraph(t.Context(), targetsByID, meta, nil)
 	require.NoError(t, err)
 
 	require.Len(t, graph, 2)
@@ -1447,4 +1448,80 @@ func TestToDiffGraph_SkipsUnresolvedIDs(t *testing.T) {
 
 	_, ok := graph["//app:b"]
 	assert.True(t, ok)
+}
+
+func TestToDiffGraph_OnlyKeepsAllowlistedAttributes(t *testing.T) {
+	targetsByID := map[int32]*entity.OptimizedTarget{
+		1: {
+			Hash:     "h1",
+			RuleType: 100,
+			Attributes: map[int32]int32{
+				20: 30, // size (allowlisted)
+				21: 31, // generator_location (cosmetic BUILD-file position, not allowlisted)
+				22: 32, // package_name (not allowlisted)
+			},
+		},
+	}
+	meta := &entity.Metadata{
+		TargetIDMapping: map[int32]string{1: "//app:a"},
+		RuleTypeMapping: map[int32]string{100: "go_library"},
+		AttributeNameMapping: map[int32]string{
+			20: "size",
+			21: "generator_location",
+			22: "package_name",
+		},
+		AttributeStringValueMapping: map[int32]string{
+			30: "val_a",
+			31: "app/BUILD.bazel:12:1",
+			32: "app",
+		},
+	}
+
+	graph, err := toDiffGraph(t.Context(), targetsByID, meta, map[string]bool{"size": true})
+	require.NoError(t, err)
+
+	a := graph["//app:a"]
+	require.NotNil(t, a)
+	assert.Equal(t, map[string]string{"size": "val_a"}, a.Attributes)
+}
+
+// fakeRepoConfigProvider is a minimal RepositoryConfigProvider test double;
+// the interface is small enough not to warrant a generated mock.
+type fakeRepoConfigProvider map[string]config.RepositoryConfig
+
+func (f fakeRepoConfigProvider) GetRepositoryConfig(remote string) (config.RepositoryConfig, bool) {
+	cfg, ok := f[remote]
+	return cfg, ok
+}
+
+func TestSeedAttributesFor(t *testing.T) {
+	t.Run("no repo config provider means no filtering", func(t *testing.T) {
+		c := newTestController(zaptest.NewLogger(t))
+		assert.Nil(t, c.seedAttributesFor("some-remote"))
+	})
+
+	t.Run("remote not found means no filtering", func(t *testing.T) {
+		c := newTestController(zaptest.NewLogger(t))
+		c.repoConfig = fakeRepoConfigProvider{}
+		assert.Nil(t, c.seedAttributesFor("some-remote"))
+	})
+
+	t.Run("configured remote with no seed_attributes means no filtering", func(t *testing.T) {
+		c := newTestController(zaptest.NewLogger(t))
+		c.repoConfig = fakeRepoConfigProvider{
+			"some-remote": config.RepositoryConfig{Remote: "some-remote"},
+		}
+		assert.Nil(t, c.seedAttributesFor("some-remote"))
+	})
+
+	t.Run("configured remote with seed_attributes returns allowlist", func(t *testing.T) {
+		c := newTestController(zaptest.NewLogger(t))
+		c.repoConfig = fakeRepoConfigProvider{
+			"some-remote": config.RepositoryConfig{
+				Remote:         "some-remote",
+				SeedAttributes: []string{"size", "timeout"},
+			},
+		}
+		assert.Equal(t, map[string]bool{"size": true, "timeout": true}, c.seedAttributesFor("some-remote"))
+	})
 }
