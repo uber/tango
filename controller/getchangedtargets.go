@@ -97,7 +97,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		return fmt.Errorf("fetch target graphs: %w", err)
 	}
 
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, e, logger, firstGraph, secondGraph)
+	changedTargetsResponses, err := c.compareTargetGraphs(ctx, e, logger, firstGraph, secondGraph, c.directlyChangedAttributesFor(request.GetFirstRevision().GetRemote()))
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = nil
 	secondGraph = nil
@@ -375,7 +375,7 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 // are re-mapped into a canonical per-call ID namespace so the response metadata
 // only carries the names actually referenced. See internal/targetdiff for the
 // classification and distance rules.
-func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse) ([]entity.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse, directlyChangedAttrs map[string]bool) ([]entity.GetChangedTargetsResponse, error) {
 	compareStart := time.Now()
 	defer func() {
 		e.DurationHistogram(opGetChangedTargets, "compare_duration", metrics.SlowDurationBuckets).RecordDuration(time.Since(compareStart))
@@ -395,14 +395,14 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	// Release raw chunk slices — individual target protos are now held by the ID maps.
 	firstGraph = nil
 	secondGraph = nil
-	before, err := toDiffGraph(ctx, firstTargetsByID, firstMetadata)
+	before, err := toDiffGraph(ctx, firstTargetsByID, firstMetadata, directlyChangedAttrs)
 	if err != nil {
 		return nil, err
 	}
 	// Metadata and ID map are fully consumed by the name-resolved graph; drop them.
 	firstTargetsByID = nil
 	firstMetadata = nil
-	after, err := toDiffGraph(ctx, secondTargetsByID, secondMetadata)
+	after, err := toDiffGraph(ctx, secondTargetsByID, secondMetadata, directlyChangedAttrs)
 	if err != nil {
 		return nil, err
 	}
@@ -514,10 +514,34 @@ func getTargetsAndMetadata(ctx context.Context, graph []entity.GetTargetGraphRes
 	return targets, merged, nil
 }
 
+// directlyChangedAttributesFor returns the RepositoryConfig.DirectlyChangedAttributes
+// allowlist configured for the given remote, or nil when the repository has no
+// override configured — meaning every attribute is considered a valid signal
+// for a direct-change classification (no filtering). See
+// RepositoryConfig.DirectlyChangedAttributes for the full rationale, and
+// attributesChanged in internal/targetdiff/compare.go for how the allowlist
+// is applied.
+func (c *controller) directlyChangedAttributesFor(remote string) map[string]bool {
+	if c.repoConfig == nil {
+		return nil
+	}
+	cfg, ok := c.repoConfig.GetRepositoryConfig(remote)
+	if !ok || len(cfg.DirectlyChangedAttributes) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(cfg.DirectlyChangedAttributes))
+	for _, attr := range cfg.DirectlyChangedAttributes {
+		set[attr] = true
+	}
+	return set
+}
+
 // toDiffGraph resolves a stream's int32 IDs into a semantic targetdiff.Graph
 // keyed by canonical target name. Targets with no name mapping are skipped;
-// dependency, tag, and attribute IDs that don't resolve are dropped.
-func toDiffGraph(ctx context.Context, targetsByID map[int32]*entity.OptimizedTarget, meta *entity.Metadata) (targetdiff.Graph, error) {
+// dependency, tag, and attribute IDs that don't resolve are dropped. When
+// directlyChangedAttrs is nil, every attribute is kept; otherwise only attributes
+// present in directlyChangedAttrs are kept on each target.
+func toDiffGraph(ctx context.Context, targetsByID map[int32]*entity.OptimizedTarget, meta *entity.Metadata, directlyChangedAttrs map[string]bool) (targetdiff.Graph, error) {
 	targetIDMap := meta.TargetIDMapping
 	ruleTypeMap := meta.RuleTypeMapping
 	tagMap := meta.TagMapping
@@ -561,9 +585,14 @@ func toDiffGraph(ctx context.Context, targetsByID map[int32]*entity.OptimizedTar
 		if attrs := t.Attributes; len(attrs) > 0 {
 			target.Attributes = make(map[string]string, len(attrs))
 			for nameID, valID := range attrs {
-				if attrName := attrNameMap[nameID]; attrName != "" {
-					target.Attributes[attrName] = attrValMap[valID]
+				attrName := attrNameMap[nameID]
+				if attrName == "" {
+					continue
 				}
+				if directlyChangedAttrs != nil && !directlyChangedAttrs[attrName] {
+					continue
+				}
+				target.Attributes[attrName] = attrValMap[valID]
 			}
 		}
 		graph[name] = target
