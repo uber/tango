@@ -1518,7 +1518,7 @@ func TestSeedAttributesFor(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.repoConfig = fakeRepoConfigProvider{
 			"some-remote": config.RepositoryConfig{
-				Remote:                    "some-remote",
+				Remote:         "some-remote",
 				SeedAttributes: []string{"size", "timeout"},
 			},
 		}
