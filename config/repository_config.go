@@ -32,7 +32,7 @@ type RepositoryConfig struct {
 	// BazelStartupOptions are Bazel startup flags placed before the `query` subcommand (e.g. "--batch"); empty by default.
 	BazelStartupOptions []string `yaml:"bazel_startup_options"`
 	StreamBazelLogs     bool     `yaml:"stream_bazel_logs"`
-	// DirectlyChangedAttributes restricts which rule attributes GetChangedTargets
+	// SeedAttributes restricts which rule attributes GetChangedTargets
 	// treats as evidence that a target's own configuration changed, as opposed to
 	// dependency-only churn.
 	//
@@ -51,11 +51,11 @@ type RepositoryConfig struct {
 	// change and assign the target distance 0, when it should instead inherit
 	// its distance from its dependencies.
 	//
-	// When DirectlyChangedAttributes is set, only attributes named here are
+	// When SeedAttributes is set, only attributes named here are
 	// compared; all others are ignored for this classification. When unset
 	// (the default), every attribute is compared and can trigger a direct-change
 	// classification.
-	DirectlyChangedAttributes []string `yaml:"directly_changed_attributes"`
+	SeedAttributes []string `yaml:"seed_attributes"`
 }
 
 // RepositoryConfigProvider looks up per-repository configuration by remote.

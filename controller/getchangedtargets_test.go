@@ -1494,34 +1494,34 @@ func (f fakeRepoConfigProvider) GetRepositoryConfig(remote string) (config.Repos
 	return cfg, ok
 }
 
-func TestDirectlyChangedAttributesFor(t *testing.T) {
+func TestSeedAttributesFor(t *testing.T) {
 	t.Run("no repo config provider means no filtering", func(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
-		assert.Nil(t, c.directlyChangedAttributesFor("some-remote"))
+		assert.Nil(t, c.seedAttributesFor("some-remote"))
 	})
 
 	t.Run("remote not found means no filtering", func(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.repoConfig = fakeRepoConfigProvider{}
-		assert.Nil(t, c.directlyChangedAttributesFor("some-remote"))
+		assert.Nil(t, c.seedAttributesFor("some-remote"))
 	})
 
-	t.Run("configured remote with no directly_changed_attributes means no filtering", func(t *testing.T) {
+	t.Run("configured remote with no seed_attributes means no filtering", func(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.repoConfig = fakeRepoConfigProvider{
 			"some-remote": config.RepositoryConfig{Remote: "some-remote"},
 		}
-		assert.Nil(t, c.directlyChangedAttributesFor("some-remote"))
+		assert.Nil(t, c.seedAttributesFor("some-remote"))
 	})
 
-	t.Run("configured remote with directly_changed_attributes returns allowlist", func(t *testing.T) {
+	t.Run("configured remote with seed_attributes returns allowlist", func(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.repoConfig = fakeRepoConfigProvider{
 			"some-remote": config.RepositoryConfig{
 				Remote:                    "some-remote",
-				DirectlyChangedAttributes: []string{"size", "timeout"},
+				SeedAttributes: []string{"size", "timeout"},
 			},
 		}
-		assert.Equal(t, map[string]bool{"size": true, "timeout": true}, c.directlyChangedAttributesFor("some-remote"))
+		assert.Equal(t, map[string]bool{"size": true, "timeout": true}, c.seedAttributesFor("some-remote"))
 	})
 }
