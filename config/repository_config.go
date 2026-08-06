@@ -24,13 +24,16 @@ var _bzlmodEnabledDefault = true
 
 // RepositoryConfig holds configuration for a single repository.
 type RepositoryConfig struct {
+	// Remote is the URL used to `git clone` the repository. Tango clones from
+	// this URL and uses it as the lookup key for per-repo settings. Must be
+	// unique across all entries and match exactly what clients send in
+	// BuildDescription.remote.
 	Remote string `yaml:"remote"`
-	// TODO: FullHashRepos, ExcludedFiles, ExcludeExternalTargets, StreamBazelLogs,
-	// and WorkerRootPath are not documented in config/README.md. Delete them if
-	// they turn out to be unneeded, otherwise document them there.
-	FullHashRepos          []string `yaml:"full_hash_repos"`
-	ExcludedFiles          []string `yaml:"excluded_files"`
-	ExcludeExternalTargets bool     `yaml:"exclude_external_targets"`
+	// TODO: FullHashRepos, ExcludedFiles, and StreamBazelLogs are not
+	// documented in config/README.md. Delete them if they turn out to be
+	// unneeded, otherwise document them there.
+	FullHashRepos []string `yaml:"full_hash_repos"`
+	ExcludedFiles []string `yaml:"excluded_files"`
 	// BzlmodEnabled indicates whether this repository uses Bzlmod for external
 	// dependency management. Defaults to true if unset. Set to false only for
 	// repositories still using WORKSPACE.
@@ -38,12 +41,14 @@ type RepositoryConfig struct {
 	// BazelCommandPath overrides the Bazel binary path. When empty, Tango
 	// automatically downloads and caches Bazelisk from GitHub.
 	BazelCommandPath string `yaml:"bazel_command_path"`
-	// QueryTimeoutSeconds is the Bazel query timeout in seconds. Defaults to DefaultQueryTimeoutSeconds (600).
-	QueryTimeoutSeconds int64    `yaml:"query_timeout_seconds"`
-	BazelExtraArgs      []string `yaml:"bazel_extra_args"`
+	// BazelExtraArgs are extra arguments passed to `bazel query` invocations,
+	// inserted between the `query` subcommand and the query expression.
+	BazelExtraArgs []string `yaml:"bazel_extra_args"`
 	// BazelStartupOptions are Bazel startup flags placed before the `query` subcommand (e.g. "--batch"); empty by default.
 	BazelStartupOptions []string `yaml:"bazel_startup_options"`
 	StreamBazelLogs     bool     `yaml:"stream_bazel_logs"`
+	// QueryTimeoutSeconds is the Bazel query timeout in seconds. Defaults to DefaultQueryTimeoutSeconds (600).
+	QueryTimeoutSeconds int64 `yaml:"query_timeout_seconds"`
 	// SeedAttributes restricts which rule attributes GetChangedTargets
 	// treats as evidence that a target's own configuration changed, as opposed to
 	// dependency-only churn.

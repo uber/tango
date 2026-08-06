@@ -47,7 +47,6 @@ type RepoManager interface {
 type repoManager struct {
 	git                  git.Interface
 	repoManagerClonePath string
-	workerRootPath       string
 	logger               *zap.SugaredLogger
 	emitter              *metrics.Emitter
 	poolSize             int
@@ -89,7 +88,6 @@ type Params struct {
 	Git                  git.Interface
 	Logger               *zap.SugaredLogger
 	RepoManagerClonePath string
-	WorkerRootPath       string
 	PoolSize             int
 	// Scope is the tally scope for metrics. A nil scope disables metrics
 	// (defaults to a no-op). Metrics nest under <scope>.repo_manager.*.
@@ -108,7 +106,6 @@ func NewRepoManager(appCtx context.Context, p Params) (RepoManager, error) {
 	return &repoManager{
 		git:                  p.Git,
 		repoManagerClonePath: p.RepoManagerClonePath,
-		workerRootPath:       p.WorkerRootPath,
 		logger:               p.Logger,
 		emitter:              metrics.New(p.Scope).SubScope("repo_manager"),
 		poolSize:             p.PoolSize,
@@ -131,7 +128,7 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 
 	// Pre-allocate fixed worker slots. Existing directories from a previous
 	// run are detected and reused without re-cloning.
-	workersDir := filepath.Join(r.workerRootPath, repo)
+	workersDir := filepath.Join(r.repoManagerClonePath, ".workers", repo)
 	for i := 1; i <= r.poolSize; i++ {
 		dir := filepath.Join(workersDir, fmt.Sprintf("worker-%d", i))
 		slot := &workerSlot{dir: dir}
