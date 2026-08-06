@@ -34,8 +34,9 @@ type Params struct {
 	Logger          *zap.Logger
 	Storage         storage.Storage
 	Orchestrator    orchestrator.Orchestrator
-	Scope           tally.Scope `optional:"true"`
-	MaxMessageBytes int         `optional:"true"`
+	Scope           tally.Scope                     `optional:"true"`
+	MaxMessageBytes int                             `optional:"true"`
+	RepoConfig      config.RepositoryConfigProvider `optional:"true"`
 }
 
 type controller struct {
@@ -44,6 +45,7 @@ type controller struct {
 	orchestrator    orchestrator.Orchestrator
 	emitter         *metrics.Emitter
 	maxMessageBytes int
+	repoConfig      config.RepositoryConfigProvider
 
 	// appCtx is the application lifetime; cancel it on process shutdown.
 	// Used by linkRequestCtx and any fire-and-forget goroutines so they
@@ -65,6 +67,7 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 		orchestrator:    p.Orchestrator,
 		emitter:         emitter,
 		maxMessageBytes: maxMessageBytes,
+		repoConfig:      p.RepoConfig,
 		appCtx:          appCtx,
 	}
 }

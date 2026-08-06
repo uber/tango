@@ -32,6 +32,30 @@ type RepositoryConfig struct {
 	// BazelStartupOptions are Bazel startup flags placed before the `query` subcommand (e.g. "--batch"); empty by default.
 	BazelStartupOptions []string `yaml:"bazel_startup_options"`
 	StreamBazelLogs     bool     `yaml:"stream_bazel_logs"`
+	// SeedAttributes restricts which rule attributes GetChangedTargets
+	// treats as evidence that a target's own configuration changed, as opposed to
+	// dependency-only churn.
+	//
+	// GetChangedTargets classifies each changed target either as "directly
+	// changed" (distance 0 — its own definition differs between revisions) or as
+	// "transitively changed" (distance > 0 — unchanged itself, but reachable from
+	// a directly changed target). A target whose attribute set differs between
+	// revisions is classified as directly changed.
+	//
+	// Bazel attaches many attributes to a rule that are pure BUILD-file
+	// bookkeeping rather than semantic configuration — for example
+	// generator_location records the generating macro's line:column, which
+	// shifts whenever unrelated lines are added or removed earlier in the same
+	// BUILD file, with no effect on the rule's behavior. Comparing the full,
+	// unfiltered attribute set would classify that cosmetic churn as a direct
+	// change and assign the target distance 0, when it should instead inherit
+	// its distance from its dependencies.
+	//
+	// When SeedAttributes is set, only attributes named here are
+	// compared; all others are ignored for this classification. When unset
+	// (the default), every attribute is compared and can trigger a direct-change
+	// classification.
+	SeedAttributes []string `yaml:"seed_attributes"`
 }
 
 // RepositoryConfigProvider looks up per-repository configuration by remote.
