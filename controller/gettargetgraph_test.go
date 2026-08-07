@@ -17,11 +17,10 @@ package controller
 import (
 	"bytes"
 	"context"
+	"encoding/gob"
 	"errors"
 	"io"
 	"testing"
-
-	"encoding/json"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -125,7 +124,7 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).Return(nil)
 	store := storagemock.NewMockStorage(ctrl)
 	var buf bytes.Buffer
-	require.NoError(t, json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
+	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
 
 	gomock.InOrder(
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-xyz"))}, nil),
@@ -272,7 +271,7 @@ func TestGetTargetGraph_StreamSendError(t *testing.T) {
 	storagemock := storagemock.NewMockStorage(ctrl)
 
 	var buf bytes.Buffer
-	require.NoError(t, json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
+	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
 
 	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send fail"))
 	gomock.InOrder(

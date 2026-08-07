@@ -17,7 +17,7 @@ package controller
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"io"
@@ -161,9 +161,9 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 	stream.EXPECT().Context().Return(t.Context())
 
 	// Build a cached response with one ChangedTargets message and one Metadata message,
-	// JSON-encoded (the storage layer uses newline-delimited JSON).
+	// gob-encoded (the storage layer streams a gob-encoded sequence of values).
 	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	enc := gob.NewEncoder(&buf)
 	enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}})
 	enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
 	cachedBytes := buf.Bytes()
@@ -277,7 +277,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	storagemock := storagemock.NewMockStorage(ctrl)
 
 	var buf bytes.Buffer
-	json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{})
+	gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{})
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 		if strings.Contains(req.Key, "compared-targets") {
 			return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
@@ -335,7 +335,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 
 	// Build first revision graph (2 chunks: Targets + Metadata)
 	var buf1 bytes.Buffer
-	enc1 := json.NewEncoder(&buf1)
+	enc1 := gob.NewEncoder(&buf1)
 	enc1.Encode(entity.GetTargetGraphResponse{
 		Targets: []entity.OptimizedTarget{
 			{ID: 1, Hash: "h1", RuleType: 100},
@@ -352,7 +352,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 
 	// Build second revision graph - target2 has different hash
 	var buf2 bytes.Buffer
-	enc2 := json.NewEncoder(&buf2)
+	enc2 := gob.NewEncoder(&buf2)
 	enc2.Encode(entity.GetTargetGraphResponse{
 		Targets: []entity.OptimizedTarget{
 			{ID: 1, Hash: "h1", RuleType: 100},
@@ -447,7 +447,7 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	// goroutine runs. Both revisions share the same target so there are no
 	// diffs to send beyond the metadata chunk.
 	var graphBuf bytes.Buffer
-	enc := json.NewEncoder(&graphBuf)
+	enc := gob.NewEncoder(&graphBuf)
 	enc.Encode(entity.GetTargetGraphResponse{
 		Targets: []entity.OptimizedTarget{{ID: 1, Hash: "h1", RuleType: 100}},
 	})
@@ -954,7 +954,7 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 
 	// Cached response: two targets at distances 0 and 2, plus metadata.
 	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	enc := gob.NewEncoder(&buf)
 	enc.Encode(entity.GetChangedTargetsResponse{
 		ChangedTargets: []entity.ChangedTarget{
 			{Distance: 0, ChangeType: entity.ChangeTypeChanged},
@@ -1262,15 +1262,15 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 	t.Run("corrupt cached blob falls through to recompute", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 
-		// A two-message JSON blob with the second message truncated — mimics an
+		// A two-message gob blob with the second message truncated — mimics an
 		// incomplete concurrent write. The reader returns the first message fine
 		// but errors on the second, and the caller must fall through
 		// (served=false) without sending anything.
 		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
+		enc := gob.NewEncoder(&buf)
 		enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}})
 		enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
-		// Truncate well into the second JSON object to guarantee corruption.
+		// Truncate well into the second gob message to guarantee corruption.
 		truncated := buf.Bytes()[:buf.Len()-5]
 
 		st := storagemock.NewMockStorage(ctrl)
@@ -1302,7 +1302,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		ctrl := gomock.NewController(t)
 
 		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
+		enc := gob.NewEncoder(&buf)
 		enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}})
 		enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
 		cached := buf.Bytes()
@@ -1363,13 +1363,16 @@ func TestFetchTargetGraphs(t *testing.T) {
 	t.Run("first revision failure names graph #1", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		injected := errors.New("orchestrator boom")
+		causeCh := make(chan error, 1)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(_ context.Context, p entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+			func(ctx context.Context, p entity.GetTargetGraphRequest) (storage.GraphReader, error) {
 				if p.Build.BaseSha == "sha1" {
 					return nil, injected
 				}
-				return newGraphReader(t, entityChunk), nil
+				<-ctx.Done()
+				causeCh <- context.Cause(ctx)
+				return nil, ctx.Err()
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
@@ -1380,6 +1383,9 @@ func TestFetchTargetGraphs(t *testing.T) {
 		assert.ErrorIs(t, err, injected)
 		assert.Nil(t, first)
 		assert.Nil(t, second)
+
+		cause := <-causeCh
+		assert.NotErrorIs(t, cause, context.Canceled, "sibling cancellation should carry a distinct cause, not the generic context.Canceled")
 	})
 
 	t.Run("empty reader yields no-chunks error", func(t *testing.T) {
