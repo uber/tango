@@ -24,11 +24,11 @@ import (
 )
 
 type githubPullRequest struct {
-	git      git.Interface
-	remote   string
-	pr       githubpr.PullRequest
-	baseRef  string
-	logger   *zap.SugaredLogger
+	git     git.Interface
+	remote  string
+	pr      githubpr.PullRequest
+	baseRef string
+	logger  *zap.SugaredLogger
 }
 
 // newGitHubPRRequest creates a Request that applies a GitHub pull request.
