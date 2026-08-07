@@ -16,14 +16,14 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/gob"
 	"io"
 )
 
-// reader streams JSON-encoded values of type T from storage.
+// reader streams gob-encoded values of type T from storage.
 type reader[T any] struct {
 	rc  io.ReadCloser
-	dec *json.Decoder
+	dec *gob.Decoder
 }
 
 // Read decodes the next value from the stream. Returns io.EOF at end of stream.
@@ -45,7 +45,7 @@ func (r *reader[T]) Close() error {
 }
 
 // newReader opens the blob at key and returns a reader that decodes
-// JSON-encoded T values from it.
+// gob-encoded T values from it.
 func newReader[T any](ctx context.Context, st Storage, key string) (*reader[T], error) {
 	resp, err := st.Get(ctx, DownloadRequest{Key: key})
 	if err != nil {
@@ -53,6 +53,6 @@ func newReader[T any](ctx context.Context, st Storage, key string) (*reader[T], 
 	}
 	return &reader[T]{
 		rc:  resp.ReadCloser,
-		dec: json.NewDecoder(resp.ReadCloser),
+		dec: gob.NewDecoder(resp.ReadCloser),
 	}, nil
 }

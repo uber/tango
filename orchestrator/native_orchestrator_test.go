@@ -22,7 +22,7 @@ import (
 	"io"
 	"testing"
 
-	"encoding/json"
+	"encoding/gob"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,7 +48,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 
 	st := storagemock.NewMockStorage(ctrl)
 	var buf bytes.Buffer
-	require.NoError(t, json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
+	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{{ID: 1}}}))
 	// Single fetch by remote/treehash for the graph
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
@@ -101,7 +101,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	}).MinTimes(1).MaxTimes(3)
 	// After compute, second read returns a valid delimited stream with one message
 	var buf bytes.Buffer
-	_ = json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
+	_ = gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{{ID: 1}}})
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
 		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
 	}, nil)
@@ -211,7 +211,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	defer ctrl.Finish()
 	st := storagemock.NewMockStorage(ctrl)
 	var buf bytes.Buffer
-	require.NoError(t, json.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
+	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{{ID: 1}}}))
 
 	// git mock must handle Apply sequence from workspace.NewRequest for PR 123
 	g := gitmock.NewMockInterface(ctrl)

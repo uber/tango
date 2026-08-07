@@ -16,7 +16,7 @@ package storage
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/gob"
 	"fmt"
 	"io"
 
@@ -24,25 +24,25 @@ import (
 )
 
 // WriteGraphStream writes entity.GetTargetGraphResponse values to storage
-// as newline-delimited JSON, allowing streaming reads via NewGraphReader.
+// as a gob-encoded stream, allowing streaming reads via NewGraphReader.
 func WriteGraphStream(ctx context.Context, st Storage, key string, chunks []entity.GetTargetGraphResponse) error {
 	return writeStream(ctx, st, key, chunks)
 }
 
 // WriteChangedTargetsStream writes entity.GetChangedTargetsResponse values to storage
-// as newline-delimited JSON, allowing streaming reads via NewChangedTargetsReader.
+// as a gob-encoded stream, allowing streaming reads via NewChangedTargetsReader.
 func WriteChangedTargetsStream(ctx context.Context, st Storage, key string, responses []entity.GetChangedTargetsResponse) error {
 	return writeStream(ctx, st, key, responses)
 }
 
-// writeStream JSON-encodes values and streams them to storage under key.
+// writeStream gob-encodes values and streams them to storage under key.
 // It uses an io.Pipe so the serialized payload is never buffered in full:
 // a writer goroutine encodes into the pipe while Put consumes from it.
 func writeStream[T any](ctx context.Context, st Storage, key string, values []T) error {
 	pr, pw := io.Pipe()
 	writerErr := make(chan error, 1)
 	go func() {
-		enc := json.NewEncoder(pw)
+		enc := gob.NewEncoder(pw)
 		var err error
 		for i := range values {
 			if err = context.Cause(ctx); err != nil {
