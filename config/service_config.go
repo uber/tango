@@ -21,14 +21,11 @@ type ServiceConfig struct {
 	// full copy) that handles one request at a time. Must be greater than 0.
 	MaxWorkerPoolSize int `yaml:"max_worker_pool_size"`
 	// WorkspacesRootPath is the root directory where Tango stores repository
-	// clones and worker checkouts. Required.
+	// clones and worker checkouts. Required. Layout: <workspaces_root_path>/<repo>/
+	// for origin clones and <workspaces_root_path>/.workers/<repo>/worker-{1..N}/
+	// for worker checkouts.
 	WorkspacesRootPath string `yaml:"workspaces_root_path"`
-	// TODO: WorkerRootPath is not documented in config/README.md. Delete it if
-	// it turns out to be unneeded, otherwise document it there.
-	// WorkerRootPath is the root directory for worker workspace checkouts.
-	// Defaults to workspaces_root_path/.workers.
-	WorkerRootPath  string `yaml:"worker_root_path"`
-	MaxMessageBytes int    `yaml:"max_message_bytes"` // max serialized bytes per streamed gRPC message; 0 → DefaultMaxMessageBytes
+	MaxMessageBytes    int    `yaml:"max_message_bytes"` // max serialized bytes per streamed gRPC message; 0 → DefaultMaxMessageBytes
 }
 
 // DefaultMaxMessageBytes is the fallback max serialized size per streamed

@@ -40,7 +40,6 @@ func TestParseBytes_Defaults(t *testing.T) {
 
 	assert.Equal(t, StorageTypeMemory, cfg.Storage.Type, "storage type should default to memory")
 	assert.Equal(t, DefaultMaxMessageBytes, cfg.Service.MaxMessageBytes, "max_message_bytes should default")
-	assert.Contains(t, cfg.Service.WorkerRootPath, ".workers", "worker root should default under workspaces root")
 	assert.Equal(t, DefaultQueryTimeoutSeconds, cfg.Repository[0].QueryTimeoutSeconds, "query_timeout_seconds should default to 600")
 	require.NotNil(t, cfg.Repository[0].BzlmodEnabled)
 	assert.True(t, *cfg.Repository[0].BzlmodEnabled, "bzlmod_enabled should default to true")
@@ -52,12 +51,14 @@ repository:
   - remote: "https://example.com/repo.git"
     query_timeout_seconds: 60
     bzlmod_enabled: false
+    full_hash_repos: ["//"]
+    excluded_files: ["*.gen.go"]
+    stream_bazel_logs: true
 storage:
   type: "memory"
 service:
   max_worker_pool_size: 4
   workspaces_root_path: "/custom/clone"
-  worker_root_path: "/custom/workers"
   max_message_bytes: 1000000
 `
 	cfg, err := ParseBytes([]byte(yamlStr))
@@ -67,8 +68,10 @@ service:
 	assert.Equal(t, int64(60), cfg.Repository[0].QueryTimeoutSeconds)
 	require.NotNil(t, cfg.Repository[0].BzlmodEnabled)
 	assert.False(t, *cfg.Repository[0].BzlmodEnabled)
+	assert.Equal(t, []string{"//"}, cfg.Repository[0].FullHashRepos)
+	assert.Equal(t, []string{"*.gen.go"}, cfg.Repository[0].ExcludedFiles)
+	assert.True(t, cfg.Repository[0].StreamBazelLogs)
 	assert.Equal(t, "/custom/clone", cfg.Service.WorkspacesRootPath)
-	assert.Equal(t, "/custom/workers", cfg.Service.WorkerRootPath)
 	assert.Equal(t, 1000000, cfg.Service.MaxMessageBytes)
 }
 

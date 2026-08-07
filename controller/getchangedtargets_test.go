@@ -1363,13 +1363,16 @@ func TestFetchTargetGraphs(t *testing.T) {
 	t.Run("first revision failure names graph #1", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		injected := errors.New("orchestrator boom")
+		causeCh := make(chan error, 1)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-			func(_ context.Context, p entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+			func(ctx context.Context, p entity.GetTargetGraphRequest) (storage.GraphReader, error) {
 				if p.Build.BaseSha == "sha1" {
 					return nil, injected
 				}
-				return newGraphReader(t, entityChunk), nil
+				<-ctx.Done()
+				causeCh <- context.Cause(ctx)
+				return nil, ctx.Err()
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))
@@ -1380,6 +1383,9 @@ func TestFetchTargetGraphs(t *testing.T) {
 		assert.ErrorIs(t, err, injected)
 		assert.Nil(t, first)
 		assert.Nil(t, second)
+
+		cause := <-causeCh
+		assert.NotErrorIs(t, cause, context.Canceled, "sibling cancellation should carry a distinct cause, not the generic context.Canceled")
 	})
 
 	t.Run("empty reader yields no-chunks error", func(t *testing.T) {

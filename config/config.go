@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	yaml "github.com/goccy/go-yaml"
 )
@@ -78,9 +77,6 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 	// --- service validation and defaults ---
 	if config.Service.WorkspacesRootPath == "" {
 		return nil, fmt.Errorf("service.workspaces_root_path must be set")
-	}
-	if config.Service.WorkerRootPath == "" {
-		config.Service.WorkerRootPath = filepath.Join(config.Service.WorkspacesRootPath, ".workers")
 	}
 	if config.Service.MaxWorkerPoolSize <= 0 {
 		return nil, fmt.Errorf("service.max_worker_pool_size must be > 0, got %d", config.Service.MaxWorkerPoolSize)
