@@ -4,17 +4,15 @@ storage:
 repository:
   - remote: {{.Remote}}
 {{- if .BazelCommand}}
-    bazel_command: {{.BazelCommand}}
+    bazel_command_path: {{.BazelCommand}}
 {{- end}}
     full_hash_repos: [""]
     excluded_files: ["^@@?bazel_tools/"]
-    exclude_external_targets: true
     bzlmod_enabled: true
     # Batch mode avoids a persistent Bazel server, which can wedge when a pooled worker's tree is swapped by `git checkout` between queries.
     bazel_startup_options: ["--batch"]
-    query_timeout: 600
+    query_timeout_seconds: 600
 
 service:
-  worker_pool_size: 2
-  repo_manager_clone_path: {{.ClonePath}}
-  worker_root_path: {{.WorkerPath}}
+  max_worker_pool_size: 2
+  workspaces_root_path: {{.ClonePath}}

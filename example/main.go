@@ -71,23 +71,17 @@ func run() error {
 	logger.Infof("Using storage type: %s", cfg.Storage.Type)
 
 	// Repo manager and orchestrator
-	repoManagerClonePath := cfg.Service.RepoManagerClonePath
-	workerRootPath := cfg.Service.WorkerRootPath
+	repoManagerClonePath := cfg.Service.WorkspacesRootPath
 	if err := os.MkdirAll(repoManagerClonePath, 0o755); err != nil {
 		return fmt.Errorf("failed to create repo manager clone path: %w", err)
 	}
 	defer os.RemoveAll(repoManagerClonePath)
-	if err := os.MkdirAll(workerRootPath, 0o755); err != nil {
-		return fmt.Errorf("failed to create worker root path: %w", err)
-	}
-	defer os.RemoveAll(workerRootPath)
 
 	rm, err := repomanager.NewRepoManager(appCtx, repomanager.Params{
 		Git:                  git.New(repoManagerClonePath, logger),
 		Logger:               logger,
 		RepoManagerClonePath: repoManagerClonePath,
-		WorkerRootPath:       workerRootPath,
-		PoolSize:             cfg.Service.WorkerPoolSize,
+		PoolSize:             cfg.Service.MaxWorkerPoolSize,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create repo manager: %w", err)

@@ -29,7 +29,8 @@ func minimal() string {
 repository:
   - remote: "https://example.com/repo.git"
 service:
-  worker_pool_size: 2
+  max_worker_pool_size: 2
+  workspaces_root_path: "/tmp/tango-repo-manager"
 `
 }
 
@@ -39,31 +40,38 @@ func TestParseBytes_Defaults(t *testing.T) {
 
 	assert.Equal(t, StorageTypeMemory, cfg.Storage.Type, "storage type should default to memory")
 	assert.Equal(t, DefaultMaxMessageBytes, cfg.Service.MaxMessageBytes, "max_message_bytes should default")
-	assert.Contains(t, cfg.Service.RepoManagerClonePath, "tango-repo-manager", "clone path should default to temp dir")
-	assert.Contains(t, cfg.Service.WorkerRootPath, ".workers", "worker root should default under clone path")
-	assert.Equal(t, DefaultQueryTimeoutSeconds, cfg.Repository[0].QueryTimeout, "query_timeout should default to 900")
+	assert.Equal(t, DefaultQueryTimeoutSeconds, cfg.Repository[0].QueryTimeoutSeconds, "query_timeout_seconds should default to 600")
+	require.NotNil(t, cfg.Repository[0].BzlmodEnabled)
+	assert.True(t, *cfg.Repository[0].BzlmodEnabled, "bzlmod_enabled should default to true")
 }
 
 func TestParseBytes_ExplicitValues(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
-    query_timeout: 60
+    query_timeout_seconds: 60
+    bzlmod_enabled: false
+    full_hash_repos: ["//"]
+    excluded_files: ["*.gen.go"]
+    stream_bazel_logs: true
 storage:
   type: "memory"
 service:
-  worker_pool_size: 4
-  repo_manager_clone_path: "/custom/clone"
-  worker_root_path: "/custom/workers"
+  max_worker_pool_size: 4
+  workspaces_root_path: "/custom/clone"
   max_message_bytes: 1000000
 `
 	cfg, err := ParseBytes([]byte(yamlStr))
 	require.NoError(t, err)
 
 	assert.Equal(t, StorageTypeMemory, cfg.Storage.Type)
-	assert.Equal(t, int64(60), cfg.Repository[0].QueryTimeout)
-	assert.Equal(t, "/custom/clone", cfg.Service.RepoManagerClonePath)
-	assert.Equal(t, "/custom/workers", cfg.Service.WorkerRootPath)
+	assert.Equal(t, int64(60), cfg.Repository[0].QueryTimeoutSeconds)
+	require.NotNil(t, cfg.Repository[0].BzlmodEnabled)
+	assert.False(t, *cfg.Repository[0].BzlmodEnabled)
+	assert.Equal(t, []string{"//"}, cfg.Repository[0].FullHashRepos)
+	assert.Equal(t, []string{"*.gen.go"}, cfg.Repository[0].ExcludedFiles)
+	assert.True(t, cfg.Repository[0].StreamBazelLogs)
+	assert.Equal(t, "/custom/clone", cfg.Service.WorkspacesRootPath)
 	assert.Equal(t, 1000000, cfg.Service.MaxMessageBytes)
 }
 
@@ -81,7 +89,8 @@ storage:
 repository:
   - remote: "https://example.com/r.git"
 service:
-  worker_pool_size: 1
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
 `,
 		},
 		{
@@ -90,7 +99,8 @@ service:
 repository:
   - remote: "https://example.com/r.git"
 service:
-  worker_pool_size: 1
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
 `,
 		},
 		{
@@ -103,7 +113,8 @@ storage:
 repository:
   - remote: "https://example.com/r.git"
 service:
-  worker_pool_size: 1
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
 `,
 		},
 		{
@@ -115,7 +126,8 @@ storage:
 repository:
   - remote: "https://example.com/r.git"
 service:
-  worker_pool_size: 1
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
 `,
 		},
 		{
@@ -129,7 +141,8 @@ storage:
 repository:
   - remote: "https://example.com/r.git"
 service:
-  worker_pool_size: 1
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
 `,
 		},
 		{
@@ -141,7 +154,8 @@ storage:
 repository:
   - remote: "https://example.com/r.git"
 service:
-  worker_pool_size: 1
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
 `,
 		},
 	}
@@ -162,7 +176,8 @@ func TestParseBytes_UnknownFieldsRejected(t *testing.T) {
 repository:
   - remote: "https://example.com/repo.git"
 service:
-  worker_pool_size: 1
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
   totally_bogus_field: true
 `
 	_, err := ParseBytes([]byte(yamlStr))
@@ -174,7 +189,8 @@ func TestParseBytes_WorkerPoolSizeRequired(t *testing.T) {
 repository:
   - remote: "https://example.com/repo.git"
 service:
-  worker_pool_size: 0
+  max_worker_pool_size: 0
+  workspaces_root_path: "/tmp/tango-repo-manager"
 `
 	_, err := ParseBytes([]byte(yamlStr))
 	require.Error(t, err)
@@ -185,7 +201,8 @@ func TestParseBytes_EmptyRemoteRejected(t *testing.T) {
 repository:
   - remote: ""
 service:
-  worker_pool_size: 1
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
 `
 	_, err := ParseBytes([]byte(yamlStr))
 	require.Error(t, err)
@@ -197,19 +214,19 @@ repository:
   - remote: "https://example.com/repo.git"
   - remote: "https://example.com/repo.git"
 service:
-  worker_pool_size: 1
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
 `
 	_, err := ParseBytes([]byte(yamlStr))
 	require.Error(t, err)
 }
 
-func TestParseBytes_WorkerRootPathRequiresClonePath(t *testing.T) {
+func TestParseBytes_WorkspacesRootPathRequired(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
 service:
-  worker_pool_size: 1
-  worker_root_path: "/some/path"
+  max_worker_pool_size: 1
 `
 	_, err := ParseBytes([]byte(yamlStr))
 	require.Error(t, err)

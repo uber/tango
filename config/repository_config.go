@@ -14,24 +14,41 @@
 
 package config
 
-// DefaultQueryTimeoutSeconds is the default query_timeout applied when the
-// field is unset or zero (15 minutes), matching core/bazel's _queryTimeout.
-const DefaultQueryTimeoutSeconds int64 = 900
+// DefaultQueryTimeoutSeconds is the default query_timeout_seconds applied when
+// the field is unset or zero (10 minutes).
+const DefaultQueryTimeoutSeconds int64 = 600
+
+// _bzlmodEnabledDefault is the default for BzlmodEnabled when unset. It's a
+// var (not a const) so its address can be taken for the pointer default.
+var _bzlmodEnabledDefault = true
 
 // RepositoryConfig holds configuration for a single repository.
 type RepositoryConfig struct {
-	Remote                 string   `yaml:"remote"`
-	FullHashRepos          []string `yaml:"full_hash_repos"`
-	ExcludedFiles          []string `yaml:"excluded_files"`
-	ExcludeExternalTargets bool     `yaml:"exclude_external_targets"`
-	BzlmodEnabled          bool     `yaml:"bzlmod_enabled"`
-	BazelCommand           string   `yaml:"bazel_command"`
-	// QueryTimeout is the Bazel query timeout in seconds. Defaults to DefaultQueryTimeoutSeconds (900, i.e. 15 minutes).
-	QueryTimeout   int64    `yaml:"query_timeout"`
+	// Remote is the URL used to `git clone` the repository. Tango clones from
+	// this URL and uses it as the lookup key for per-repo settings. Must be
+	// unique across all entries and match exactly what clients send in
+	// BuildDescription.remote.
+	Remote string `yaml:"remote"`
+	// TODO: FullHashRepos, ExcludedFiles, and StreamBazelLogs are not
+	// documented in config/README.md. Delete them if they turn out to be
+	// unneeded, otherwise document them there.
+	FullHashRepos []string `yaml:"full_hash_repos"`
+	ExcludedFiles []string `yaml:"excluded_files"`
+	// BzlmodEnabled indicates whether this repository uses Bzlmod for external
+	// dependency management. Defaults to true if unset. Set to false only for
+	// repositories still using WORKSPACE.
+	BzlmodEnabled *bool `yaml:"bzlmod_enabled"`
+	// BazelCommandPath overrides the Bazel binary path. When empty, Tango
+	// automatically downloads and caches Bazelisk from GitHub.
+	BazelCommandPath string `yaml:"bazel_command_path"`
+	// BazelExtraArgs are extra arguments passed to `bazel query` invocations,
+	// inserted between the `query` subcommand and the query expression.
 	BazelExtraArgs []string `yaml:"bazel_extra_args"`
 	// BazelStartupOptions are Bazel startup flags placed before the `query` subcommand (e.g. "--batch"); empty by default.
 	BazelStartupOptions []string `yaml:"bazel_startup_options"`
 	StreamBazelLogs     bool     `yaml:"stream_bazel_logs"`
+	// QueryTimeoutSeconds is the Bazel query timeout in seconds. Defaults to DefaultQueryTimeoutSeconds (600).
+	QueryTimeoutSeconds int64 `yaml:"query_timeout_seconds"`
 	// SeedAttributes restricts which rule attributes GetChangedTargets
 	// treats as evidence that a target's own configuration changed, as opposed to
 	// dependency-only churn.
