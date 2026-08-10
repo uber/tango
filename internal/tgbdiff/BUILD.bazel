@@ -1,0 +1,37 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "tgbdiff",
+    srcs = [
+        "adapt.go",
+        "compare.go",
+    ],
+    importpath = "github.com/uber/tango/internal/tgbdiff",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//entity",
+        "//internal/targetdiff",
+        "//internal/tgb",
+    ],
+)
+
+go_test(
+    name = "tgbdiff_test",
+    srcs = [
+        "adapt_test.go",
+        "compare_test.go",
+        "digest_test.go",
+        "nested_pkg_repro_test.go",
+        "oracle_test.go",
+        "rapid_test.go",
+        "stride_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    deps = [
+        ":tgbdiff",
+        "//entity",
+        "//internal/targetdiff",
+        "//internal/tgb",
+        "@net_pgregory_rapid//:rapid",
+    ],
+)

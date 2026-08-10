@@ -1,0 +1,67 @@
+# 2026/08/09 19:27:26.581803 [TestRapidDifferential] [rapid] draw bN: 1
+# 2026/08/09 19:27:26.581812 [TestRapidDifferential] [rapid] draw bPkgs: 1
+# 2026/08/09 19:27:26.581814 [TestRapidDifferential] [rapid] draw bpkg0: 0
+# 2026/08/09 19:27:26.581816 [TestRapidDifferential] [rapid] draw bh0: 0
+# 2026/08/09 19:27:26.581817 [TestRapidDifferential] [rapid] draw brt0: 1
+# 2026/08/09 19:27:26.581818 [TestRapidDifferential] [rapid] draw btags0_1: false
+# 2026/08/09 19:27:26.581819 [TestRapidDifferential] [rapid] draw btags0_2: false
+# 2026/08/09 19:27:26.581820 [TestRapidDifferential] [rapid] draw broot0: false
+# 2026/08/09 19:27:26.581820 [TestRapidDifferential] [rapid] draw bext0: false
+# 2026/08/09 19:27:26.581822 [TestRapidDifferential] [rapid] draw battrs0_1: false
+# 2026/08/09 19:27:26.581822 [TestRapidDifferential] [rapid] draw battrs0_2: false
+# 2026/08/09 19:27:26.581825 [TestRapidDifferential] [rapid] draw nops: 1
+# 2026/08/09 19:27:26.581826 [TestRapidDifferential] [rapid] draw op0target: 0
+# 2026/08/09 19:27:26.581827 [TestRapidDifferential] [rapid] draw op0kind: 0
+# 2026/08/09 19:27:26.581828 [TestRapidDifferential] [rapid] draw op0hash: 1
+# 2026/08/09 19:27:26.581829 [TestRapidDifferential] [rapid] draw seedAttrs: map[string]bool(nil)
+# 2026/08/09 19:27:26.581832 [TestRapidDifferential] [rapid] draw maxDistance: -1
+# 2026/08/09 19:27:26.581835 [TestRapidDifferential] [rapid] draw chunkSize: 1
+# 2026/08/09 19:27:26.581914 [TestRapidDifferential] [rapid] draw chunkSize: 1
+# 2026/08/09 19:27:26.582017 [TestRapidDifferential] incumbent 1 changed, TGB path 0 changed
+#   incumbent: [//src/p000:t000(type=3,dist=0)]
+#   tgb:       []
+# 
+v0.4.8#3904535690807565301
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0

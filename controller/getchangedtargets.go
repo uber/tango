@@ -29,20 +29,52 @@ import (
 	"github.com/uber/tango/internal/mapper/idmapper"
 	"github.com/uber/tango/internal/streaming"
 	"github.com/uber/tango/internal/targetdiff"
+	"github.com/uber/tango/internal/tgb"
+	"github.com/uber/tango/internal/tgbdiff"
 	"github.com/uber/tango/internal/url"
 	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
 
+// fetchedGraph is one revision's fetched target graph: either an undrained
+// TGB reader (preferred — the comparison path uses its random-access form
+// without a full decode) or the drained chunk stream from a gob-era blob.
+// Exactly one of the fields is set.
+type fetchedGraph struct {
+	tgb    *storage.TGBGraphReader
+	chunks []entity.GetTargetGraphResponse
+}
+
+// materializeChunks returns the revision's chunk stream, paying the full
+// decode when the graph was fetched as a TGB blob. Only the transitional
+// mixed-format case needs this — one revision's blob predating the format
+// flip — so the comparison falls back to the incumbent chunk pipeline.
+func (f fetchedGraph) materializeChunks() ([]entity.GetTargetGraphResponse, error) {
+	if f.tgb == nil {
+		return f.chunks, nil
+	}
+	var chunks []entity.GetTargetGraphResponse
+	for {
+		chunk, err := f.tgb.Read()
+		if err == io.EOF {
+			return chunks, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, chunk)
+	}
+}
+
 // job represents a single goroutine of getting a target graph
 type job struct {
-	graphChunks []entity.GetTargetGraphResponse
-	err         error
-	cancelled   bool
-	completed   bool
-	ctx         context.Context
-	cancel      context.CancelCauseFunc
+	graph     fetchedGraph
+	err       error
+	cancelled bool
+	completed bool
+	ctx       context.Context
+	cancel    context.CancelCauseFunc
 }
 
 // GetChangedTargets returns the changed targets between two revisions. If the
@@ -97,10 +129,10 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		return fmt.Errorf("fetch target graphs: %w", err)
 	}
 
-	changedTargetsResponses, err := c.compareTargetGraphs(ctx, e, logger, firstGraph, secondGraph, c.seedAttributesFor(request.GetFirstRevision().GetRemote()))
+	changedTargetsResponses, err := c.compareFetchedGraphs(ctx, e, logger, firstGraph, secondGraph, c.seedAttributesFor(request.GetFirstRevision().GetRemote()))
 	// Allow GC of raw graph data while the caching goroutine runs.
-	firstGraph = nil
-	secondGraph = nil
+	firstGraph = fetchedGraph{}
+	secondGraph = fetchedGraph{}
 	if err != nil {
 		if ctx.Err() != nil {
 			err = context.Cause(ctx)
@@ -201,13 +233,14 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 	return true, nil
 }
 
-// fetchTargetGraphs computes both revisions' target graphs concurrently. Each
+// fetchTargetGraphs fetches both revisions' target graphs concurrently. Each
 // fetch runs under its own cancellable context so that, when one fails, the
 // sibling is cancelled to avoid wasting work on a result that will be discarded.
 // Errors caused solely by that induced cancellation are dropped; only the
 // original failure is returned. A client disconnect surfaces as a user-cancelled
-// error.
-func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request *pb.GetChangedTargetsRequest) ([]entity.GetTargetGraphResponse, []entity.GetTargetGraphResponse, error) {
+// error. A graph stored as a TGB blob comes back as its undrained reader; a
+// gob-era graph is drained into chunks here, inside the concurrent fetch.
+func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request *pb.GetChangedTargetsRequest) (fetchedGraph, fetchedGraph, error) {
 	jobs := make([]*job, 2)
 	for i := 0; i < 2; i++ {
 		// create independent contexts for each job; if one of the jobs fails, the other one should be cancelled to save resources and improve latency
@@ -219,9 +252,9 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 	// Start jobs for both revisions. Success or failure, the result will report to the results channel.
 	type graphResult struct {
 		// order is 0 or 1, 0 is the base (first) revision, 1 is the target (second) revision
-		order  int
-		chunks []entity.GetTargetGraphResponse
-		err    error
+		order int
+		graph fetchedGraph
+		err   error
 	}
 	results := make(chan graphResult, len(jobs))
 	graphFetchStart := time.Now()
@@ -255,13 +288,20 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 				results <- graphResult{order: idx, err: err}
 				return
 			}
+			// A TGB-backed reader is handed over whole: the comparison path
+			// wants its random-access form, and draining it here would force
+			// the full decode the format exists to avoid.
+			if tgbReader, ok := graphReader.(*storage.TGBGraphReader); ok {
+				results <- graphResult{order: idx, graph: fetchedGraph{tgb: tgbReader}}
+				return
+			}
 			defer func() { _ = graphReader.Close() }()
 
 			var chunks []entity.GetTargetGraphResponse
 			for {
 				chunk, err := graphReader.Read()
 				if err == io.EOF {
-					results <- graphResult{order: idx, chunks: chunks}
+					results <- graphResult{order: idx, graph: fetchedGraph{chunks: chunks}}
 					return
 				}
 				if err != nil {
@@ -276,10 +316,10 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 	// Wait for both results to complete, either successfully or with an error.
 	for range jobs {
 		res := <-results
-		jobs[res.order].graphChunks = res.chunks
+		jobs[res.order].graph = res.graph
 		jobs[res.order].completed = true
 		jobs[res.order].err = res.err
-		if res.chunks == nil && res.err == nil {
+		if res.graph.chunks == nil && res.graph.tgb == nil && res.err == nil {
 			jobs[res.order].err = errors.New("no chunks returned")
 		}
 
@@ -305,7 +345,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 
 	if ctx.Err() != nil {
 		// If the context was cancelled by the upstream, just return the original error without additional augmentation
-		return nil, nil, context.Cause(ctx)
+		return fetchedGraph{}, fetchedGraph{}, context.Cause(ctx)
 	}
 
 	// Process errors, only aggregating the ones that are original ones and not a result of the other job being cancelled
@@ -320,14 +360,14 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 		}
 	}
 	if err != nil {
-		return nil, nil, err
+		return fetchedGraph{}, fetchedGraph{}, err
 	}
 
-	firstGraph := jobs[0].graphChunks
-	secondGraph := jobs[1].graphChunks
+	firstGraph := jobs[0].graph
+	secondGraph := jobs[1].graph
 	// Drop job references so the GC can reclaim them once the comparison is done.
-	jobs[0].graphChunks = nil
-	jobs[1].graphChunks = nil
+	jobs[0].graph = fetchedGraph{}
+	jobs[1].graph = fetchedGraph{}
 	return firstGraph, secondGraph, nil
 }
 
@@ -365,6 +405,114 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 				zap.Bool("treehash1_empty", treehash1 == ""),
 				zap.Bool("treehash2_empty", treehash2 == ""))
 		}
+	}()
+}
+
+// compareFetchedGraphs picks the comparison path for a pair of fetched
+// graphs: TGB-native when both revisions came back as TGB blobs, otherwise
+// the incumbent chunk pipeline (gob blobs, or the transitional mixed case
+// where exactly one revision's blob predates a format flip).
+func (c *controller) compareFetchedGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, first, second fetchedGraph, seedAttrs map[string]bool) ([]entity.GetChangedTargetsResponse, error) {
+	if first.tgb != nil && second.tgb != nil {
+		return c.compareTargetGraphsTGB(ctx, e, logger, first.tgb.TGB(), second.tgb.TGB(), seedAttrs)
+	}
+	firstChunks, err := first.materializeChunks()
+	if err != nil {
+		return nil, fmt.Errorf("decode first graph: %w", err)
+	}
+	secondChunks, err := second.materializeChunks()
+	if err != nil {
+		return nil, fmt.Errorf("decode second graph: %w", err)
+	}
+	return c.compareTargetGraphs(ctx, e, logger, firstChunks, secondChunks, seedAttrs)
+}
+
+// compareTargetGraphsTGB diffs two TGB-backed graphs without materialising
+// either into a semantic graph: tgbdiff.Compare works on the readers'
+// columnar form directly, and only the changed targets are materialised into
+// the targetdiff.Result shape the response pipeline consumes. With
+// ShadowCompare on, the incumbent targetdiff comparison additionally runs
+// over the same two readers in a background goroutine and any divergence is
+// logged and counted (see shadowCompareTGB).
+func (c *controller) compareTargetGraphsTGB(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, before, after *tgb.Reader, seedAttrs map[string]bool) ([]entity.GetChangedTargetsResponse, error) {
+	compareStart := time.Now()
+	defer func() {
+		e.DurationHistogram(opGetChangedTargets, "compare_duration", metrics.SlowDurationBuckets).RecordDuration(time.Since(compareStart))
+	}()
+	logger.Info("compareTargetGraphsTGB: Computing differences between target graphs")
+	e.Counter(opGetChangedTargets, "tgb_native_compare").Inc(1)
+
+	diffStart := time.Now()
+	res, err := tgbdiff.Compare(ctx, before, after, tgbdiff.Options{
+		MaxDistance: -1,
+		SeedAttrs:   seedAttrs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("tgb compare: %w", err)
+	}
+	e.DurationHistogram(opGetChangedTargets, "diff_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(diffStart))
+
+	materializeStart := time.Now()
+	result, err := tgbdiff.Materialize(before, after, res, seedAttrs)
+	if err != nil {
+		return nil, fmt.Errorf("materialize changed targets: %w", err)
+	}
+	e.DurationHistogram(opGetChangedTargets, "materialize_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(materializeStart))
+	e.ValueHistogram(opGetChangedTargets, "target_count", metrics.LargeCountBuckets).RecordValue(float64(len(result.ChangedTargets)))
+
+	if ctx.Err() != nil {
+		return nil, context.Cause(ctx)
+	}
+
+	if c.shadowCompare {
+		// The goroutine only reads the readers and the result, and the
+		// remainder of the request only reads the result, so handing both
+		// over without copies is safe.
+		c.shadowCompareTGB(logger, e, before, after, seedAttrs, result)
+	}
+
+	responses, err := c.resultToResponses(result)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("GetChangedTargets: Target graphs compared (TGB)")
+	return responses, nil
+}
+
+// shadowCompareTGB runs the incumbent targetdiff comparison over the same two
+// TGB readers in a fire-and-forget goroutine and emits a mismatch metric plus
+// a detailed log when the TGB path's result diverges. This is the
+// production-scale extension of the internal/tgbdiff differential tests: while
+// it stays clean, any tango-vs-incumbent-system delta is known to be
+// algorithmic rather than a codec artifact. It never affects what is served.
+//
+// Runs under c.appCtx: the oracle should finish even when the client has
+// disconnected (the signal is about the comparison, not the request) but must
+// die at process shutdown.
+func (c *controller) shadowCompareTGB(logger *zap.Logger, e *metrics.Emitter, before, after *tgb.Reader, seedAttrs map[string]bool, got targetdiff.Result) {
+	go func() {
+		start := time.Now()
+		oracle, err := targetdiff.Compare(c.appCtx, targetdiff.Request{
+			Before:      tgbdiff.SemanticGraph(before, seedAttrs),
+			After:       tgbdiff.SemanticGraph(after, seedAttrs),
+			MaxDistance: -1,
+		})
+		if err != nil {
+			e.Counter(opGetChangedTargets, "tgb_shadow_error").Inc(1)
+			logger.Warn("GetChangedTargets: TGB shadow compare failed", zap.Error(err))
+			return
+		}
+		equivalent, divergence := tgbdiff.ResultsEquivalent(got, oracle)
+		if !equivalent {
+			e.Counter(opGetChangedTargets, "tgb_shadow_mismatch").Inc(1)
+			logger.Error("GetChangedTargets: TGB comparison diverges from targetdiff oracle",
+				zap.String("divergence", divergence),
+				zap.Duration("shadow_duration", time.Since(start)))
+			return
+		}
+		e.Counter(opGetChangedTargets, "tgb_shadow_match").Inc(1)
+		logger.Info("GetChangedTargets: TGB shadow compare matched",
+			zap.Duration("shadow_duration", time.Since(start)))
 	}()
 }
 
@@ -430,9 +578,20 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 		return nil, context.Cause(ctx)
 	}
 
-	// 3) Re-map each change into a canonical per-call ID namespace. The mappers
-	// only assign IDs to names they actually see, so the emitted metadata is
-	// pruned to what the changed targets reference.
+	// 3) Re-map into the canonical response shape.
+	results, err := c.resultToResponses(result)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("GetChangedTargets: Target graphs compared")
+	return results, nil
+}
+
+// resultToResponses re-maps each change into a canonical per-call ID
+// namespace and splits the result into message-size-bounded response chunks.
+// The mappers only assign IDs to names they actually see, so the emitted
+// metadata is pruned to what the changed targets reference.
+func (c *controller) resultToResponses(result targetdiff.Result) ([]entity.GetChangedTargetsResponse, error) {
 	mappers := newCanonicalMappers()
 	changed := make([]entity.ChangedTarget, 0, len(result.ChangedTargets))
 	for _, ct := range result.ChangedTargets {
@@ -466,7 +625,6 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	for _, m := range metaGroups {
 		results = append(results, entity.GetChangedTargetsResponse{Metadata: m})
 	}
-	logger.Info("GetChangedTargets: Target graphs compared")
 	return results, nil
 }
 

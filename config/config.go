@@ -84,6 +84,13 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 	if config.Service.MaxMessageBytes <= 0 {
 		config.Service.MaxMessageBytes = DefaultMaxMessageBytes
 	}
+	switch config.Service.GraphFormat {
+	case "":
+		config.Service.GraphFormat = GraphFormatGob
+	case GraphFormatGob, GraphFormatTGB:
+	default:
+		return nil, fmt.Errorf("unsupported service.graph_format: %q (supported: %q, %q)", config.Service.GraphFormat, GraphFormatGob, GraphFormatTGB)
+	}
 
 	// --- repository validation and defaults ---
 	config.repositoryByRemote = make(map[string]*RepositoryConfig, len(config.Repository))

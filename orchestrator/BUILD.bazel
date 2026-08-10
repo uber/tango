@@ -40,6 +40,7 @@ go_test(
     deps = [
         "//config",
         "//core/bazel",
+        "//core/cachekey",
         "//core/errors",
         "//core/git",
         "//core/git/gitmock",

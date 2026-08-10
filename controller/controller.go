@@ -37,6 +37,14 @@ type Params struct {
 	Scope           tally.Scope                     `optional:"true"`
 	MaxMessageBytes int                             `optional:"true"`
 	RepoConfig      config.RepositoryConfigProvider `optional:"true"`
+	// GraphFormat mirrors ServiceConfig.GraphFormat; empty defaults to gob.
+	// It must match the orchestrator's configured format — both are wired
+	// from the same ServiceConfig.
+	GraphFormat string `optional:"true"`
+	// ShadowCompare mirrors ServiceConfig.ShadowCompare: with the TGB format,
+	// run the incumbent targetdiff comparison in the background on every
+	// GetChangedTargets and emit a mismatch metric on divergence.
+	ShadowCompare bool `optional:"true"`
 }
 
 type controller struct {
@@ -46,6 +54,8 @@ type controller struct {
 	emitter         *metrics.Emitter
 	maxMessageBytes int
 	repoConfig      config.RepositoryConfigProvider
+	graphFormat     string
+	shadowCompare   bool
 
 	// appCtx is the application lifetime; cancel it on process shutdown.
 	// Used by linkRequestCtx and any fire-and-forget goroutines so they
@@ -61,6 +71,10 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	if maxMessageBytes <= 0 {
 		maxMessageBytes = config.DefaultMaxMessageBytes
 	}
+	graphFormat := p.GraphFormat
+	if graphFormat == "" {
+		graphFormat = config.GraphFormatGob
+	}
 	return &controller{
 		logger:          p.Logger,
 		storage:         p.Storage,
@@ -68,6 +82,8 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 		emitter:         emitter,
 		maxMessageBytes: maxMessageBytes,
 		repoConfig:      p.RepoConfig,
+		graphFormat:     graphFormat,
+		shadowCompare:   p.ShadowCompare,
 		appCtx:          appCtx,
 	}
 }

@@ -1,0 +1,36 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "tgb",
+    srcs = [
+        "dict.go",
+        "encode.go",
+        "format.go",
+        "graph.go",
+        "psort.go",
+        "reader.go",
+        "varint.go",
+    ],
+    importpath = "github.com/uber/tango/internal/tgb",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//entity",
+        "@com_github_cespare_xxhash_v2//:xxhash",
+        "@com_github_klauspost_compress//zstd",
+    ],
+)
+
+go_test(
+    name = "tgb_test",
+    srcs = [
+        "fuzz_test.go",
+        "hashwidth_test.go",
+        "sentinel_test.go",
+        "tgb_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    deps = [
+        ":tgb",
+        "//entity",
+    ],
+)

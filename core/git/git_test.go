@@ -355,6 +355,10 @@ func TestGitPathnames_roundTripAcrossRealGitBoundary(t *testing.T) {
 	runGit(t, repo, "init", "--quiet")
 	runGit(t, repo, "config", "user.email", "tango-test@example.com")
 	runGit(t, repo, "config", "user.name", "Tango Test")
+	// A dev image's system git config can enable commit signing, which cannot
+	// run inside the bazel test sandbox; repo-local config overrides it for
+	// every git subprocess touching this repo.
+	runGit(t, repo, "config", "commit.gpgsign", "false")
 	runGit(t, repo, "commit", "--quiet", "--allow-empty", "-m", "base")
 	for _, path := range paths {
 		absolutePath := filepath.Join(repo, filepath.FromSlash(path))

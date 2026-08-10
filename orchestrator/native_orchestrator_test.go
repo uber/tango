@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/config"
+	"github.com/uber/tango/core/cachekey"
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
@@ -347,4 +348,84 @@ func TestNative_GetTargetGraph_LeaseGenericError_Infra(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Equal(t, tangoerrors.ErrorInfra, tangoerrors.GetErrorCode(err))
+}
+
+// TestNative_GetTargetGraph_TGBFormat: with graph_format=tgb, a cache miss
+// computes the graph, writes it as a TGB blob under the tgb key (never under
+// the gob key), and returns a TGB-backed reader whose chunk stream carries
+// the computed target.
+func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+
+	st := storage.NewMemoryStorage()
+	g := gitmock.NewMockInterface(ctrl)
+	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th", nil)
+	ws := workspacemock.NewMockWorkspace(ctrl)
+	ws.EXPECT().Path().Return("/tmp/ws")
+	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().ApplyRequests(gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().Release().Return(nil)
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
+	graphRunner := graphmock.NewMockGraphRunner(ctrl)
+	graphRunner.EXPECT().Compute(gomock.Any(), gomock.Any()).Return(targethasher.Result{
+		TargetNames: []string{"//:a"},
+		Targets: map[string]*targethasher.Target{
+			"//:a": {
+				Name:     "//:a",
+				Hash:     bytes.Repeat([]byte{0xab}, 20),
+				RuleType: "go_library",
+			},
+		},
+	}, nil)
+
+	cfg := testConfig(t)
+	cfg.Service.GraphFormat = config.GraphFormatTGB
+
+	o, err := NewNativeOrchestrator(appCtx, Params{
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t).Sugar(),
+		GitFactory:  func(dir string) git.Interface { return g },
+		GraphRunner: graphRunner,
+		Config:      cfg,
+	})
+	require.NoError(t, err)
+
+	build := entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"}
+	reader, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{Build: build})
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	defer reader.Close()
+
+	// The reader is TGB-backed: its random-access form is available.
+	tgbReader, ok := reader.(*storage.TGBGraphReader)
+	require.True(t, ok, "expected a *storage.TGBGraphReader, got %T", reader)
+	assert.Equal(t, 1, tgbReader.TGB().NodeCount())
+
+	// The chunk view yields the computed target.
+	var sawTarget bool
+	for {
+		chunk, rerr := reader.Read()
+		if rerr == io.EOF {
+			break
+		}
+		require.NoError(t, rerr)
+		if len(chunk.Targets) > 0 {
+			sawTarget = true
+		}
+	}
+	assert.True(t, sawTarget, "chunk stream should carry the computed target")
+
+	// The blob landed under the tgb key only; nothing was written to the gob key.
+	tgbKey := cachekey.GetTGBGraphByTreeHash(build.Remote, "th", build.Strategy, nil)
+	_, err = storage.NewTGBGraphReader(context.Background(), st, tgbKey, config.DefaultMaxMessageBytes)
+	require.NoError(t, err)
+	gobKey := cachekey.GetGraphByTreeHash(build.Remote, "th", build.Strategy, nil)
+	_, err = storage.NewGraphReader(context.Background(), st, gobKey)
+	require.Error(t, err)
+	assert.True(t, storage.IsNotFound(err), "gob key must stay empty under graph_format=tgb")
 }

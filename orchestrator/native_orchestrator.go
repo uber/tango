@@ -170,9 +170,11 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		return nil, classifyGitError(fmt.Errorf("compute treehash for %s@%s: %w", build.Remote, build.BaseSha, err))
 	}
 	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
+	useTGB := b.config.Service.GraphFormat == config.GraphFormatTGB
+	tgbPath := cachekey.GetTGBGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
 	if !req.BypassCache {
 		cacheReadStart := time.Now()
-		graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
+		graphReader, err := b.readCachedGraph(ctx, logger, useTGB, tgbPath, treehashPath)
 		recordStep(e, "cache_read_duration", cacheReadStart, metrics.FastDurationBuckets)
 		metrics.RecordCacheLookup(e, _opGetTargetGraph, metrics.GraphCacheLookup, err)
 		if err == nil {
@@ -245,6 +247,18 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		return nil, fmt.Errorf("convert target graph: %w", err)
 	}
 	cacheWriteStart := time.Now()
+	if useTGB {
+		if err := storage.WriteTGBGraph(ctx, b.storage, tgbPath, chunks); err != nil {
+			return nil, fmt.Errorf("write TGB graph to storage at %s: %w", tgbPath, err)
+		}
+		recordStep(e, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
+		graphReader, err := storage.NewTGBGraphReader(ctx, b.storage, tgbPath, b.config.Service.MaxMessageBytes)
+		if err != nil {
+			return nil, fmt.Errorf("create TGB graph reader at %s: %w", tgbPath, err)
+		}
+		logger.Infow("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
+		return graphReader, nil
+	}
 	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, chunks)
 	if err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
@@ -256,6 +270,26 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	logger.Infow("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
 	return graphReader, nil
+}
+
+// readCachedGraph opens the cached graph for a treehash, preferring the TGB
+// blob when the service is configured for it and falling back to the gob
+// stream for entries written before the format flip. A TGB blob that exists
+// but fails validation is treated as a miss (recompute overwrites it), not an
+// infra failure. Returns a not-found error when neither format is present.
+func (b *nativeOrchestrator) readCachedGraph(ctx context.Context, logger *zap.SugaredLogger, useTGB bool, tgbPath, gobPath string) (storage.GraphReader, error) {
+	if useTGB {
+		graphReader, err := storage.NewTGBGraphReader(ctx, b.storage, tgbPath, b.config.Service.MaxMessageBytes)
+		if err == nil {
+			return graphReader, nil
+		}
+		if errors.Is(err, storage.ErrCorruptTGB) {
+			logger.Warnw("GetTargetGraph: corrupt TGB blob, recomputing", zap.String("path", tgbPath), zap.Error(err))
+		} else if !storage.IsNotFound(err) {
+			return nil, err
+		}
+	}
+	return storage.NewGraphReader(ctx, b.storage, gobPath)
 }
 
 // recordStep records a pipeline step's duration under the get_target_graph op.

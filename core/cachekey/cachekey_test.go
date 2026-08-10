@@ -74,3 +74,26 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 	// Different exclude lists ⇒ different keys.
 	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", []string{"foo.*"}))
 }
+
+func TestGetTGBGraphByTreeHash(t *testing.T) {
+	t.Parallel()
+	remote := "git@github:uber/tango"
+	treehash := "abcd1234"
+	strategy := entity.ComputationStrategyNative
+
+	got := GetTGBGraphByTreeHash(remote, treehash, strategy, nil)
+	assert.Equal(t, filepath.Join("uber/tango", "graphs", treehash, strategy.String()+"-tgb"), got)
+	assert.Equal(t, got, GetTGBGraphByTreeHash(remote, treehash, strategy, []string{}))
+
+	// Never collides with the gob key space, and stays a sibling (same
+	// directory) rather than a child of the gob key — on the disk backend a
+	// key is a file, so a child key could not coexist with the gob blob.
+	gob := GetGraphByTreeHash(remote, treehash, strategy, nil)
+	assert.NotEqual(t, gob, got)
+	assert.Equal(t, filepath.Dir(gob), filepath.Dir(got))
+
+	// Exclude-files regex folds into the key the same way as the gob variant.
+	withRegex := GetTGBGraphByTreeHash(remote, treehash, strategy, []string{"^docs/"})
+	assert.NotEqual(t, got, withRegex)
+	assert.Contains(t, withRegex, "_requests-options-")
+}
