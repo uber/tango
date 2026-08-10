@@ -289,7 +289,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 		if jobs[res.order].err != nil {
 			other := (res.order + 1) % 2
 			if !jobs[other].completed {
-				jobs[other].cancel(errors.New("sibling graph fetch failed"))
+				jobs[other].cancel(fmt.Errorf("cancelled: sibling graph #%d failed: %w", res.order+1, jobs[res.order].err))
 				// explicitly mark that this job is cancelled, so we can
 				// ignore its error later
 				jobs[other].cancelled = true
