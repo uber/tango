@@ -258,3 +258,32 @@ func TestGetRepositoryConfig(t *testing.T) {
 	_, ok = cfg.GetRepositoryConfig("https://missing.com/repo.git")
 	assert.False(t, ok)
 }
+
+func TestParseBytes_GraphFormat(t *testing.T) {
+	base := func(extra string) []byte {
+		return []byte(`
+service:
+  max_worker_pool_size: 1
+  workspaces_root_path: /tmp/ws
+` + extra)
+	}
+
+	t.Run("defaults to gob", func(t *testing.T) {
+		cfg, err := ParseBytes(base(""))
+		require.NoError(t, err)
+		assert.Equal(t, GraphFormatGob, cfg.Service.GraphFormat)
+		assert.False(t, cfg.Service.ShadowCompare)
+	})
+
+	t.Run("accepts tgb with shadow compare", func(t *testing.T) {
+		cfg, err := ParseBytes(base("  graph_format: tgb\n  shadow_compare: true\n"))
+		require.NoError(t, err)
+		assert.Equal(t, GraphFormatTGB, cfg.Service.GraphFormat)
+		assert.True(t, cfg.Service.ShadowCompare)
+	})
+
+	t.Run("rejects unknown format", func(t *testing.T) {
+		_, err := ParseBytes(base("  graph_format: msgpack\n"))
+		require.ErrorContains(t, err, "graph_format")
+	})
+}

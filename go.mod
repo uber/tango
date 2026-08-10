@@ -4,11 +4,13 @@ go 1.25.0
 
 require (
 	github.com/bazelbuild/buildtools v0.0.0-20250930140053-2eb4fccefb52
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/goccy/go-yaml v1.19.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.7.0-rc.1
 	github.com/google/go-cmp v0.6.0
+	github.com/klauspost/compress v1.18.4
 	github.com/stretchr/testify v1.10.0
 	github.com/uber-go/tally v3.5.8+incompatible
 	go.uber.org/fx v1.24.0
@@ -24,7 +26,6 @@ require (
 require (
 	github.com/BurntSushi/toml v1.2.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/gogo/googleapis v1.4.1 // indirect
 	github.com/gogo/status v1.1.0 // indirect

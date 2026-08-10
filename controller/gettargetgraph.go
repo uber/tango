@@ -16,10 +16,12 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/cachekey"
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/entity"
@@ -119,10 +121,9 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 				return nil, fmt.Errorf("read treehash: %w", err)
 			}
 			logger.Info("getGraph: treehash found")
-			treehashPath := cachekey.GetGraphByTreeHash(req.Build.Remote, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
-			graphReader, err := storage.NewGraphReader(ctx, c.storage, treehashPath)
+			graphReader, err := c.readCachedGraph(ctx, logger, req.Build.Remote, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
 			if ctx.Err() != nil {
 				err = context.Cause(ctx)
 			}
@@ -157,4 +158,27 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 		zap.Duration("total_duration", time.Since(start)),
 	)
 	return graphReader, nil
+}
+
+// readCachedGraph opens the cached graph for a resolved treehash, preferring
+// the TGB blob when the service is configured for it and falling back to the
+// gob stream for entries written before the format flip. A TGB blob that
+// exists but fails validation is treated as a miss (the orchestrator will
+// recompute and overwrite it), not an infra failure. Returns a not-found
+// error when neither format is present.
+func (c *controller) readCachedGraph(ctx context.Context, logger *zap.Logger, remote, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) (storage.GraphReader, error) {
+	if c.graphFormat == config.GraphFormatTGB {
+		tgbPath := cachekey.GetTGBGraphByTreeHash(remote, treehash, strategy, excludeFilesRegex)
+		graphReader, err := storage.NewTGBGraphReader(ctx, c.storage, tgbPath, c.maxMessageBytes)
+		if err == nil {
+			return graphReader, nil
+		}
+		if errors.Is(err, storage.ErrCorruptTGB) {
+			logger.Warn("readCachedGraph: corrupt TGB blob, falling back", zap.String("path", tgbPath), zap.Error(err))
+		} else if !storage.IsNotFound(err) {
+			return nil, err
+		}
+	}
+	gobPath := cachekey.GetGraphByTreeHash(remote, treehash, strategy, excludeFilesRegex)
+	return storage.NewGraphReader(ctx, c.storage, gobPath)
 }

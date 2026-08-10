@@ -26,7 +26,28 @@ type ServiceConfig struct {
 	// for worker checkouts.
 	WorkspacesRootPath string `yaml:"workspaces_root_path"`
 	MaxMessageBytes    int    `yaml:"max_message_bytes"` // max serialized bytes per streamed gRPC message; 0 → DefaultMaxMessageBytes
+	// GraphFormat selects the storage format for cached target-graph blobs:
+	// GraphFormatGob (default) or GraphFormatTGB. The two formats live under
+	// different cache keys, so flipping the value never reinterprets existing
+	// blobs — a flip means cache misses that recompute, nothing more. With
+	// GraphFormatTGB, reads still fall back to gob entries written before the
+	// flip.
+	GraphFormat string `yaml:"graph_format"`
+	// ShadowCompare, with GraphFormatTGB, additionally runs the incumbent
+	// targetdiff comparison over the same two graphs in a background goroutine
+	// on every GetChangedTargets request and emits a mismatch metric (plus a
+	// detailed log) when the TGB path's result diverges. It has no effect on
+	// what is served. Meaningless under GraphFormatGob.
+	ShadowCompare bool `yaml:"shadow_compare"`
 }
+
+// Supported ServiceConfig.GraphFormat values.
+const (
+	// GraphFormatGob is the legacy gob-encoded chunk stream format.
+	GraphFormatGob = "gob"
+	// GraphFormatTGB is the columnar TGB blob format (internal/tgb).
+	GraphFormatTGB = "tgb"
+)
 
 // DefaultMaxMessageBytes is the fallback max serialized size per streamed
 // message (~4.25 MB), well under the 64 MB default gRPC limit.

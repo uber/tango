@@ -41,6 +41,12 @@ func runGit(t *testing.T, dir string, args ...string) string {
 		"GIT_AUTHOR_EMAIL=test@test.com",
 		"GIT_COMMITTER_NAME=test",
 		"GIT_COMMITTER_EMAIL=test@test.com",
+		// Isolate from host git config for hermeticity. In particular, a dev
+		// image's system config can enable commit signing (gpg.format x509
+		// with an external signing helper), which cannot run inside the bazel
+		// test sandbox and fails every `git commit` with exit 128.
+		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_CONFIG_GLOBAL=/dev/null",
 	)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v in %s failed: %s", args, dir, string(out))
@@ -85,6 +91,9 @@ func cloneWorker(t *testing.T, bareDir, baseSHA string) string {
 	runGit(t, workerDir, "checkout", baseSHA)
 	runGit(t, workerDir, "config", "user.name", "test")
 	runGit(t, workerDir, "config", "user.email", "test@test.com")
+	// git.Interface subprocesses don't inherit runGit's config isolation, so
+	// host-config commit signing must also be disabled repo-locally.
+	runGit(t, workerDir, "config", "commit.gpgsign", "false")
 	return workerDir
 }
 

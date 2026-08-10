@@ -103,6 +103,9 @@ func run() error {
 		Storage:         store,
 		Orchestrator:    orch,
 		MaxMessageBytes: cfg.Service.MaxMessageBytes,
+		RepoConfig:      cfg,
+		GraphFormat:     cfg.Service.GraphFormat,
+		ShadowCompare:   cfg.Service.ShadowCompare,
 	})
 
 	// YARPC transports and dispatcher

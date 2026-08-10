@@ -1356,8 +1356,8 @@ func TestFetchTargetGraphs(t *testing.T) {
 
 		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest())
 		require.NoError(t, err)
-		require.Len(t, first, 1)
-		require.Len(t, second, 1)
+		require.Len(t, first.chunks, 1)
+		require.Len(t, second.chunks, 1)
 	})
 
 	t.Run("first revision failure names graph #1", func(t *testing.T) {
@@ -1381,8 +1381,8 @@ func TestFetchTargetGraphs(t *testing.T) {
 		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest())
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
-		assert.Nil(t, first)
-		assert.Nil(t, second)
+		assert.Zero(t, first)
+		assert.Zero(t, second)
 
 		cause := <-causeCh
 		assert.NotErrorIs(t, cause, context.Canceled, "sibling cancellation should carry a distinct cause, not the generic context.Canceled")
