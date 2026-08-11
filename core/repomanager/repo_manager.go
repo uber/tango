@@ -47,7 +47,7 @@ type RepoManager interface {
 type repoManager struct {
 	git                  git.Interface
 	repoManagerClonePath string
-	logger               *zap.SugaredLogger
+	logger               *zap.Logger
 	emitter              *metrics.Emitter
 	poolSize             int
 
@@ -86,7 +86,7 @@ type workerSlot struct {
 // Params for creating a RepoManager.
 type Params struct {
 	Git                  git.Interface
-	Logger               *zap.SugaredLogger
+	Logger               *zap.Logger
 	RepoManagerClonePath string
 	PoolSize             int
 	// Scope is the tally scope for metrics. A nil scope disables metrics
@@ -134,7 +134,7 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 		slot := &workerSlot{dir: dir}
 		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 			slot.created = true
-			r.logger.Debugf("discovered existing worker: %s", dir)
+			r.logger.Debug("discovered existing worker", zap.String("directory", dir))
 		}
 		pool.avail <- slot
 	}

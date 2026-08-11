@@ -54,7 +54,7 @@ func TestWorkspace_ApplyRequests_Success(t *testing.T) {
 	w := NewWorkspace(WorkspaceParams{
 		Path:   "/tmp/workspace",
 		Git:    gitmock.NewMockInterface(gomock.NewController(t)),
-		Logger: zap.NewNop().Sugar(),
+		Logger: zap.NewNop(),
 	})
 	ctrl := gomock.NewController(t)
 	r1 := requestmock.NewMockRequest(ctrl)
@@ -81,7 +81,7 @@ func TestWorkspace_Checkout_RevParseSuccess(t *testing.T) {
 	defer ctrl.Finish()
 	g := gitmock.NewMockInterface(ctrl)
 	wsPath := "/tmp/workspace"
-	w := &workspace{path: wsPath, git: g, logger: zap.NewNop().Sugar()}
+	w := &workspace{path: wsPath, git: g, logger: zap.NewNop()}
 
 	ref := "abc123"
 	commitRef := ref + "^{commit}"
@@ -98,7 +98,7 @@ func TestWorkspace_Checkout_FetchError(t *testing.T) {
 	defer ctrl.Finish()
 	g := gitmock.NewMockInterface(ctrl)
 	wsPath := "/tmp/workspace"
-	w := &workspace{path: wsPath, git: g, logger: zap.NewNop().Sugar()}
+	w := &workspace{path: wsPath, git: g, logger: zap.NewNop()}
 
 	remote := "origin"
 	ref := "refs/heads/feature"

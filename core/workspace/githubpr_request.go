@@ -28,11 +28,11 @@ type githubPullRequest struct {
 	remote  string
 	pr      githubpr.PullRequest
 	baseRef string
-	logger  *zap.SugaredLogger
+	logger  *zap.Logger
 }
 
 // newGitHubPRRequest creates a Request that applies a GitHub pull request.
-func newGitHubPRRequest(git git.Interface, remote string, pr githubpr.PullRequest, baseRef string, logger *zap.SugaredLogger) Request {
+func newGitHubPRRequest(git git.Interface, remote string, pr githubpr.PullRequest, baseRef string, logger *zap.Logger) Request {
 	return &githubPullRequest{
 		git:     git,
 		remote:  remote,
@@ -45,7 +45,7 @@ func newGitHubPRRequest(git git.Interface, remote string, pr githubpr.PullReques
 // Apply fetches the PR ref, verifies the pinned head SHA is reachable,
 // diffs against it, and applies the patch to the workspace.
 func (r *githubPullRequest) Apply(ctx context.Context) error {
-	r.logger.Infow("Applying GitHub PR", zap.String("pr_number", r.pr.Number), zap.String("base_ref", r.baseRef), zap.String("head_sha", r.pr.HeadSHA))
+	r.logger.Info("Applying GitHub PR", zap.String("pr_number", r.pr.Number), zap.String("base_ref", r.baseRef), zap.String("head_sha", r.pr.HeadSHA))
 	ref := fmt.Sprintf("+pull/%s/head:pull/%s/head", r.pr.Number, r.pr.Number)
 	err := r.git.Fetch(ctx, r.remote, ref, "--force", "--no-tags")
 	if err != nil {
@@ -75,6 +75,6 @@ func (r *githubPullRequest) Apply(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("update submodules for PR %s: %w", r.pr.Number, err)
 	}
-	r.logger.Infow("Successfully applied GitHub PR", zap.String("pr_number", r.pr.Number))
+	r.logger.Info("Successfully applied GitHub PR", zap.String("pr_number", r.pr.Number))
 	return nil
 }

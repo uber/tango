@@ -45,12 +45,11 @@ func main() {
 }
 
 func run() error {
-	zl, err := zap.NewDevelopment()
+	logger, err := zap.NewDevelopment()
 	if err != nil {
 		return fmt.Errorf("init logger: %w", err)
 	}
-	defer zl.Sync()
-	logger := zl.Sugar()
+	defer logger.Sync()
 
 	// appCtx is the application-lifetime context. It is cancelled on
 	// SIGINT/SIGTERM so background work (e.g. the controller's async
@@ -68,7 +67,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("failed to create storage: %w", err)
 	}
-	logger.Infof("Using storage type: %s", cfg.Storage.Type)
+	logger.Info("Using storage", zap.String("type", string(cfg.Storage.Type)))
 
 	// Repo manager and orchestrator
 	repoManagerClonePath := cfg.Service.WorkspacesRootPath
@@ -100,7 +99,7 @@ func run() error {
 	// Controller (YARPC server implementation). appCtx is forwarded so the
 	// controller's background goroutines are tied to process lifetime.
 	ctrl := controller.NewController(appCtx, controller.Params{
-		Logger:          zl,
+		Logger:          logger,
 		Storage:         store,
 		Orchestrator:    orch,
 		MaxMessageBytes: cfg.Service.MaxMessageBytes,
@@ -128,9 +127,8 @@ func run() error {
 	}
 	defer func() { _ = dispatcher.Stop() }()
 
-	logger.Infof("Tango server is running:")
-	logger.Infof("- gRPC inbound:  %s", port)
-	logger.Infof("Press Ctrl+C to stop.")
+	logger.Info("Tango server is running", zap.String("grpc_inbound", port))
+	logger.Info("Press Ctrl+C to stop.")
 	// Block until SIGINT/SIGTERM cancels appCtx.
 	<-appCtx.Done()
 	return nil

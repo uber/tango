@@ -204,7 +204,7 @@ If you modified `.proto` files or interface signatures, also run `make proto` an
 
 ### Code Style
 
-1. **Structured logging** — `zap.SugaredLogger` with `Debugw`/`Infow`/`Warnw`/`Errorw(msg, key, val, ...)` or `zap.Logger` with explicit `zap.Field`s. Never log via `Printf` or unstructured `fmt`.
+1. **Structured logging** — use `zap.Logger` with explicit `zap.Field`s. Never use `zap.SugaredLogger`, `Printf`, or unstructured `fmt` logging.
 2. **Interfaces for behavior, structs for data** — interfaces for behavioral contracts (`Storage`, `RepoManager`, `Workspace`, `GraphRunner`, `Orchestrator`). Structs for data containers, configs, and params (`Config`, `Params`, `WorkspaceParams`).
 3. **Value-oriented identities and configuration** — prefer values for identity structs, configs, params, and ordinary results. Use `(T, bool)` for optional value results when practical; pointers remain appropriate for optional payloads, mutation, or shared ownership.
 4. **`Params` structs** — every non-trivial constructor takes a `Params` value (e.g. `controller.Params`, `orchestrator.Params`, `repomanager.Params`). New optional fields go on `Params` with a documented default, not as constructor overloads.

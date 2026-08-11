@@ -60,7 +60,7 @@ func TestExecuteQuery_Success(t *testing.T) {
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
-		Logger:        zap.NewNop().Sugar(),
+		Logger:        zap.NewNop(),
 		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
 			return mockCmd
 		},
@@ -104,7 +104,7 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
-		Logger:        zap.NewNop().Sugar(),
+		Logger:        zap.NewNop(),
 		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
 			capturedArgs = arg
 			return mockCmd
@@ -161,7 +161,7 @@ func TestExecuteQueryInternal_DrainsStreamsBeforeWait(t *testing.T) {
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
-		Logger:        zap.NewNop().Sugar(),
+		Logger:        zap.NewNop(),
 		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
 			return mockCmd
 		},
@@ -195,7 +195,7 @@ func TestExecuteQueryInternal_ContextTimeout(t *testing.T) {
 	client, err := NewBazelClient(context.Background(), Params{
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
-		Logger:        zap.NewNop().Sugar(),
+		Logger:        zap.NewNop(),
 		EnvVarsMap:    map[string]string{},
 		QueryTimeout:  10 * time.Millisecond, // Short timeout for test
 
@@ -238,7 +238,7 @@ func TestExecuteQueryInternal_StreamTimeoutWithoutWaitError(t *testing.T) {
 	client, err := NewBazelClient(context.Background(), Params{
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
-		Logger:        zap.NewNop().Sugar(),
+		Logger:        zap.NewNop(),
 		EnvVarsMap:    map[string]string{},
 		QueryTimeout:  10 * time.Millisecond, // Short timeout for test
 		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
@@ -274,7 +274,7 @@ func TestExecuteQueryInternal_WaitFailureWithoutTimeout(t *testing.T) {
 	client, err := NewBazelClient(context.Background(), Params{
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
-		Logger:        zap.NewNop().Sugar(),
+		Logger:        zap.NewNop(),
 		EnvVarsMap:    map[string]string{},
 		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
 			return mockCmd
@@ -347,7 +347,7 @@ func TestExecuteQueryInternal_Failures(t *testing.T) {
 				BazelCommand:  "bazel",
 				WorkspacePath: "/tmp/test",
 				EnvVarsMap:    map[string]string{},
-				Logger:        zap.NewNop().Sugar(),
+				Logger:        zap.NewNop(),
 				ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
 					return mockCmd
 				},
@@ -376,7 +376,7 @@ func TestExecuteQuery_ErrorCase(t *testing.T) {
 		BazelCommand:  "bazel",
 		WorkspacePath: "/tmp/test",
 		EnvVarsMap:    map[string]string{},
-		Logger:        zap.NewNop().Sugar(),
+		Logger:        zap.NewNop(),
 		ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
 			return mockCmd
 		},
