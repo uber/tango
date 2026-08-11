@@ -31,7 +31,7 @@ type Request interface {
 // NewRequest creates a Request from a canonical change URI and the remote
 // URL of the repository. Currently only GitHub PR URIs are supported
 // (github://{host}/{org}/{repo}/pull/{pr}/{head_sha}).
-func NewRequest(rawURL string, g git.Interface, remote string, baseRef string, logger *zap.SugaredLogger) (Request, error) {
+func NewRequest(rawURL string, g git.Interface, remote string, baseRef string, logger *zap.Logger) (Request, error) {
 	pr, err := githubpr.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid change URI %q: %w", rawURL, err)

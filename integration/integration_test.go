@@ -94,16 +94,14 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 
 	configPath := writeConfig(t, configDir, remote, clonePath)
 
-	logger := zl.Sugar()
-
 	appCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
 	store := storage.NewMemoryStorage()
 
 	rm, err := repomanager.NewRepoManager(appCtx, repomanager.Params{
-		Git:                  git.New(clonePath, logger),
-		Logger:               logger,
+		Git:                  git.New(clonePath, zl),
+		Logger:               zl,
 		RepoManagerClonePath: clonePath,
 		PoolSize:             2,
 	})
@@ -115,8 +113,8 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 	orch, err := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
 		Storage:     store,
 		RepoManager: rm,
-		Logger:      logger,
-		GitFactory:  func(dir string) git.Interface { return git.New(dir, logger) },
+		Logger:      zl,
+		GitFactory:  func(dir string) git.Interface { return git.New(dir, zl) },
 		Config:      cfg,
 	})
 	require.NoError(t, err, "failed to create orchestrator")

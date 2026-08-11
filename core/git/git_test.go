@@ -326,7 +326,7 @@ func TestDefaultGit_FileHashes(t *testing.T) {
 			g := &impl{
 				directory: "/repo",
 				runner:    m,
-				logger:    zap.NewNop().Sugar(),
+				logger:    zap.NewNop(),
 			}
 			m.out = tt.giveOutput
 			m.err = tt.wantError
@@ -364,7 +364,7 @@ func TestGitPathnames_roundTripAcrossRealGitBoundary(t *testing.T) {
 	runGit(t, repo, "add", "--all")
 	runGit(t, repo, "commit", "--quiet", "-m", "paths")
 
-	client := New(repo, zap.NewNop().Sugar())
+	client := New(repo, zap.NewNop())
 	diff, err := client.DiffWithStatus(t.Context(), "HEAD^", "HEAD")
 	require.NoError(t, err)
 	diffPaths := make(map[string]string, len(diff))

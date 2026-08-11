@@ -35,7 +35,7 @@ func TestNewBazelClient(t *testing.T) {
 				BazelCommand:  "bazel",
 				WorkspacePath: "/tmp/test",
 				EnvVarsMap:    map[string]string{"FOO": "bar"},
-				Logger:        zap.NewNop().Sugar(),
+				Logger:        zap.NewNop(),
 				ExecCommandContext: func(ctx context.Context, name string, arg ...string) commander {
 					return nil
 				},
@@ -47,7 +47,7 @@ func TestNewBazelClient(t *testing.T) {
 				BazelCommand:  "bazel",
 				WorkspacePath: "/tmp/test",
 				EnvVarsMap:    map[string]string{"FOO": "bar"},
-				Logger:        zap.NewNop().Sugar(),
+				Logger:        zap.NewNop(),
 			},
 		},
 	}
@@ -71,7 +71,7 @@ func TestNewBazelClient_WithNilExecCommand(t *testing.T) {
 		BazelCommand:  "bazel",
 		WorkspacePath: "/workspace",
 		EnvVarsMap:    map[string]string{"KEY": "value"},
-		Logger:        zap.NewNop().Sugar(),
+		Logger:        zap.NewNop(),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, client)

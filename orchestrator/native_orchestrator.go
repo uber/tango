@@ -44,7 +44,7 @@ import (
 type nativeOrchestrator struct {
 	storage     storage.Storage
 	repoManager repomanager.RepoManager
-	logger      *zap.SugaredLogger
+	logger      *zap.Logger
 	// scope is subscoped to the orchestrator component and forwarded to the
 	// graph runner so its metrics nest under orchestrator.*.
 	scope   tally.Scope
@@ -68,7 +68,7 @@ type nativeOrchestrator struct {
 type Params struct {
 	Storage     storage.Storage
 	RepoManager repomanager.RepoManager
-	Logger      *zap.SugaredLogger
+	Logger      *zap.Logger
 	Scope       tally.Scope
 	GitFactory  func(directory string) git.Interface
 	GraphRunner graphrunner.GraphRunner
@@ -112,7 +112,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	defer func() { op.Complete(retErr) }()
 	build := req.Build
 	logger := b.logger.With(zap.Any("build_description", build))
-	logger.Infow("GetTargetGraph: Processing request")
+	logger.Info("GetTargetGraph: Processing request")
 
 	remote := build.Remote
 	repoCfg, ok := b.config.GetRepositoryConfig(remote)
@@ -130,7 +130,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		if err != nil {
 			// clean up the workspace if release fails.
 			if removeErr := os.RemoveAll(ws.Path()); removeErr != nil {
-				logger.Errorw("GetTargetGraph: Failed to remove workspace", zap.Error(removeErr))
+				logger.Error("GetTargetGraph: Failed to remove workspace", zap.Error(removeErr))
 			}
 		}
 	}()
@@ -140,7 +140,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, classifyGitError(fmt.Errorf("checkout %s@%s: %w", build.Remote, build.BaseSha, err))
 	}
-	logger.Infow("GetTargetGraph: Checked out base revision")
+	logger.Info("GetTargetGraph: Checked out base revision")
 
 	requests := make([]workspace.Request, 0, len(build.ChangeRequests))
 	gitFactory := b.gitFactory
@@ -162,7 +162,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, classifyGitError(fmt.Errorf("apply requests for %s@%s: %w", build.Remote, build.BaseSha, err))
 	}
-	logger.Infow("GetTargetGraph: Applied requests", zap.Int("request_count", len(requests)))
+	logger.Info("GetTargetGraph: Applied requests", zap.Int("request_count", len(requests)))
 
 	// Compute the treehash and download the target graph from storage if exists.
 	treehash, err := gitModule.RevParse(ctx, "HEAD^{tree}")
@@ -176,15 +176,15 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		recordStep(e, "cache_read_duration", cacheReadStart, metrics.FastDurationBuckets)
 		metrics.RecordCacheLookup(e, _opGetTargetGraph, metrics.GraphCacheLookup, err)
 		if err == nil {
-			logger.Infow("GetTargetGraph: Cache hit on treehash", zap.String("treehash", treehash))
+			logger.Info("GetTargetGraph: Cache hit on treehash", zap.String("treehash", treehash))
 			return graphReader, nil
 		}
 		if !storage.IsNotFound(err) {
 			return nil, fmt.Errorf("read graph at treehash %s: %w", treehash, err)
 		}
-		logger.Infow("GetTargetGraph: Treehash not found, computing target graph", zap.String("treehash", treehash))
+		logger.Info("GetTargetGraph: Treehash not found, computing target graph", zap.String("treehash", treehash))
 	} else {
-		logger.Infow("GetTargetGraph: bypass_cache=true, computing target graph")
+		logger.Info("GetTargetGraph: bypass_cache=true, computing target graph")
 	}
 	// Store the treehash mapping in the background before the (potentially
 	// slow) graph computation so concurrent or subsequent requests can
@@ -198,10 +198,10 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		})
 		bgOp.Complete(putErr)
 		if putErr != nil {
-			logger.Warnw("GetTargetGraph: Failed to eagerly store treehash mapping",
+			logger.Warn("GetTargetGraph: Failed to eagerly store treehash mapping",
 				zap.String("path", thCachePath), zap.Error(putErr))
 		} else {
-			logger.Infow("GetTargetGraph: Eagerly stored treehash mapping",
+			logger.Info("GetTargetGraph: Eagerly stored treehash mapping",
 				zap.String("path", thCachePath), zap.String("treehash", treehash))
 		}
 	}()
@@ -254,7 +254,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("create graph reader at %s: %w", treehashPath, err)
 	}
-	logger.Infow("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
+	logger.Info("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
 	return graphReader, nil
 }
 

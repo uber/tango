@@ -36,7 +36,7 @@ type Workspace interface {
 type workspace struct {
 	path        string
 	git         git.Interface
-	logger      *zap.SugaredLogger
+	logger      *zap.Logger
 	onRelease   func() // optional callback invoked on Release
 	releaseOnce sync.Once
 }
@@ -44,7 +44,7 @@ type workspace struct {
 type WorkspaceParams struct {
 	Path      string
 	Git       git.Interface
-	Logger    *zap.SugaredLogger
+	Logger    *zap.Logger
 	OnRelease func() // if set, called when the workspace is released
 }
 
@@ -81,7 +81,7 @@ func (w *workspace) Checkout(ctx context.Context, remote string, ref string) err
 	_, err := w.git.RevParse(ctx, commit)
 	// commit is not present in the repository
 	if err != nil {
-		w.logger.Warnw("git rev-parse failed, attempting to fetch from remote",
+		w.logger.Warn("git rev-parse failed, attempting to fetch from remote",
 			zap.String("remote", remote),
 			zap.String("ref", ref),
 			zap.Error(err))

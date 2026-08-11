@@ -73,14 +73,14 @@ type Interface interface {
 type impl struct {
 	directory string
 	runner    commandRunner
-	logger    *zap.SugaredLogger
+	logger    *zap.Logger
 }
 
 // New creates new Git interface implementation. A nil logger is tolerated and
 // discards log output.
-func New(directory string, logger *zap.SugaredLogger) Interface {
+func New(directory string, logger *zap.Logger) Interface {
 	if logger == nil {
-		logger = zap.NewNop().Sugar()
+		logger = zap.NewNop()
 	}
 	return &impl{
 		directory: directory,
@@ -258,17 +258,17 @@ func (c *impl) FileHashes(ctx context.Context, ref string) (map[string][]byte, e
 		}
 		fields := bytes.SplitN(record, []byte{'\t'}, 2)
 		if len(fields) != 2 {
-			c.logger.Warnw("skipping ls-tree record due to unexpected format", "record", string(record))
+			c.logger.Warn("skipping ls-tree record due to unexpected format", zap.ByteString("record", record))
 			continue
 		}
 		metadata := strings.Fields(string(fields[0]))
 		if len(metadata) < 3 {
-			c.logger.Warnw("skipping ls-tree record due to unexpected metadata", "record", string(record))
+			c.logger.Warn("skipping ls-tree record due to unexpected metadata", zap.ByteString("record", record))
 			continue
 		}
 		hash, err := hex.DecodeString(metadata[2])
 		if err != nil {
-			c.logger.Warnw("skipping ls-tree record due to parsing error", "record", string(record), zap.Error(err))
+			c.logger.Warn("skipping ls-tree record due to parsing error", zap.ByteString("record", record), zap.Error(err))
 			continue
 		}
 		fileHashes[string(fields[1])] = hash

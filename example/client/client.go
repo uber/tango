@@ -50,13 +50,12 @@ func main() {
 
 	grpcTransport := yarpcgrpc.NewTransport()
 	out := grpcTransport.NewSingleOutbound(*addr)
-	zl, err := zap.NewDevelopment()
+	logger, err := zap.NewDevelopment()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer zl.Sync()
-	logger := zl.Sugar()
+	defer logger.Sync()
 	dispatcher := yarpc.NewDispatcher(yarpc.Config{
 		Name: "tango-client",
 		Outbounds: yarpc.Outbounds{
@@ -64,7 +63,7 @@ func main() {
 		},
 	})
 	if err := dispatcher.Start(); err != nil {
-		logger.Errorf("start dispatcher: %w", err)
+		logger.Error("start dispatcher", zap.Error(err))
 		os.Exit(1)
 	}
 	defer func() { _ = dispatcher.Stop() }()
@@ -100,14 +99,14 @@ func main() {
 		}
 		if err := callGetTargetGraph(ctx, client, logger, req); err != nil {
 			// log error and exit
-			logger.Errorf("Error: %v", err)
+			logger.Error("GetTargetGraph failed", zap.Error(err))
 			os.Exit(1)
 		}
 	case "get-changed-targets":
 		var requests []*pb.Request
 		// check if both reqURLs and newRequestURLs are provided
 		if *baseSHA == "" && *newBaseSHA == "" {
-			logger.Errorf("Error: both baseSHA and newBaseSHA cannot be empty")
+			logger.Error("both baseSHA and newBaseSHA cannot be empty")
 			os.Exit(1)
 		}
 		if trimmed := strings.TrimSpace(*reqURLs); trimmed != "" {
@@ -147,17 +146,17 @@ func main() {
 			BypassCache: *bypassCache,
 		}
 		if err := callGetChangedTargets(ctx, client, logger, req); err != nil {
-			logger.Errorf("Error: %v", err)
+			logger.Error("GetChangedTargets failed", zap.Error(err))
 			os.Exit(1)
 		}
 	default:
-		logger.Errorf("unsupported method: %s", *method)
+		logger.Error("unsupported method", zap.String("method", *method))
 		os.Exit(1)
 	}
 	logger.Info("Done.")
 }
 
-func callGetTargetGraph(ctx context.Context, client pb.TangoYARPCClient, logger *zap.SugaredLogger, req *pb.GetTargetGraphRequest) error {
+func callGetTargetGraph(ctx context.Context, client pb.TangoYARPCClient, logger *zap.Logger, req *pb.GetTargetGraphRequest) error {
 	stream, err := client.GetTargetGraph(ctx, req)
 	if err != nil {
 		return fmt.Errorf("GetTargetGraph: %w", err)
@@ -182,7 +181,7 @@ func callGetTargetGraph(ctx context.Context, client pb.TangoYARPCClient, logger 
 		}
 		switch x := msg.Item.(type) {
 		case *pb.GetTargetGraphResponse_Targets:
-			logger.Infof("Received targets packet with %d targets", len(x.Targets.GetTargets()))
+			logger.Info("Received targets packet", zap.Int("target_count", len(x.Targets.GetTargets())))
 			j, err := json.Marshal(x.Targets)
 			if err != nil {
 				return fmt.Errorf("marshal targets: %w", err)
@@ -202,7 +201,7 @@ func callGetTargetGraph(ctx context.Context, client pb.TangoYARPCClient, logger 
 	return nil
 }
 
-func callGetChangedTargets(ctx context.Context, client pb.TangoYARPCClient, logger *zap.SugaredLogger, req *pb.GetChangedTargetsRequest) error {
+func callGetChangedTargets(ctx context.Context, client pb.TangoYARPCClient, logger *zap.Logger, req *pb.GetChangedTargetsRequest) error {
 	stream, err := client.GetChangedTargets(ctx, req)
 	if err != nil {
 		return fmt.Errorf("GetChangedTargets: %w", err)
@@ -227,7 +226,7 @@ func callGetChangedTargets(ctx context.Context, client pb.TangoYARPCClient, logg
 		}
 		switch x := msg.Item.(type) {
 		case *pb.GetChangedTargetsResponse_ChangedTargets:
-			logger.Infof("Received changed targets packet with %d targets", len(x.ChangedTargets.GetChangedTargets()))
+			logger.Info("Received changed targets packet", zap.Int("target_count", len(x.ChangedTargets.GetChangedTargets())))
 			j, err := json.Marshal(x.ChangedTargets)
 			if err != nil {
 				return fmt.Errorf("marshal changed targets: %w", err)

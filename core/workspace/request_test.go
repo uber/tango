@@ -28,7 +28,7 @@ func TestNewRequest_Github_Success(t *testing.T) {
 	rawURL := "github://github.com/org/repo/pull/123/" + _testHeadSHA
 	var g git.Interface = nil
 
-	req, err := NewRequest(rawURL, g, "https://github.com/org/repo.git", "baseRef", zap.NewNop().Sugar())
+	req, err := NewRequest(rawURL, g, "https://github.com/org/repo.git", "baseRef", zap.NewNop())
 	require.NoError(t, err)
 	require.NotNil(t, req)
 	gr, ok := req.(*githubPullRequest)
@@ -40,13 +40,13 @@ func TestNewRequest_Github_Success(t *testing.T) {
 }
 
 func TestNewRequest_InvalidURL(t *testing.T) {
-	req, err := NewRequest("://bad", nil, "", "baseRef", zap.NewNop().Sugar())
+	req, err := NewRequest("://bad", nil, "", "baseRef", zap.NewNop())
 	require.Error(t, err)
 	require.Nil(t, req)
 }
 
 func TestNewRequest_InvalidScheme(t *testing.T) {
-	req, err := NewRequest("phabricator://bad", nil, "", "baseRef", zap.NewNop().Sugar())
+	req, err := NewRequest("phabricator://bad", nil, "", "baseRef", zap.NewNop())
 	require.Error(t, err)
 	require.Nil(t, req)
 }
@@ -63,7 +63,7 @@ func TestNewRequest_NonCanonicalURI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, err := NewRequest(tt.url, nil, "", "baseRef", zap.NewNop().Sugar())
+			req, err := NewRequest(tt.url, nil, "", "baseRef", zap.NewNop())
 			require.Error(t, err)
 			require.Nil(t, req)
 		})

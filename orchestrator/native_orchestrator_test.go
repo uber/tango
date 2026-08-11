@@ -68,7 +68,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t).Sugar(),
+		Logger:      zaptest.NewLogger(t),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -124,7 +124,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t).Sugar(),
+		Logger:      zaptest.NewLogger(t),
 		GitFactory:  func(dir string) git.Interface { return g },
 		GraphRunner: graphRunner,
 		Config:      testConfig(t),
@@ -161,7 +161,7 @@ func TestNative_GetTargetGraph_UnknownStrategy_UserError(t *testing.T) {
 	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t).Sugar(),
+		Logger:      zaptest.NewLogger(t),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -196,7 +196,7 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t).Sugar(),
+		Logger:      zaptest.NewLogger(t),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -231,7 +231,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t).Sugar(),
+		Logger:      zaptest.NewLogger(t),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -265,7 +265,7 @@ func TestNative_GetTargetGraph_InvalidChangeURI_UserError(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t).Sugar(),
+		Logger:      zaptest.NewLogger(t),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -318,7 +318,7 @@ func TestNative_GetTargetGraph_LeasePoolTimeout_InfraRetryable(t *testing.T) {
 
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t).Sugar(),
+		Logger:      zaptest.NewLogger(t),
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
@@ -338,7 +338,7 @@ func TestNative_GetTargetGraph_LeaseGenericError_Infra(t *testing.T) {
 
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t).Sugar(),
+		Logger:      zaptest.NewLogger(t),
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)

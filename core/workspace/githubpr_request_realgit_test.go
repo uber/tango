@@ -103,7 +103,7 @@ func advancePR(t *testing.T, bareDir, newContent string) {
 func TestGitHubPR_RealGit_AppliesPinnedContent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	logger := zap.NewNop().Sugar()
+	logger := zap.NewNop()
 
 	bareDir, baseSHA, prSHA := setupBareRepoWithPR(t, "pr-content")
 	require.Len(t, prSHA, _testSHALen)
@@ -121,7 +121,7 @@ func TestGitHubPR_RealGit_AppliesPinnedContent(t *testing.T) {
 func TestGitHubPR_RealGit_StableTreeAcrossPRAdvance(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	logger := zap.NewNop().Sugar()
+	logger := zap.NewNop()
 
 	bareDir, baseSHA, prSHA1 := setupBareRepoWithPR(t, "version-1")
 	require.Len(t, prSHA1, _testSHALen)
@@ -155,7 +155,7 @@ func TestGitHubPR_RealGit_StableTreeAcrossPRAdvance(t *testing.T) {
 func TestGitHubPR_RealGit_RejectsNonAncestorSHA(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	logger := zap.NewNop().Sugar()
+	logger := zap.NewNop()
 
 	bareDir, baseSHA, _ := setupBareRepoWithPR(t, "original")
 

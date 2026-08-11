@@ -75,7 +75,7 @@ func run() error {
 	client, err := bazel.NewBazelClient(parentCtx, bazel.Params{
 		BazelCommand:  *bazelCmd,
 		WorkspacePath: *workspace,
-		Logger:        logger.Sugar(),
+		Logger:        logger,
 		QueryTimeout:  *timeout,
 	})
 	if err != nil {

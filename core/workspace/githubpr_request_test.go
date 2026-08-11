@@ -36,7 +36,7 @@ func testPR(number, headSHA string) githubpr.PullRequest {
 
 func TestGitHubPRRequest_Fields(t *testing.T) {
 	pr := testPR("456", _testHeadSHA)
-	r := newGitHubPRRequest(nil, "https://github.com/org/repo", pr, "baseRef", zap.NewNop().Sugar())
+	r := newGitHubPRRequest(nil, "https://github.com/org/repo", pr, "baseRef", zap.NewNop())
 	gr, ok := r.(*githubPullRequest)
 	assert.True(t, ok, "expected *githubPullRequest, got %T", r)
 	assert.Equal(t, "https://github.com/org/repo", gr.remote)
@@ -54,7 +54,7 @@ func TestGitHubPRRequest_Apply_HeadSHAIsAncestor_Success(t *testing.T) {
 	git.EXPECT().ApplyPatch(gomock.Any(), gomock.Any()).Return(nil)
 	git.EXPECT().Commit(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 	git.EXPECT().SubmoduleUpdate(gomock.Any()).Return(nil)
-	req := newGitHubPRRequest(git, "https://github.com/org/repo", testPR("123", "deadbeef"), "baseRef", zap.NewNop().Sugar())
+	req := newGitHubPRRequest(git, "https://github.com/org/repo", testPR("123", "deadbeef"), "baseRef", zap.NewNop())
 	err := req.Apply(context.Background())
 	require.NoError(t, err)
 }
@@ -64,7 +64,7 @@ func TestGitHubPRRequest_Apply_HeadSHANotAncestor_ReturnsError(t *testing.T) {
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "https://github.com/org/repo", gomock.Any(), gomock.Any()).Return(nil)
 	git.EXPECT().IsAncestor(gomock.Any(), "deadbeef", "pull/456/head").Return(false, nil)
-	req := newGitHubPRRequest(git, "https://github.com/org/repo", testPR("456", "deadbeef"), "baseRef", zap.NewNop().Sugar())
+	req := newGitHubPRRequest(git, "https://github.com/org/repo", testPR("456", "deadbeef"), "baseRef", zap.NewNop())
 	err := req.Apply(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deadbeef")
@@ -75,7 +75,7 @@ func TestGitHubPRRequest_Apply_IsAncestorFails_ReturnsError(t *testing.T) {
 	git := gitmock.NewMockInterface(ctrl)
 	git.EXPECT().Fetch(gomock.Any(), "https://github.com/org/repo", gomock.Any(), gomock.Any()).Return(nil)
 	git.EXPECT().IsAncestor(gomock.Any(), "deadbeef", "pull/789/head").Return(false, errors.New("ancestor check failed"))
-	req := newGitHubPRRequest(git, "https://github.com/org/repo", testPR("789", "deadbeef"), "baseRef", zap.NewNop().Sugar())
+	req := newGitHubPRRequest(git, "https://github.com/org/repo", testPR("789", "deadbeef"), "baseRef", zap.NewNop())
 	err := req.Apply(context.Background())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read PR commit history")
@@ -90,7 +90,7 @@ func TestGitHubPRRequest_Apply_DiffsAgainstPinnedHeadSHA(t *testing.T) {
 	git.EXPECT().ApplyPatch(gomock.Any(), []byte("patch")).Return(nil)
 	git.EXPECT().Commit(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 	git.EXPECT().SubmoduleUpdate(gomock.Any()).Return(nil)
-	req := newGitHubPRRequest(git, "https://github.com/org/repo", testPR("10", "pinnedsha"), "baseRef", zap.NewNop().Sugar())
+	req := newGitHubPRRequest(git, "https://github.com/org/repo", testPR("10", "pinnedsha"), "baseRef", zap.NewNop())
 	err := req.Apply(context.Background())
 	require.NoError(t, err)
 }

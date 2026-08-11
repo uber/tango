@@ -60,7 +60,7 @@ type BazelClient struct {
 	workspacePath      string
 	envVarsMap         map[string]string
 	bazelCommand       string
-	logger             *zap.SugaredLogger
+	logger             *zap.Logger
 	execCommandContext func(ctx context.Context, name string, arg ...string) commander
 	queryTimeout       time.Duration
 	streamLogs         bool
@@ -70,7 +70,7 @@ type Params struct {
 	BazelCommand       string
 	WorkspacePath      string
 	EnvVarsMap         map[string]string
-	Logger             *zap.SugaredLogger
+	Logger             *zap.Logger
 	ExecCommandContext func(ctx context.Context, name string, arg ...string) commander
 	QueryTimeout       time.Duration
 	StreamLogs         bool
@@ -97,7 +97,7 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("detect bazel executable: %w", err)
 	}
-	p.Logger.Debugw("NewBazelClient", zap.String("bazelCommand", bazelCommand), zap.String("workspacePath", p.WorkspacePath))
+	p.Logger.Debug("NewBazelClient", zap.String("bazelCommand", bazelCommand), zap.String("workspacePath", p.WorkspacePath))
 	return &BazelClient{
 		workspacePath:      p.WorkspacePath,
 		envVarsMap:         p.EnvVarsMap,
