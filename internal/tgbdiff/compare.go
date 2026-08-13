@@ -930,6 +930,9 @@ func attrsChanged(before, after map[string]string) bool {
 //
 // depBuf is a scratch buffer reused across calls to avoid allocation.
 func buildReverseCSR(after *tgb.Reader, n int, depBuf *[]int32) (offsets []int32, targets []int32, err error) {
+	// Decode the forward edges once into CSR form. Calling Deps per node walks
+	// the reader's offset table twice over and allocates per node; DepsCSR is a
+	// single sequential pass over the column.
 	fwdOff, fwdTgt, err := after.DepsCSR()
 	if err != nil {
 		return nil, nil, err
