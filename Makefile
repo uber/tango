@@ -1,4 +1,4 @@
-.PHONY: build cover test test-integration bench lint proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets version help
+.PHONY: build cover test test-integration test-integration-tgb test-integration-gob bench lint proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets version help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -15,11 +15,32 @@ test:
 	@$(BAZEL) test //...
 	@echo "All tests passed!"
 
-# Run integration tests (requires bazel; may take several minutes)
-test-integration:
-	@echo "Running integration tests..."
-	@$(BAZEL) test //integration:integration_test --test_output=errors --test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) --test_env=HOME=$$HOME
-	@echo "Integration tests passed!"
+FIXTURE_REMOTE  ?= https://github.com/xytan0056/bazel-fixture.git
+FIXTURE_BASE_SHA ?= 0d79296cfd507440f536ea01e626b294d74d19a8
+FIXTURE_HEAD_SHA ?= b5f81eb872dfcbe4c13131a73367122eb2d92065
+FIXTURE_PR_URL  ?= github://github.com/xytan0056/bazel-fixture/pull/2/$(FIXTURE_HEAD_SHA)
+
+INTEGRATION_ENV = \
+	--test_env=HOME=$$HOME \
+	--test_env=TANGO_REPO_REMOTE=$(FIXTURE_REMOTE) \
+	--test_env=TANGO_BASE_SHA=$(FIXTURE_BASE_SHA) \
+	--test_env=TANGO_HEAD_SHA=$(FIXTURE_HEAD_SHA) \
+	--test_env=TANGO_PR_URL=$(FIXTURE_PR_URL)
+
+# Run integration tests with both graph formats
+test-integration: test-integration-tgb test-integration-gob
+
+test-integration-tgb:
+	@echo "Running integration tests (tgb)..."
+	@$(BAZEL) test //integration:integration_test --test_output=errors \
+		$(INTEGRATION_ENV) --test_env=TANGO_GRAPH_FORMAT=tgb
+	@echo "Integration tests (tgb) passed!"
+
+test-integration-gob:
+	@echo "Running integration tests (gob)..."
+	@$(BAZEL) test //integration:integration_test --test_output=errors \
+		$(INTEGRATION_ENV) --test_env=TANGO_GRAPH_FORMAT=gob
+	@echo "Integration tests (gob) passed!"
 
 # Run GetChangedTargets benchmarks against fixed, checked-in commit pairs.
 # Measurement only: not part of `make test` / `make test-integration` and not
@@ -116,7 +137,9 @@ help:
 	@echo "Build & Test:"
 	@echo "  make build            - Build all targets"
 	@echo "  make test             - Run all tests"
-	@echo "  make test-integration - Run integration tests (slow)"
+	@echo "  make test-integration     - Run integration tests with both formats (needs network, slow)"
+	@echo "  make test-integration-tgb - Run integration tests with TGB format"
+	@echo "  make test-integration-gob - Run integration tests with gob format"
 	@echo "  make bench            - Run GetChangedTargets benchs (measurement only, not in CI)"
 	@echo "  make lint             - Run golangci-lint"
 	@echo "  make gazelle          - Update BUILD.bazel files"

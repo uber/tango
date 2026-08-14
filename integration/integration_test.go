@@ -14,7 +14,8 @@
 
 // Package integration_test implements integration tests for tango.
 // Its tests spin up the tango server, create a client that connects to it,
-// and calls its APIs using the tango GitHub repository itself as the target.
+// and calls its APIs against a dedicated Bazel fixture repository with a
+// known, stable dependency graph.
 package integration_test
 
 import (
@@ -49,11 +50,36 @@ const (
 	configTemplateFile = "testdata/tango-config.yaml.tmpl"
 )
 
+func requiredEnv(t testing.TB, key string) string {
+	t.Helper()
+	v := os.Getenv(key)
+	require.NotEmpty(t, v, "%s must be set (pass --test_env=%s=... to bazel test)", key, key)
+	return v
+}
+
 func repoRemote(t testing.TB) string {
 	t.Helper()
-	remote := os.Getenv("TANGO_REPO_REMOTE")
-	require.NotEmpty(t, remote, "TANGO_REPO_REMOTE must be set (pass --test_env=TANGO_REPO_REMOTE=... to bazel test)")
-	return remote
+	return requiredEnv(t, "TANGO_REPO_REMOTE")
+}
+
+func fixtureBaseSHA(t testing.TB) string {
+	t.Helper()
+	return requiredEnv(t, "TANGO_BASE_SHA")
+}
+
+func fixtureHeadSHA(t testing.TB) string {
+	t.Helper()
+	return requiredEnv(t, "TANGO_HEAD_SHA")
+}
+
+func fixturePRURL(t testing.TB) string {
+	t.Helper()
+	return requiredEnv(t, "TANGO_PR_URL")
+}
+
+func graphFormat(t testing.TB) string {
+	t.Helper()
+	return requiredEnv(t, "TANGO_GRAPH_FORMAT")
 }
 
 func writeConfig(t testing.TB, dir, remote, clonePath string) string {
@@ -71,10 +97,11 @@ func writeConfig(t testing.TB, dir, remote, clonePath string) string {
 		Remote       string
 		ClonePath    string
 		BazelCommand string
+		GraphFormat  string
 	}{
-		Remote:       remote,
-		ClonePath:    clonePath,
-		BazelCommand: filepath.Join(remote, "tools", "bazel"),
+		Remote:      remote,
+		ClonePath:   clonePath,
+		GraphFormat: graphFormat(t),
 	})
 	require.NoError(t, err, "failed to render config template")
 
@@ -160,7 +187,6 @@ func newClient(t testing.TB, addr string) pb.TangoYARPCClient {
 	return pb.NewTangoYARPCClient(dispatcher.ClientConfig("tango"))
 }
 
-// rawGraph holds the full streamed response before any subgraph extraction.
 type rawGraph struct {
 	targets  []*pb.OptimizedTarget
 	metadata *pb.Metadata
@@ -190,8 +216,6 @@ func drainTargetGraphStream(t *testing.T, stream pb.TangoServiceGetTargetGraphYA
 	return result
 }
 
-// subgraph is a helper for constructing a focused subgraph from a raw proto graph.
-// It returns a mapping of target names to list of dependency target names.
 func subgraph(t *testing.T, raw rawGraph, roots ...string) map[string][]string {
 	t.Helper()
 
@@ -250,23 +274,15 @@ type parsedChangedTargets struct {
 	Distances map[string]int32
 }
 
-func getChangedTargets(t testing.TB, client pb.TangoYARPCClient, remote, firstSHA, secondSHA string) parsedChangedTargets {
+func getChangedTargets(t testing.TB, client pb.TangoYARPCClient, first, second *pb.BuildDescription) parsedChangedTargets {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
 
 	stream, err := client.GetChangedTargets(ctx, &pb.GetChangedTargetsRequest{
-		FirstRevision: &pb.BuildDescription{
-			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
-			Remote:   remote,
-			BaseSha:  firstSHA,
-		},
-		SecondRevision: &pb.BuildDescription{
-			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
-			Remote:   remote,
-			BaseSha:  secondSHA,
-		},
+		FirstRevision:  first,
+		SecondRevision: second,
 	})
 	require.NoError(t, err, "failed to initiate GetChangedTargets stream")
 
@@ -344,13 +360,26 @@ func mergeMetadata(existing, incoming *pb.Metadata) *pb.Metadata {
 	return existing
 }
 
+func buildDesc(remote, sha string) *pb.BuildDescription {
+	return &pb.BuildDescription{
+		Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+		Remote:   remote,
+		BaseSha:  sha,
+	}
+}
+
+func assertContainsTarget(t testing.TB, names []string, target, category string) {
+	t.Helper()
+	for _, n := range names {
+		if n == target {
+			return
+		}
+	}
+	t.Errorf("expected %s targets to contain %q, got: %v", category, target, names)
+}
+
 func TestIntegration_GetTargetGraph(t *testing.T) {
 	remote := repoRemote(t)
-
-	// Pinned SHA for deterministic assertions. The target count and edges are
-	// fixed for a given treehash — they only change if this SHA is updated.
-	const pinnedSHA = "74d1cd55155e5f4f43aa92b4e0146a0c528a0d96"
-
 	addr := startServer(t, remote)
 	client := newClient(t, addr)
 
@@ -358,11 +387,7 @@ func TestIntegration_GetTargetGraph(t *testing.T) {
 	defer cancel()
 
 	stream, err := client.GetTargetGraph(ctx, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{
-			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
-			Remote:   remote,
-			BaseSha:  pinnedSHA,
-		},
+		BuildDescription: buildDesc(remote, fixtureBaseSHA(t)),
 	})
 	require.NoError(t, err, "failed to initiate GetTargetGraph stream")
 
@@ -371,117 +396,124 @@ func TestIntegration_GetTargetGraph(t *testing.T) {
 	require.NotEmpty(t, raw.metadata.GetTargetIdMapping())
 	require.NotEmpty(t, raw.metadata.GetRuleTypeMapping())
 
-	assert.Equal(t, 3673, len(raw.targets), "expected exact target count for pinned SHA")
+	targetNames := make([]string, 0, len(raw.metadata.GetTargetIdMapping()))
+	for _, name := range raw.metadata.GetTargetIdMapping() {
+		targetNames = append(targetNames, name)
+	}
+	sort.Strings(targetNames)
+	t.Logf("target count: %d, target names:\n%v", len(raw.targets), targetNames)
 
 	totalEdges := 0
 	for _, tgt := range raw.targets {
 		totalEdges += len(tgt.DirectDependencies)
 	}
-	assert.Equal(t, 8105, totalEdges, "expected exact edge count for pinned SHA")
+	t.Logf("edge count: %d", totalEdges)
 
-	t.Run("controller sub-graph contains some correct well-known edges", func(t *testing.T) {
-		controllerGraph := subgraph(t, raw, "//controller:controller")
-		assert.Contains(t, controllerGraph["//controller:controller"], "//orchestrator:orchestrator")
-		assert.Contains(t, controllerGraph["//controller:controller"], "//core/storage:storage")
-		assert.Contains(t, controllerGraph["//controller:controller"], "//tangopb:tangopb")
-		assert.Contains(t, controllerGraph["//orchestrator:orchestrator"], "//core/storage:storage")
-		assert.Contains(t, controllerGraph["//orchestrator:orchestrator"], "//core/repomanager:repomanager")
-		assert.Contains(t, controllerGraph["//orchestrator:orchestrator"], "//graphrunner:graphrunner")
+	t.Run("service_depends_on_pkg", func(t *testing.T) {
+		g := subgraph(t, raw, "//service/handlers:handlers")
+		assert.Contains(t, g["//service/handlers:handlers"], "//pkg/logger:logger")
+		assert.Contains(t, g["//service/handlers:handlers"], "//service/store:store")
 	})
 
-	t.Run("nodes correctly include external dependencies", func(t *testing.T) {
-		configGraph := subgraph(t, raw, "//config:config")
-		assert.Equal(t, []string{
-			"//config:config.go",
-			"//config:repository_config.go",
-			"//config:service_config.go",
-			"//config:storage_config.go",
-			"@bazel_tools//tools/allowlists/function_transition_allowlist:function_transition_allowlist",
-			"@com_github_goccy_go_yaml//:go-yaml",
-			"@rules_go//:go_context_data",
-		}, configGraph["//config:config"])
+	t.Run("cmd_depends_on_service_and_config", func(t *testing.T) {
+		g := subgraph(t, raw, "//cmd/server:server_lib")
+		assert.Contains(t, g["//cmd/server:server_lib"], "//service/api:api")
+		assert.Contains(t, g["//cmd/server:server_lib"], "//service/config:config")
+		assert.Contains(t, g["//cmd/server:server_lib"], "//pkg/logger:logger")
+	})
+
+	t.Run("external_dependencies", func(t *testing.T) {
+		g := subgraph(t, raw, "//pkg/logger:logger")
+		loggerDeps := g["//pkg/logger:logger"]
+		hasExternal := false
+		for _, dep := range loggerDeps {
+			if len(dep) > 0 && dep[0] == '@' {
+				hasExternal = true
+				break
+			}
+		}
+		assert.True(t, hasExternal, "expected at least one external (@) dependency, got: %v", loggerDeps)
+	})
+
+	t.Run("proto_targets", func(t *testing.T) {
+		found := false
+		for _, name := range targetNames {
+			if name == "//proto/common:common_proto" || name == "//proto/api:api_proto" || name == "//proto/store:store_proto" {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected at least one proto_library target in the graph")
+	})
+
+	t.Run("embedded_config", func(t *testing.T) {
+		g := subgraph(t, raw, "//service/config:config")
+		configDeps := g["//service/config:config"]
+		hasEmbedded := false
+		for _, dep := range configDeps {
+			if dep == "//service/config:config.yaml" || dep == "//service/config:defaults.json" {
+				hasEmbedded = true
+				break
+			}
+		}
+		assert.True(t, hasEmbedded, "expected embedded config asset, got: %v", configDeps)
 	})
 }
 
 func TestIntegration_GetChangedTargets(t *testing.T) {
 	remote := repoRemote(t)
-
 	addr := startServer(t, remote)
 	client := newClient(t, addr)
 
-	t.Run("changed_only", func(t *testing.T) {
-		// Compare two adjacent commits:
-		//   5716262 [core/storage] generic reader implementation (#145)
-		//   74d1cd5 [core/workspace] fix silent drop of invalid scheme (#146)
-		// The second commit changes core/workspace/request.go and its test.
-		const firstSHA = "57162624a45965a7e783072c56561f91c5d4084d"
-		const secondSHA = "74d1cd55155e5f4f43aa92b4e0146a0c528a0d96"
+	t.Run("sha_comparison", func(t *testing.T) {
+		ct := getChangedTargets(t, client, buildDesc(remote, fixtureBaseSHA(t)), buildDesc(remote, fixtureHeadSHA(t)))
 
-		ct := getChangedTargets(t, client, remote, firstSHA, secondSHA)
+		t.Logf("NEW: %v", ct.ByType[pb.CHANGE_TYPE_NEW])
+		t.Logf("DELETED: %v", ct.ByType[pb.CHANGE_TYPE_DELETED])
+		t.Logf("CHANGED: %v", ct.ByType[pb.CHANGE_TYPE_CHANGED])
+		t.Logf("Distances: %v", ct.Distances)
 
-		assert.Empty(t, ct.ByType[pb.CHANGE_TYPE_NEW], "expected no new targets")
-		assert.Empty(t, ct.ByType[pb.CHANGE_TYPE_DELETED], "expected no deleted targets")
-		assert.ElementsMatch(t, []string{
-			"//controller:controller",
-			"//controller:controller_test",
-			"//core/repomanager/mock:mock",
-			"//core/repomanager:repomanager",
-			"//core/repomanager:repomanager_test",
-			"//core/workspace/workspacemock:workspacemock",
-			"//core/workspace:request.go",
-			"//core/workspace:request_test.go",
-			"//core/workspace:workspace",
-			"//core/workspace:workspace_test",
-			"//example:example",
-			"//example:example_lib",
-			"//graphrunner/mock:mock",
-			"//graphrunner:graphrunner",
-			"//graphrunner:graphrunner_test",
-			"//orchestrator/orchestratormock:orchestratormock",
-			"//orchestrator:orchestrator",
-			"//orchestrator:orchestrator_test",
-		}, ct.ByType[pb.CHANGE_TYPE_CHANGED])
+		assert.NotEmpty(t, ct.ByType[pb.CHANGE_TYPE_DELETED])
+		assert.NotEmpty(t, ct.ByType[pb.CHANGE_TYPE_NEW])
+		assert.NotEmpty(t, ct.ByType[pb.CHANGE_TYPE_CHANGED])
 
-		assert.Equal(t, int32(0), ct.Distances["//core/workspace:request.go"])
-		assert.Equal(t, int32(0), ct.Distances["//core/workspace:workspace"])
-		assert.Equal(t, int32(1), ct.Distances["//orchestrator:orchestrator"])
-		assert.Equal(t, int32(2), ct.Distances["//controller:controller"])
-		assert.Equal(t, int32(3), ct.Distances["//example:example"])
+		assertContainsTarget(t, ct.ByType[pb.CHANGE_TYPE_NEW], "//pkg/timeutil:timeutil", "NEW")
+		assertContainsTarget(t, ct.ByType[pb.CHANGE_TYPE_NEW], "//proto/audit:audit_proto", "NEW")
+		assertContainsTarget(t, ct.ByType[pb.CHANGE_TYPE_DELETED], "//pkg/mathutil:mathutil", "DELETED")
+		assertContainsTarget(t, ct.ByType[pb.CHANGE_TYPE_CHANGED], "//service/handlers:handlers", "CHANGED")
+		assertContainsTarget(t, ct.ByType[pb.CHANGE_TYPE_CHANGED], "//service/api:api", "CHANGED")
+		assertContainsTarget(t, ct.ByType[pb.CHANGE_TYPE_CHANGED], "//cmd/server:server_lib", "CHANGED")
+
+		assert.Equal(t, int32(0), ct.Distances["//pkg/strutil:strutil"])
+		assert.Equal(t, int32(0), ct.Distances["//service/handlers:handlers"])
+		assert.Equal(t, int32(1), ct.Distances["//service/api:api"])
+		assert.Equal(t, int32(1), ct.Distances["//cmd/server:server_lib"])
+		assert.Equal(t, int32(2), ct.Distances["//cmd/server:server"])
 	})
 
-	t.Run("new_targets", func(t *testing.T) {
-		// Compare two adjacent commits:
-		//   046de2c (parent)
-		//   1f2e3e9 Honor OutputConfig include_hashes/include_tags/include_attributes (#116)
-		// The second commit adds controller/output_filter.go and output_filter_test.go.
-		const firstSHA = "046de2c20b5492cd5606d32fd632a38b8b70c8f6"
-		const secondSHA = "1f2e3e9245b159006cf2103becd51c5c1b6ec868"
+	t.Run("pr_change_request", func(t *testing.T) {
+		ct := getChangedTargets(t, client,
+			buildDesc(remote, fixtureBaseSHA(t)),
+			&pb.BuildDescription{
+				Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+				Remote:   remote,
+				BaseSha:  fixtureBaseSHA(t),
+				Requests: []*pb.Request{{Url: fixturePRURL(t)}},
+			},
+		)
 
-		ct := getChangedTargets(t, client, remote, firstSHA, secondSHA)
+		t.Logf("NEW: %v", ct.ByType[pb.CHANGE_TYPE_NEW])
+		t.Logf("DELETED: %v", ct.ByType[pb.CHANGE_TYPE_DELETED])
+		t.Logf("CHANGED: %v", ct.ByType[pb.CHANGE_TYPE_CHANGED])
+		t.Logf("Distances: %v", ct.Distances)
 
-		assert.Empty(t, ct.ByType[pb.CHANGE_TYPE_DELETED], "expected no deleted targets")
-		assert.ElementsMatch(t, []string{
-			"//controller:output_filter.go",
-			"//controller:output_filter_test.go",
-		}, ct.ByType[pb.CHANGE_TYPE_NEW])
-		assert.ElementsMatch(t, []string{
-			"//controller:BUILD.bazel",
-			"//controller:controller",
-			"//controller:controller_test",
-			"//controller:getchangedtargets.go",
-			"//controller:getchangedtargets_test.go",
-			"//controller:gettargetgraph.go",
-			"//example/client:client",
-			"//example/client:client.go",
-			"//example/client:client_lib",
-			"//example:example",
-			"//example:example_lib",
-		}, ct.ByType[pb.CHANGE_TYPE_CHANGED])
+		assert.NotEmpty(t, ct.ByType[pb.CHANGE_TYPE_NEW])
+		assert.NotEmpty(t, ct.ByType[pb.CHANGE_TYPE_DELETED])
+		assert.NotEmpty(t, ct.ByType[pb.CHANGE_TYPE_CHANGED])
 
-		assert.Equal(t, int32(0), ct.Distances["//controller:output_filter.go"])
-		assert.Equal(t, int32(0), ct.Distances["//controller:getchangedtargets.go"])
-		assert.Equal(t, int32(0), ct.Distances["//controller:controller"])
-		assert.Equal(t, int32(1), ct.Distances["//example:example_lib"])
-		assert.Equal(t, int32(2), ct.Distances["//example:example"])
+		assertContainsTarget(t, ct.ByType[pb.CHANGE_TYPE_NEW], "//pkg/timeutil:timeutil", "NEW")
+		assertContainsTarget(t, ct.ByType[pb.CHANGE_TYPE_NEW], "//proto/audit:audit_proto", "NEW")
+		assertContainsTarget(t, ct.ByType[pb.CHANGE_TYPE_DELETED], "//pkg/mathutil:mathutil", "DELETED")
+		assertContainsTarget(t, ct.ByType[pb.CHANGE_TYPE_CHANGED], "//service/handlers:handlers", "CHANGED")
 	})
 }

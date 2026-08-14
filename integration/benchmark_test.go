@@ -23,7 +23,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// coldCommitPairs are distinct consecutive commit pairs from repo history.
+// coldCommitPairs are distinct consecutive commit pairs from tango repo history.
 // Each pair produces a unique treehash, guaranteeing a cache miss per call.
 var coldCommitPairs = []struct{ first, second string }{
 	{"57162624a45965a7e783072c56561f91c5d4084d", "74d1cd55155e5f4f43aa92b4e0146a0c528a0d96"},
@@ -54,7 +54,7 @@ func BenchmarkGetChangedTargets_Cold(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		pair := coldCommitPairs[i]
-		getChangedTargets(b, client, remote, pair.first, pair.second)
+		getChangedTargets(b, client, buildDesc(remote, pair.first), buildDesc(remote, pair.second))
 	}
 }
 
@@ -67,13 +67,13 @@ func BenchmarkGetChangedTargets_Cached(b *testing.B) {
 	addr := startServerWithLogger(b, remote, logger)
 	client := newClient(b, addr)
 
-	firstSHA := "57162624a45965a7e783072c56561f91c5d4084d"
-	secondSHA := "74d1cd55155e5f4f43aa92b4e0146a0c528a0d96"
+	first := buildDesc(remote, "57162624a45965a7e783072c56561f91c5d4084d")
+	second := buildDesc(remote, "74d1cd55155e5f4f43aa92b4e0146a0c528a0d96")
 
-	getChangedTargets(b, client, remote, firstSHA, secondSHA)
+	getChangedTargets(b, client, first, second)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		getChangedTargets(b, client, remote, firstSHA, secondSHA)
+		getChangedTargets(b, client, first, second)
 	}
 }
