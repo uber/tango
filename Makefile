@@ -15,10 +15,11 @@ test:
 	@$(BAZEL) test //...
 	@echo "All tests passed!"
 
-# Run integration tests (requires bazel; may take several minutes)
+# Run integration tests against the xytan0056/bazel-fixture GitHub repo.
+# Override the fixture remote with TANGO_FIXTURE_REMOTE for local testing.
 test-integration:
 	@echo "Running integration tests..."
-	@$(BAZEL) test //integration:integration_test --test_output=errors --test_env=TANGO_REPO_REMOTE=$$(git rev-parse --show-toplevel) --test_env=HOME=$$HOME
+	@$(BAZEL) test //integration:integration_test --test_output=errors --test_env=HOME=$$HOME
 	@echo "Integration tests passed!"
 
 # Run GetChangedTargets benchmarks against fixed, checked-in commit pairs.
@@ -116,7 +117,7 @@ help:
 	@echo "Build & Test:"
 	@echo "  make build            - Build all targets"
 	@echo "  make test             - Run all tests"
-	@echo "  make test-integration - Run integration tests (slow)"
+	@echo "  make test-integration - Run integration tests (needs network, slow)"
 	@echo "  make bench            - Run GetChangedTargets benchs (measurement only, not in CI)"
 	@echo "  make lint             - Run golangci-lint"
 	@echo "  make gazelle          - Update BUILD.bazel files"

@@ -19,11 +19,12 @@ package integration_test
 import (
 	"testing"
 
+	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-// coldCommitPairs are distinct consecutive commit pairs from repo history.
+// coldCommitPairs are distinct consecutive commit pairs from tango repo history.
 // Each pair produces a unique treehash, guaranteeing a cache miss per call.
 var coldCommitPairs = []struct{ first, second string }{
 	{"57162624a45965a7e783072c56561f91c5d4084d", "74d1cd55155e5f4f43aa92b4e0146a0c528a0d96"},
@@ -43,6 +44,14 @@ var coldCommitPairs = []struct{ first, second string }{
 	{"7876d3870dd0da4ec94cb49362bb85247b373358", "9cc890fb7a91de8b129a3cc86f362b393655de5b"},
 }
 
+func buildDesc(remote, sha string) *pb.BuildDescription {
+	return &pb.BuildDescription{
+		Strategy: pb.COMPUTATION_STRATEGY_UNSET,
+		Remote:   remote,
+		BaseSha:  sha,
+	}
+}
+
 // BenchmarkGetChangedTargets_Cold measures uncached GetChangedTargets calls.
 // Each iteration uses a different commit pair so every call is a cache miss,
 // exercising the full pipeline: git checkout, bazel query, compare, stream.
@@ -54,7 +63,7 @@ func BenchmarkGetChangedTargets_Cold(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		pair := coldCommitPairs[i]
-		getChangedTargets(b, client, remote, pair.first, pair.second)
+		getChangedTargets(b, client, buildDesc(remote, pair.first), buildDesc(remote, pair.second))
 	}
 }
 
@@ -67,13 +76,13 @@ func BenchmarkGetChangedTargets_Cached(b *testing.B) {
 	addr := startServerWithLogger(b, remote, logger)
 	client := newClient(b, addr)
 
-	firstSHA := "57162624a45965a7e783072c56561f91c5d4084d"
-	secondSHA := "74d1cd55155e5f4f43aa92b4e0146a0c528a0d96"
+	first := buildDesc(remote, "57162624a45965a7e783072c56561f91c5d4084d")
+	second := buildDesc(remote, "74d1cd55155e5f4f43aa92b4e0146a0c528a0d96")
 
-	getChangedTargets(b, client, remote, firstSHA, secondSHA)
+	getChangedTargets(b, client, first, second)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		getChangedTargets(b, client, remote, firstSHA, secondSHA)
+		getChangedTargets(b, client, first, second)
 	}
 }
