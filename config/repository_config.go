@@ -73,6 +73,13 @@ type RepositoryConfig struct {
 	// (the default), every attribute is compared and can trigger a direct-change
 	// classification.
 	SeedAttributes []string `yaml:"seed_attributes"`
+	// AllTargetsFiles lists repo-relative paths that, when their content
+	// differs between the two revisions compared by GetChangedTargets,
+	// cause every target in the second revision's graph to be reported as
+	// changed. Intended for files that affect the build globally but are
+	// invisible to the target graph (toolchain definitions, CI config,
+	// Bazel wrapper scripts). Matching is by exact path. Empty disables.
+	AllTargetsFiles []string `yaml:"all_targets_files"`
 }
 
 // RepositoryConfigProvider looks up per-repository configuration by remote.

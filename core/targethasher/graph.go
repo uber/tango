@@ -113,6 +113,13 @@ type Result struct {
 	//
 	//		For more info see https://docs.bazel.build/versions/master/build-ref.html#label_directory.
 	Warnings map[string]error
+
+	// AllTargetsFileHashes maps repo-relative file paths to their
+	// hex-encoded content hashes for files listed in
+	// RepositoryConfig.AllTargetsFiles. Populated from git ls-tree during
+	// graph computation; nil when the repository has no AllTargetsFiles
+	// configured.
+	AllTargetsFileHashes map[string]string
 }
 
 // EmptyResult returns a result for no targets.

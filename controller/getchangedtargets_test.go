@@ -145,6 +145,141 @@ func TestCompareTargetGraphs(t *testing.T) {
 	require.NotNil(t, response)
 }
 
+func TestAllTargetsFileChanged(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		first  map[string]string
+		second map[string]string
+		want   bool
+	}{
+		{
+			name: "both nil",
+			want: false,
+		},
+		{
+			name:   "first nil",
+			second: map[string]string{".bazelrc": "abc"},
+			want:   false,
+		},
+		{
+			name:  "second nil",
+			first: map[string]string{".bazelrc": "abc"},
+			want:  false,
+		},
+		{
+			name:   "same hashes",
+			first:  map[string]string{".bazelrc": "abc", "tools/bazel": "def"},
+			second: map[string]string{".bazelrc": "abc", "tools/bazel": "def"},
+			want:   false,
+		},
+		{
+			name:   "different hash",
+			first:  map[string]string{".bazelrc": "abc"},
+			second: map[string]string{".bazelrc": "changed"},
+			want:   true,
+		},
+		{
+			name:   "new file in second not in first",
+			first:  map[string]string{".bazelrc": "abc"},
+			second: map[string]string{".bazelrc": "abc", "tools/bazel": "def"},
+			want:   true,
+		},
+		{
+			name:   "file missing from first",
+			first:  map[string]string{"tools/bazel": "def"},
+			second: map[string]string{".bazelrc": "abc", "tools/bazel": "def"},
+			want:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			first := &entity.Metadata{AllTargetsFileHashes: tt.first}
+			second := &entity.Metadata{AllTargetsFileHashes: tt.second}
+			assert.Equal(t, tt.want, allTargetsFileChanged(first, second))
+		})
+	}
+}
+
+func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
+	c := newTestController(zap.NewNop())
+
+	firstGraph := []entity.GetTargetGraphResponse{
+		{Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: "h1", RuleType: 100},
+			{ID: 2, Hash: "h2", RuleType: 100},
+		}},
+		{Metadata: &entity.Metadata{
+			TargetIDMapping:      map[int32]string{1: "//app:a", 2: "//app:b"},
+			RuleTypeMapping:      map[int32]string{100: "go_library"},
+			AllTargetsFileHashes: map[string]string{".bazelrc": "old-hash"},
+		}},
+	}
+	secondGraph := []entity.GetTargetGraphResponse{
+		{Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: "h1", RuleType: 100},
+			{ID: 2, Hash: "h2", RuleType: 100},
+			{ID: 3, Hash: "h3", RuleType: 100},
+		}},
+		{Metadata: &entity.Metadata{
+			TargetIDMapping:      map[int32]string{1: "//app:a", 2: "//app:b", 3: "//app:c"},
+			RuleTypeMapping:      map[int32]string{100: "go_library"},
+			AllTargetsFileHashes: map[string]string{".bazelrc": "new-hash"},
+		}},
+	}
+
+	responses, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), firstGraph, secondGraph, nil)
+	require.NoError(t, err)
+
+	var totalChanged int
+	for _, resp := range responses {
+		totalChanged += len(resp.ChangedTargets)
+	}
+	assert.Equal(t, 3, totalChanged, "all targets from second graph should be reported as changed")
+	for _, resp := range responses {
+		for _, ct := range resp.ChangedTargets {
+			assert.Equal(t, entity.ChangeTypeChanged, ct.ChangeType)
+			assert.Equal(t, int32(0), ct.Distance)
+			assert.NotNil(t, ct.NewTarget)
+		}
+	}
+}
+
+func TestCompareTargetGraphs_AllTargetsFileNoTrigger(t *testing.T) {
+	c := newTestController(zap.NewNop())
+
+	firstGraph := []entity.GetTargetGraphResponse{
+		{Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: "h1", RuleType: 100},
+		}},
+		{Metadata: &entity.Metadata{
+			TargetIDMapping:      map[int32]string{1: "//app:a"},
+			RuleTypeMapping:      map[int32]string{100: "go_library"},
+			AllTargetsFileHashes: map[string]string{".bazelrc": "same-hash"},
+		}},
+	}
+	secondGraph := []entity.GetTargetGraphResponse{
+		{Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: "h1", RuleType: 100},
+		}},
+		{Metadata: &entity.Metadata{
+			TargetIDMapping:      map[int32]string{1: "//app:a"},
+			RuleTypeMapping:      map[int32]string{100: "go_library"},
+			AllTargetsFileHashes: map[string]string{".bazelrc": "same-hash"},
+		}},
+	}
+
+	responses, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), firstGraph, secondGraph, nil)
+	require.NoError(t, err)
+
+	var totalChanged int
+	for _, resp := range responses {
+		totalChanged += len(resp.ChangedTargets)
+	}
+	assert.Equal(t, 0, totalChanged, "no targets should be changed when AllTargetsFiles hashes match")
+}
+
 func TestGetChangedTargets_ValidationError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)

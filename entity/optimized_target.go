@@ -65,6 +65,12 @@ type Metadata struct {
 	TagMapping                  map[int32]string `json:"tag_mapping"`
 	AttributeNameMapping        map[int32]string `json:"attribute_name_mapping"`
 	AttributeStringValueMapping map[int32]string `json:"attribute_string_value_mapping"`
+	// AllTargetsFileHashes maps repo-relative file paths to their
+	// hex-encoded content hashes for files listed in
+	// RepositoryConfig.AllTargetsFiles. Nil when the repository has no
+	// AllTargetsFiles configured, or when the graph was stored in a format
+	// that predates this field (e.g. TGB).
+	AllTargetsFileHashes map[string]string `json:"all_targets_file_hashes,omitempty"`
 }
 
 // GetTargetGraphResponse is one piece of a streamed target graph — either a

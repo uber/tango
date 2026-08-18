@@ -92,6 +92,7 @@ func ResultToTargetGraph(ctx context.Context, result targethasher.Result) ([]ent
 		TagMapping:                  tagMapper.Invert(),
 		AttributeNameMapping:        attrNameMapper.Invert(),
 		AttributeStringValueMapping: attrStrValMapper.Invert(),
+		AllTargetsFileHashes:        result.AllTargetsFileHashes,
 	}
 
 	return targets, meta, nil

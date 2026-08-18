@@ -543,6 +543,13 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	// Release raw chunk slices — individual target protos are now held by the ID maps.
 	firstGraph = nil
 	secondGraph = nil
+
+	if allTargetsFileChanged(firstMetadata, secondMetadata) {
+		logger.Info("compareTargetGraphs: AllTargetsFiles trigger matched, reporting all targets as changed")
+		e.Counter(opGetChangedTargets, "all_targets_triggered").Inc(1)
+		return c.allTargetsChangedFromGraph(ctx, secondTargetsByID, secondMetadata)
+	}
+
 	before, err := toDiffGraph(ctx, firstTargetsByID, firstMetadata, seedAttrs)
 	if err != nil {
 		return nil, err
@@ -667,9 +674,50 @@ func getTargetsAndMetadata(ctx context.Context, graph []entity.GetTargetGraphRes
 			for k, v := range m.AttributeStringValueMapping {
 				merged.AttributeStringValueMapping[k] = v
 			}
+			for k, v := range m.AllTargetsFileHashes {
+				if merged.AllTargetsFileHashes == nil {
+					merged.AllTargetsFileHashes = make(map[string]string, len(m.AllTargetsFileHashes))
+				}
+				merged.AllTargetsFileHashes[k] = v
+			}
 		}
 	}
 	return targets, merged, nil
+}
+
+// allTargetsFileChanged reports whether any file in the AllTargetsFileHashes
+// sidecar differs between the two metadata sets. Returns false when either
+// metadata has no AllTargetsFileHashes (e.g. TGB-stored graphs or repos
+// without AllTargetsFiles configured).
+func allTargetsFileChanged(first, second *entity.Metadata) bool {
+	if len(first.AllTargetsFileHashes) == 0 || len(second.AllTargetsFileHashes) == 0 {
+		return false
+	}
+	for file, newHash := range second.AllTargetsFileHashes {
+		oldHash, ok := first.AllTargetsFileHashes[file]
+		if !ok || oldHash != newHash {
+			return true
+		}
+	}
+	return false
+}
+
+// allTargetsChangedFromGraph builds a GetChangedTargetsResponse stream that
+// marks every target in the second graph as ChangeTypeChanged with distance 0.
+// Used when an AllTargetsFiles trigger fires.
+func (c *controller) allTargetsChangedFromGraph(ctx context.Context, targetsByID map[int32]*entity.OptimizedTarget, meta *entity.Metadata) ([]entity.GetChangedTargetsResponse, error) {
+	graph, err := toDiffGraph(ctx, targetsByID, meta, nil)
+	if err != nil {
+		return nil, err
+	}
+	changed := make([]*targetdiff.ChangedTarget, 0, len(graph))
+	for _, target := range graph {
+		changed = append(changed, &targetdiff.ChangedTarget{
+			ChangeType: targetdiff.ChangeTypeChanged,
+			After:      target,
+		})
+	}
+	return c.resultToResponses(targetdiff.Result{ChangedTargets: changed})
 }
 
 // seedAttributesFor returns the RepositoryConfig.SeedAttributes
