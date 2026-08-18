@@ -35,7 +35,7 @@ import (
 // computation). Empty ⇒ legacy path unchanged.
 func GetGraphByTreeHash(remote, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) string {
 	path := filepath.Join(url.ToShortRemote(remote), "graphs", treehash, strategy.String())
-	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
+	if hash := hashSortedStrings(excludeFilesRegex); hash != "" {
 		path += "_requests-options-" + hash
 	}
 	return path
@@ -51,7 +51,7 @@ func GetGraphByTreeHash(remote, treehash string, strategy entity.ComputationStra
 // child key would need the gob file to be a directory.
 func GetTGBGraphByTreeHash(remote, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) string {
 	path := filepath.Join(url.ToShortRemote(remote), "graphs", treehash, strategy.String()+"-tgb")
-	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
+	if hash := hashSortedStrings(excludeFilesRegex); hash != "" {
 		path += "_requests-options-" + hash
 	}
 	return path
@@ -76,21 +76,34 @@ func GetTreehashCachePath(buildDescription entity.BuildDescription) string {
 // Empty ⇒ legacy path unchanged.
 func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, excludeFilesRegex []string) string {
 	path := filepath.Join(url.ToShortRemote(remote), "compared-targets", treehash1+"_"+treehash2)
-	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
+	if hash := hashSortedStrings(excludeFilesRegex); hash != "" {
 		path += "_requests-options-" + hash
 	}
 	return path
 }
 
-// hashExcludeFilesRegex returns "" when excludeFilesRegex is empty (preserves
-// legacy paths), otherwise the md5 hex digest of the sorted list. As new
-// fields affecting computation are added, fold them into the digest here.
-func hashExcludeFilesRegex(excludeFilesRegex []string) string {
-	if len(excludeFilesRegex) == 0 {
+// GetAllTargetsChangedCachePath returns the cache path for a cached
+// AllTargetsFiles-trigger check result between two revisions' treehashes.
+// allTargetsFiles is folded into the key because it's the repository config
+// input that determines the result; a config change must not read a stale
+// answer computed under a different file list.
+func GetAllTargetsChangedCachePath(remote, treehash1, treehash2 string, allTargetsFiles []string) string {
+	path := filepath.Join(url.ToShortRemote(remote), "all-targets-changed", treehash1+"_"+treehash2)
+	if hash := hashSortedStrings(allTargetsFiles); hash != "" {
+		path += "_files-" + hash
+	}
+	return path
+}
+
+// hashSortedStrings returns "" when values is empty (preserves legacy
+// paths), otherwise the md5 hex digest of the sorted list. As new fields
+// affecting computation are added, fold them into the digest here.
+func hashSortedStrings(values []string) string {
+	if len(values) == 0 {
 		return ""
 	}
-	sorted := make([]string, len(excludeFilesRegex))
-	copy(sorted, excludeFilesRegex)
+	sorted := make([]string, len(values))
+	copy(sorted, values)
 	sort.Strings(sorted)
 	h := md5.New()
 	for _, r := range sorted {

@@ -28,7 +28,6 @@ import (
 	"github.com/uber/tango/core/cachekey"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
-	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
 	"go.uber.org/mock/gomock"
@@ -124,7 +123,7 @@ func TestGetChangedTargets_TGBNativePath(t *testing.T) {
 	c := NewController(context.Background(), Params{
 		Logger:        zaptest.NewLogger(t),
 		Storage:       st,
-		Orchestrator:  orchestratormock.NewMockOrchestrator(ctrl), // no calls expected: both graphs are cached
+		Orchestrator:  newMockOrchestratorNoTrigger(ctrl),
 		Scope:         scope,
 		GraphFormat:   config.GraphFormatTGB,
 		ShadowCompare: true,
@@ -181,7 +180,7 @@ func TestGetChangedTargets_TGBMixedFormatFallsBack(t *testing.T) {
 	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		Orchestrator: newMockOrchestratorNoTrigger(ctrl),
 		Scope:        scope,
 		GraphFormat:  config.GraphFormatTGB,
 	})

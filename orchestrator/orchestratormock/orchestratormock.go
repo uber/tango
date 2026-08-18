@@ -56,3 +56,18 @@ func (mr *MockOrchestratorMockRecorder) GetTargetGraph(ctx, req any) *gomock.Cal
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTargetGraph", reflect.TypeOf((*MockOrchestrator)(nil).GetTargetGraph), ctx, req)
 }
+
+// HasAllTargetsFileChange mocks base method.
+func (m *MockOrchestrator) HasAllTargetsFileChange(ctx context.Context, first, second entity.BuildDescription) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasAllTargetsFileChange", ctx, first, second)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HasAllTargetsFileChange indicates an expected call of HasAllTargetsFileChange.
+func (mr *MockOrchestratorMockRecorder) HasAllTargetsFileChange(ctx, first, second any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasAllTargetsFileChange", reflect.TypeOf((*MockOrchestrator)(nil).HasAllTargetsFileChange), ctx, first, second)
+}

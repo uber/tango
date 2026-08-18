@@ -24,4 +24,9 @@ import (
 // Orchestrator defines high-level execution interface that "does everything"
 type Orchestrator interface {
 	GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (storage.GraphReader, error)
+	// HasAllTargetsFileChange reports whether a file configured in the
+	// repository's RepositoryConfig.AllTargetsFiles list differs between the
+	// two revisions. Returns (false, nil) with no work done when the
+	// repository has no AllTargetsFiles configured.
+	HasAllTargetsFileChange(ctx context.Context, first, second entity.BuildDescription) (bool, error)
 }

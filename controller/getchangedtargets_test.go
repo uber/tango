@@ -40,6 +40,16 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
+// newMockOrchestratorNoTrigger returns a MockOrchestrator whose
+// HasAllTargetsFileChange always reports no trigger match, for tests that
+// exercise the rest of GetChangedTargets and don't care about the
+// AllTargetsFiles check.
+func newMockOrchestratorNoTrigger(ctrl *gomock.Controller) *orchestratormock.MockOrchestrator {
+	orch := orchestratormock.NewMockOrchestrator(ctrl)
+	orch.EXPECT().HasAllTargetsFileChange(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	return orch
+}
+
 func TestValidateGetChangedTargetsRequest(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -184,7 +194,7 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		Orchestrator: newMockOrchestratorNoTrigger(ctrl),
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -215,7 +225,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 	c := NewController(context.Background(), Params{
 		Logger:       zap.NewNop(),
 		Storage:      storagemock,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		Orchestrator: newMockOrchestratorNoTrigger(ctrl),
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -301,7 +311,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		Orchestrator: newMockOrchestratorNoTrigger(ctrl),
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -317,6 +327,94 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	case <-putDone:
 	case <-time.After(time.Second):
 		assert.Fail(t, "cache write goroutine did not complete in time")
+	}
+}
+
+func TestGetChangedTargets_AllTargetsTrigger(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(t.Context())
+
+	var sentResponses []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, opts ...interface{}) error {
+		sentResponses = append(sentResponses, resp)
+		return nil
+	}).Times(2)
+
+	// Only the second revision's graph (2 targets).
+	var buf2 bytes.Buffer
+	enc2 := gob.NewEncoder(&buf2)
+	enc2.Encode(entity.GetTargetGraphResponse{
+		Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: "h1", RuleType: 100},
+			{ID: 2, Hash: "h2", RuleType: 100},
+		},
+	})
+	enc2.Encode(entity.GetTargetGraphResponse{
+		Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
+			RuleTypeMapping: map[int32]string{100: "go_library"},
+		},
+	})
+	graph2Bytes := buf2.Bytes()
+
+	storagemock := storagemock.NewMockStorage(ctrl)
+	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
+			switch {
+			case strings.Contains(req.Key, "compared-targets"):
+				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
+			case strings.Contains(req.Key, "sha1"):
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
+			case strings.Contains(req.Key, "sha2"):
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
+			case strings.Contains(req.Key, "treehash2"):
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph2Bytes))}, nil
+			default:
+				return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
+			}
+		}).AnyTimes()
+	putDone := make(chan struct{}, 1)
+	storagemock.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
+		putDone <- struct{}{}
+		return nil
+	})
+
+	orch := orchestratormock.NewMockOrchestrator(ctrl)
+	orch.EXPECT().HasAllTargetsFileChange(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
+	// GetTargetGraph must never be called: the second revision's graph is
+	// served straight from the treehash/graph cache above.
+	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Times(0)
+
+	c := NewController(context.Background(), Params{
+		Logger:       zaptest.NewLogger(t),
+		Storage:      storagemock,
+		Orchestrator: orch,
+	})
+
+	request := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
+		OutputConfig:   &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true},
+	}
+
+	err := c.GetChangedTargets(request, stream)
+	require.NoError(t, err)
+
+	select {
+	case <-putDone:
+	case <-time.After(time.Second):
+		assert.Fail(t, "cache write goroutine did not complete in time")
+	}
+
+	require.Len(t, sentResponses, 2)
+	changedTargets := sentResponses[0].GetChangedTargets().GetChangedTargets()
+	require.Len(t, changedTargets, 2, "every target in the second revision's graph should be reported as changed")
+	for _, ct := range changedTargets {
+		assert.Equal(t, pb.CHANGE_TYPE_CHANGED, ct.GetChangeType())
+		assert.Equal(t, int32(0), ct.GetDistance())
+		assert.Nil(t, ct.GetOldTarget())
+		assert.NotNil(t, ct.GetNewTarget())
 	}
 }
 
@@ -396,7 +494,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		Orchestrator: newMockOrchestratorNoTrigger(ctrl),
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -490,7 +588,7 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	c := NewController(appCtx, Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		Orchestrator: newMockOrchestratorNoTrigger(ctrl),
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -983,7 +1081,7 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		Orchestrator: newMockOrchestratorNoTrigger(ctrl),
 	})
 
 	request := &pb.GetChangedTargetsRequest{

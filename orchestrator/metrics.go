@@ -19,3 +19,6 @@ const _opGetTargetGraph = "get_target_graph"
 
 // _opTreehashCacheWrite tracks treehash mapping upload that runs before graph computation.
 const _opTreehashCacheWrite = "treehash_cache_write"
+
+// _opHasAllTargetsFileChange is snake_cased after Orchestrator.HasAllTargetsFileChange.
+const _opHasAllTargetsFileChange = "has_all_targets_file_change"

@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"time"
@@ -121,7 +122,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	leaseStart := time.Now()
 	ws, err := b.repoManager.Lease(ctx, build)
-	recordStep(e, "lease_duration", leaseStart, metrics.FastDurationBuckets)
+	recordStep(e, _opGetTargetGraph, "lease_duration", leaseStart, metrics.FastDurationBuckets)
 	if err != nil {
 		return nil, classifyLeaseError(err)
 	}
@@ -134,48 +135,25 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 			}
 		}
 	}()
-	checkoutStart := time.Now()
-	err = ws.Checkout(ctx, build.Remote, build.BaseSha)
-	recordStep(e, "checkout_duration", checkoutStart, metrics.FastDurationBuckets)
-	if err != nil {
-		return nil, classifyGitError(fmt.Errorf("checkout %s@%s: %w", build.Remote, build.BaseSha, err))
-	}
-	logger.Info("GetTargetGraph: Checked out base revision")
-
-	requests := make([]workspace.Request, 0, len(build.ChangeRequests))
 	gitFactory := b.gitFactory
 	if gitFactory == nil {
 		gitFactory = func(dir string) git.Interface { return git.New(dir, b.logger) }
 	}
-
 	gitModule := gitFactory(ws.Path())
-	for _, req := range build.ChangeRequests {
-		request, err := workspace.NewRequest(req.URL, gitModule, build.Remote, build.BaseSha, logger)
-		if err != nil {
-			return nil, tangoerrors.NewUser(fmt.Errorf("create request for %q: %w", req.URL, err))
-		}
-		requests = append(requests, request)
-	}
-	applyStart := time.Now()
-	err = ws.ApplyRequests(ctx, requests)
-	recordStep(e, "apply_requests_duration", applyStart, metrics.FastDurationBuckets)
+
+	treehash, err := b.materializeTreehash(ctx, e, ws, gitModule, build, logger)
 	if err != nil {
-		return nil, classifyGitError(fmt.Errorf("apply requests for %s@%s: %w", build.Remote, build.BaseSha, err))
+		return nil, err
 	}
-	logger.Info("GetTargetGraph: Applied requests", zap.Int("request_count", len(requests)))
 
 	// Compute the treehash and download the target graph from storage if exists.
-	treehash, err := gitModule.RevParse(ctx, "HEAD^{tree}")
-	if err != nil {
-		return nil, classifyGitError(fmt.Errorf("compute treehash for %s@%s: %w", build.Remote, build.BaseSha, err))
-	}
 	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
 	useTGB := b.config.Service.GraphFormat == config.GraphFormatTGB
 	tgbPath := cachekey.GetTGBGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
 	if !req.BypassCache {
 		cacheReadStart := time.Now()
 		graphReader, err := b.readCachedGraph(ctx, logger, useTGB, tgbPath, treehashPath)
-		recordStep(e, "cache_read_duration", cacheReadStart, metrics.FastDurationBuckets)
+		recordStep(e, _opGetTargetGraph, "cache_read_duration", cacheReadStart, metrics.FastDurationBuckets)
 		metrics.RecordCacheLookup(e, _opGetTargetGraph, metrics.GraphCacheLookup, err)
 		if err == nil {
 			logger.Info("GetTargetGraph: Cache hit on treehash", zap.String("treehash", treehash))
@@ -238,7 +216,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}
 	computeStart := time.Now()
 	result, err := runner.Compute(ctx, ws)
-	recordStep(e, "compute_duration", computeStart, metrics.SlowDurationBuckets)
+	recordStep(e, _opGetTargetGraph, "compute_duration", computeStart, metrics.SlowDurationBuckets)
 	if err != nil {
 		return nil, fmt.Errorf("compute target graph: %w", err)
 	}
@@ -251,7 +229,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		if err := storage.WriteTGBGraph(ctx, b.storage, tgbPath, chunks); err != nil {
 			return nil, fmt.Errorf("write TGB graph to storage at %s: %w", tgbPath, err)
 		}
-		recordStep(e, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
+		recordStep(e, _opGetTargetGraph, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
 		graphReader, err := storage.NewTGBGraphReader(ctx, b.storage, tgbPath, b.config.Service.MaxMessageBytes)
 		if err != nil {
 			return nil, fmt.Errorf("create TGB graph reader at %s: %w", tgbPath, err)
@@ -263,13 +241,192 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
 	}
-	recordStep(e, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
+	recordStep(e, _opGetTargetGraph, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
 	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
 	if err != nil {
 		return nil, fmt.Errorf("create graph reader at %s: %w", treehashPath, err)
 	}
 	logger.Info("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
 	return graphReader, nil
+}
+
+// materializeTreehash checks out build.BaseSha in ws, applies build.ChangeRequests
+// on top, and returns the resulting git tree hash. gitModule must be rooted at
+// ws.Path(). Shared by GetTargetGraph and HasAllTargetsFileChange so both
+// compute a revision's materialized tree identically.
+func (b *nativeOrchestrator) materializeTreehash(ctx context.Context, e *metrics.Emitter, ws workspace.Workspace, gitModule git.Interface, build entity.BuildDescription, logger *zap.Logger) (string, error) {
+	checkoutStart := time.Now()
+	err := ws.Checkout(ctx, build.Remote, build.BaseSha)
+	recordStep(e, _opGetTargetGraph, "checkout_duration", checkoutStart, metrics.FastDurationBuckets)
+	if err != nil {
+		return "", classifyGitError(fmt.Errorf("checkout %s@%s: %w", build.Remote, build.BaseSha, err))
+	}
+	logger.Info("materializeTreehash: Checked out base revision")
+
+	requests := make([]workspace.Request, 0, len(build.ChangeRequests))
+	for _, req := range build.ChangeRequests {
+		request, err := workspace.NewRequest(req.URL, gitModule, build.Remote, build.BaseSha, logger)
+		if err != nil {
+			return "", tangoerrors.NewUser(fmt.Errorf("create request for %q: %w", req.URL, err))
+		}
+		requests = append(requests, request)
+	}
+	applyStart := time.Now()
+	err = ws.ApplyRequests(ctx, requests)
+	recordStep(e, _opGetTargetGraph, "apply_requests_duration", applyStart, metrics.FastDurationBuckets)
+	if err != nil {
+		return "", classifyGitError(fmt.Errorf("apply requests for %s@%s: %w", build.Remote, build.BaseSha, err))
+	}
+	logger.Info("materializeTreehash: Applied requests", zap.Int("request_count", len(requests)))
+
+	treehash, err := gitModule.RevParse(ctx, "HEAD^{tree}")
+	if err != nil {
+		return "", classifyGitError(fmt.Errorf("compute treehash for %s@%s: %w", build.Remote, build.BaseSha, err))
+	}
+	return treehash, nil
+}
+
+// HasAllTargetsFileChange reports whether a file configured in the
+// repository's RepositoryConfig.AllTargetsFiles list differs between first
+// and second. It looks up the repository config by first.Remote; when the
+// repository has no AllTargetsFiles configured, it returns (false, nil)
+// without leasing a workspace or touching storage.
+//
+// When both revisions' treehashes and a prior result for that pair are
+// already cached, the answer is served from cache. Otherwise a workspace is
+// leased once and both revisions are materialized into it in turn (see
+// materializeTreehash), so their tree objects are guaranteed to coexist in
+// the same git object database — required to diff them directly with
+// `git diff <tree1> <tree2>`, no checkout of either needed for the diff
+// itself. Both treehashes and the result are then cached best-effort.
+func (b *nativeOrchestrator) HasAllTargetsFileChange(ctx context.Context, first, second entity.BuildDescription) (retChanged bool, retErr error) {
+	e := b.emitter.Tagged(map[string]string{metrics.TagRepo: url.ToShortRemote(first.Remote)})
+	op := metrics.Begin(e, _opHasAllTargetsFileChange, metrics.SlowDurationBuckets)
+	defer func() { op.Complete(retErr) }()
+
+	repoCfg, ok := b.config.GetRepositoryConfig(first.Remote)
+	if !ok || len(repoCfg.AllTargetsFiles) == 0 {
+		return false, nil
+	}
+	logger := b.logger.With(zap.String("remote", first.Remote))
+
+	treehash1, ok1 := b.readCachedTreehash(ctx, first)
+	treehash2, ok2 := b.readCachedTreehash(ctx, second)
+	if ok1 && ok2 {
+		resultPath := cachekey.GetAllTargetsChangedCachePath(first.Remote, treehash1, treehash2, repoCfg.AllTargetsFiles)
+		if changed, ok := b.readCachedBool(ctx, resultPath); ok {
+			logger.Info("HasAllTargetsFileChange: Cache hit", zap.Bool("changed", changed))
+			return changed, nil
+		}
+	}
+
+	gitFactory := b.gitFactory
+	if gitFactory == nil {
+		gitFactory = func(dir string) git.Interface { return git.New(dir, b.logger) }
+	}
+
+	leaseStart := time.Now()
+	ws, err := b.repoManager.Lease(ctx, first)
+	recordStep(e, _opHasAllTargetsFileChange, "lease_duration", leaseStart, metrics.FastDurationBuckets)
+	if err != nil {
+		return false, classifyLeaseError(err)
+	}
+	defer func() {
+		if err := ws.Release(); err != nil {
+			if removeErr := os.RemoveAll(ws.Path()); removeErr != nil {
+				logger.Error("HasAllTargetsFileChange: Failed to remove workspace", zap.Error(removeErr))
+			}
+		}
+	}()
+	gitModule := gitFactory(ws.Path())
+
+	// A cached treehash for one or both revisions doesn't guarantee that
+	// revision's tree object exists in *this* workspace's object database
+	// (it may have been computed in a different worker, or long enough ago
+	// that this worker never fetched it). Materialize both from scratch in
+	// this single workspace so their objects are guaranteed to coexist for
+	// the diff below.
+	treehash1, err = b.materializeTreehash(ctx, e, ws, gitModule, first, logger)
+	if err != nil {
+		return false, err
+	}
+	treehash2, err = b.materializeTreehash(ctx, e, ws, gitModule, second, logger)
+	if err != nil {
+		return false, err
+	}
+
+	diffStart := time.Now()
+	entries, err := gitModule.DiffWithStatus(ctx, treehash1, treehash2)
+	recordStep(e, _opHasAllTargetsFileChange, "diff_duration", diffStart, metrics.FastDurationBuckets)
+	if err != nil {
+		return false, classifyGitError(fmt.Errorf("diff %s..%s: %w", treehash1, treehash2, err))
+	}
+	trigger := make(map[string]bool, len(repoCfg.AllTargetsFiles))
+	for _, f := range repoCfg.AllTargetsFiles {
+		trigger[f] = true
+	}
+	changed := false
+	for _, entry := range entries {
+		if trigger[entry.Path] {
+			changed = true
+			break
+		}
+	}
+
+	b.cacheAllTargetsResult(logger, first, second, treehash1, treehash2, repoCfg.AllTargetsFiles, changed)
+	logger.Info("HasAllTargetsFileChange: Computed", zap.Bool("changed", changed))
+	return changed, nil
+}
+
+// readCachedTreehash returns the previously stored treehash for build, or
+// ("", false) on a cache miss or read failure — either way the caller falls
+// back to materializing the tree itself.
+func (b *nativeOrchestrator) readCachedTreehash(ctx context.Context, build entity.BuildDescription) (string, bool) {
+	resp, err := b.storage.Get(ctx, storage.DownloadRequest{Key: cachekey.GetTreehashCachePath(build)})
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = resp.ReadCloser.Close() }()
+	b64, err := io.ReadAll(resp.ReadCloser)
+	if err != nil || len(b64) == 0 {
+		return "", false
+	}
+	return string(b64), true
+}
+
+// readCachedBool returns the previously stored boolean at path, or (false,
+// false) on a cache miss or read failure.
+func (b *nativeOrchestrator) readCachedBool(ctx context.Context, path string) (bool, bool) {
+	resp, err := b.storage.Get(ctx, storage.DownloadRequest{Key: path})
+	if err != nil {
+		return false, false
+	}
+	defer func() { _ = resp.ReadCloser.Close() }()
+	raw, err := io.ReadAll(resp.ReadCloser)
+	if err != nil || len(raw) == 0 {
+		return false, false
+	}
+	return string(raw) == "true", true
+}
+
+// cacheAllTargetsResult best-effort writes both revisions' treehashes (so
+// later GetTargetGraph/GetChangedTargets calls resolve them without
+// recomputation) and this pair's all-targets-changed result. Writes use
+// b.appCtx rather than the request context: HasAllTargetsFileChange has
+// already paid for the workspace lease and checkout by this point, so
+// letting a client disconnect abort just the final cache write (and force a
+// full recompute next time) would waste that work for no benefit.
+func (b *nativeOrchestrator) cacheAllTargetsResult(logger *zap.Logger, first, second entity.BuildDescription, treehash1, treehash2 string, allTargetsFiles []string, changed bool) {
+	writes := map[string]string{
+		cachekey.GetTreehashCachePath(first):                                                      treehash1,
+		cachekey.GetTreehashCachePath(second):                                                      treehash2,
+		cachekey.GetAllTargetsChangedCachePath(first.Remote, treehash1, treehash2, allTargetsFiles): fmt.Sprintf("%t", changed),
+	}
+	for path, value := range writes {
+		if err := b.storage.Put(b.appCtx, storage.UploadRequest{Key: path, Reader: bytes.NewReader([]byte(value))}); err != nil {
+			logger.Warn("HasAllTargetsFileChange: Failed to cache result", zap.String("path", path), zap.Error(err))
+		}
+	}
 }
 
 // readCachedGraph opens the cached graph for a treehash, preferring the TGB
@@ -293,6 +450,6 @@ func (b *nativeOrchestrator) readCachedGraph(ctx context.Context, logger *zap.Lo
 }
 
 // recordStep records a pipeline step's duration under the get_target_graph op.
-func recordStep(e *metrics.Emitter, name string, start time.Time, buckets tally.DurationBuckets) {
-	e.DurationHistogram(_opGetTargetGraph, name, buckets).RecordDuration(time.Since(start))
+func recordStep(e *metrics.Emitter, op, name string, start time.Time, buckets tally.DurationBuckets) {
+	e.DurationHistogram(op, name, buckets).RecordDuration(time.Since(start))
 }

@@ -75,6 +75,28 @@ func TestGetComparedTargetsCachePath(t *testing.T) {
 	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", []string{"foo.*"}))
 }
 
+func TestGetAllTargetsChangedCachePath(t *testing.T) {
+	t.Parallel()
+	got := GetAllTargetsChangedCachePath("git@github:uber/tango", "abc", "def", nil)
+	assert.Equal(t, filepath.Join("uber/tango", "all-targets-changed", "abc_def"), got)
+
+	// Nil/empty list ⇒ legacy path.
+	assert.Equal(t, got, GetAllTargetsChangedCachePath("git@github:uber/tango", "abc", "def", []string{}))
+
+	// Different file lists ⇒ different keys, so a config change never reads a
+	// stale answer computed under a different AllTargetsFiles list.
+	assert.NotEqual(t, got, GetAllTargetsChangedCachePath("git@github:uber/tango", "abc", "def", []string{".bazelrc"}))
+
+	// Order-independent: the same set in a different order hashes the same.
+	assert.Equal(t,
+		GetAllTargetsChangedCachePath("git@github:uber/tango", "abc", "def", []string{"a", "b"}),
+		GetAllTargetsChangedCachePath("git@github:uber/tango", "abc", "def", []string{"b", "a"}),
+	)
+
+	// Never collides with the compared-targets key space.
+	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil))
+}
+
 func TestGetTGBGraphByTreeHash(t *testing.T) {
 	t.Parallel()
 	remote := "git@github:uber/tango"

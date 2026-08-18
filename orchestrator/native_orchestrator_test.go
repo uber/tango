@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"encoding/gob"
@@ -428,4 +429,172 @@ func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	_, err = storage.NewGraphReader(context.Background(), st, gobKey)
 	require.Error(t, err)
 	assert.True(t, storage.IsNotFound(err), "gob key must stay empty under graph_format=tgb")
+}
+
+func configWithAllTargetsFiles(t *testing.T, files []string) *config.Config {
+	t.Helper()
+
+	quoted := make([]string, len(files))
+	for i, f := range files {
+		quoted[i] = fmt.Sprintf("      - %q", f)
+	}
+	yamlStr := fmt.Sprintf(`
+repository:
+  - remote: "git@github:uber/tango"
+    all_targets_files:
+%s
+
+service:
+  max_worker_pool_size: 3
+  workspaces_root_path: "/tmp/tango-repo-manager"
+`, strings.Join(quoted, "\n"))
+	cfg, err := config.ParseBytes([]byte(yamlStr))
+	require.NoError(t, err)
+	return cfg
+}
+
+func TestNative_HasAllTargetsFileChange_NotConfigured_NoOp(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// No AllTargetsFiles configured for this remote: RepoManager and Storage
+	// must never be touched.
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	st := storagemock.NewMockStorage(ctrl)
+
+	o, err := NewNativeOrchestrator(context.Background(), Params{
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t),
+		Config:      testConfig(t),
+	})
+	require.NoError(t, err)
+
+	changed, err := o.HasAllTargetsFileChange(context.Background(),
+		entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "sha1"},
+		entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "sha2"},
+	)
+	require.NoError(t, err)
+	assert.False(t, changed)
+}
+
+func TestNative_HasAllTargetsFileChange_TriggerFileDiffers(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	st := storagemock.NewMockStorage(ctrl)
+	// Treehash-cache reads (for first and second) miss, and the all-targets
+	// result cache also isn't consulted before both treehashes are known;
+	// all writes are best-effort.
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("miss")).AnyTimes()
+	st.EXPECT().Put(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
+	g := gitmock.NewMockInterface(ctrl)
+	gomock.InOrder(
+		g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("tree1", nil),
+		g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("tree2", nil),
+	)
+	g.EXPECT().DiffWithStatus(gomock.Any(), "tree1", "tree2").Return([]git.DiffEntry{
+		{Status: "M", Path: ".bazelrc"},
+	}, nil)
+
+	ws := workspacemock.NewMockWorkspace(ctrl)
+	ws.EXPECT().Path().Return("/tmp/ws").AnyTimes()
+	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(2)
+	ws.EXPECT().ApplyRequests(gomock.Any(), gomock.Any()).Return(nil).Times(2)
+	ws.EXPECT().Release().Return(nil)
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
+
+	o, err := NewNativeOrchestrator(context.Background(), Params{
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t),
+		GitFactory:  func(dir string) git.Interface { return g },
+		Config:      configWithAllTargetsFiles(t, []string{".bazelrc", "rules/go/sdk.bzl"}),
+	})
+	require.NoError(t, err)
+
+	changed, err := o.HasAllTargetsFileChange(context.Background(),
+		entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "sha1"},
+		entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "sha2"},
+	)
+	require.NoError(t, err)
+	assert.True(t, changed)
+}
+
+func TestNative_HasAllTargetsFileChange_NoTriggerFileDiffers(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	st := storagemock.NewMockStorage(ctrl)
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("miss")).AnyTimes()
+	st.EXPECT().Put(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
+	g := gitmock.NewMockInterface(ctrl)
+	gomock.InOrder(
+		g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("tree1", nil),
+		g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("tree2", nil),
+	)
+	g.EXPECT().DiffWithStatus(gomock.Any(), "tree1", "tree2").Return([]git.DiffEntry{
+		{Status: "M", Path: "some/unrelated/file.go"},
+	}, nil)
+
+	ws := workspacemock.NewMockWorkspace(ctrl)
+	ws.EXPECT().Path().Return("/tmp/ws").AnyTimes()
+	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(2)
+	ws.EXPECT().ApplyRequests(gomock.Any(), gomock.Any()).Return(nil).Times(2)
+	ws.EXPECT().Release().Return(nil)
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
+
+	o, err := NewNativeOrchestrator(context.Background(), Params{
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t),
+		GitFactory:  func(dir string) git.Interface { return g },
+		Config:      configWithAllTargetsFiles(t, []string{".bazelrc"}),
+	})
+	require.NoError(t, err)
+
+	changed, err := o.HasAllTargetsFileChange(context.Background(),
+		entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "sha1"},
+		entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "sha2"},
+	)
+	require.NoError(t, err)
+	assert.False(t, changed)
+}
+
+func TestNative_HasAllTargetsFileChange_CacheHit_NoLease(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	build1 := entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "sha1"}
+	build2 := entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "sha2"}
+	allTargetsFiles := []string{".bazelrc"}
+
+	st := storagemock.NewMockStorage(ctrl)
+	st.EXPECT().Get(gomock.Any(), storage.DownloadRequest{Key: cachekey.GetTreehashCachePath(build1)}).
+		Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("tree1")))}, nil)
+	st.EXPECT().Get(gomock.Any(), storage.DownloadRequest{Key: cachekey.GetTreehashCachePath(build2)}).
+		Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("tree2")))}, nil)
+	resultKey := cachekey.GetAllTargetsChangedCachePath(build1.Remote, "tree1", "tree2", allTargetsFiles)
+	st.EXPECT().Get(gomock.Any(), storage.DownloadRequest{Key: resultKey}).
+		Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("true")))}, nil)
+
+	// No lease/checkout expected: the cache hit must short-circuit before
+	// touching RepoManager at all.
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+
+	o, err := NewNativeOrchestrator(context.Background(), Params{
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zaptest.NewLogger(t),
+		Config:      configWithAllTargetsFiles(t, allTargetsFiles),
+	})
+	require.NoError(t, err)
+
+	changed, err := o.HasAllTargetsFileChange(context.Background(), build1, build2)
+	require.NoError(t, err)
+	assert.True(t, changed)
 }

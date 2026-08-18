@@ -112,6 +112,25 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 		maxDist = request.GetOutputConfig().GetMaxDistance()
 	}
 
+	// AllTargetsFiles check takes precedence over the compared-targets cache:
+	// a cache entry computed before a trigger file was configured (or before
+	// it changed) must not mask the trigger firing now.
+	firstBuild, err := mapper.ProtoToBuildDescription(request.GetFirstRevision())
+	if err != nil {
+		return tangoerrors.NewUser(fmt.Errorf("convert first revision: %w", err))
+	}
+	secondBuild, err := mapper.ProtoToBuildDescription(request.GetSecondRevision())
+	if err != nil {
+		return tangoerrors.NewUser(fmt.Errorf("convert second revision: %w", err))
+	}
+	triggered, err := c.orchestrator.HasAllTargetsFileChange(ctx, firstBuild, secondBuild)
+	if err != nil {
+		return fmt.Errorf("check all-targets trigger: %w", err)
+	}
+	if triggered {
+		return c.sendAllTargetsChanged(ctx, e, logger, stream, request, maxDist, start)
+	}
+
 	// Fast path: stream a previously computed result straight from cache.
 	if !request.GetBypassCache() {
 		served, err := c.serveChangedTargetsFromCache(ctx, e, logger, request, stream, maxDist, start)
@@ -233,6 +252,99 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 	return true, nil
 }
 
+// fetchSingleGraph fetches one revision's target graph. A TGB-backed reader
+// is handed over whole: the comparison path wants its random-access form,
+// and draining it here would force the full decode the format exists to
+// avoid. A gob-era graph is drained into chunks here.
+func (c *controller) fetchSingleGraph(ctx context.Context, e *metrics.Emitter, revision *pb.BuildDescription, options *pb.RequestOptions, bypassCache bool) (fetchedGraph, error) {
+	entityBuild, err := mapper.ProtoToBuildDescription(revision)
+	if err != nil {
+		return fetchedGraph{}, fmt.Errorf("convert build description: %w", err)
+	}
+	entityReq := entity.GetTargetGraphRequest{
+		Build:             entityBuild,
+		ExcludeFilesRegex: options.GetExtraExcludeFilesRegex(),
+		BypassCache:       bypassCache,
+	}
+	graphReader, err := c.getGraph(ctx, e, entityReq)
+	if err != nil || graphReader == nil {
+		return fetchedGraph{}, err
+	}
+	if tgbReader, ok := graphReader.(*storage.TGBGraphReader); ok {
+		return fetchedGraph{tgb: tgbReader}, nil
+	}
+	defer func() { _ = graphReader.Close() }()
+
+	var chunks []entity.GetTargetGraphResponse
+	for {
+		chunk, err := graphReader.Read()
+		if err == io.EOF {
+			return fetchedGraph{chunks: chunks}, nil
+		}
+		if err != nil {
+			return fetchedGraph{}, err
+		}
+		chunks = append(chunks, chunk)
+	}
+}
+
+// sendAllTargetsChanged handles the AllTargetsFiles trigger short-circuit:
+// instead of diffing both revisions' target graphs, it fetches only the
+// second revision's graph and reports every target in it as changed
+// (distance 0). Reuses resultToResponses/sendTrimmedChangedTargets/
+// cacheComparedTargets so downstream ID-remapping, chunking, output
+// filtering, and caching are identical to the normal comparison path.
+func (c *controller) sendAllTargetsChanged(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, stream pb.TangoServiceGetChangedTargetsYARPCServer, request *pb.GetChangedTargetsRequest, maxDist int32, start time.Time) error {
+	e.Counter(opGetChangedTargets, "all_targets_triggered").Inc(1)
+	logger.Info("GetChangedTargets: AllTargetsFiles trigger matched, reporting all targets in second revision as changed")
+
+	graph, err := c.fetchSingleGraph(ctx, e, request.GetSecondRevision(), request.GetRequestOptions(), request.GetBypassCache())
+	if err != nil {
+		return fmt.Errorf("fetch second target graph: %w", err)
+	}
+	chunks, err := graph.materializeChunks()
+	if err != nil {
+		return fmt.Errorf("decode second graph: %w", err)
+	}
+	targetsByID, meta, err := getTargetsAndMetadata(ctx, chunks)
+	if err != nil {
+		return err
+	}
+	// seedAttrs is nil so every attribute is retained in the response; there
+	// is no direct-vs-transitive classification to make on this path.
+	diffGraph, err := toDiffGraph(ctx, targetsByID, meta, nil)
+	if err != nil {
+		return err
+	}
+
+	changed := make([]*targetdiff.ChangedTarget, 0, len(diffGraph))
+	for _, target := range diffGraph {
+		changed = append(changed, &targetdiff.ChangedTarget{
+			ChangeType: targetdiff.ChangeTypeChanged,
+			After:      target,
+			Distance:   0,
+		})
+	}
+	responses, err := c.resultToResponses(targetdiff.Result{ChangedTargets: changed})
+	if err != nil {
+		return err
+	}
+
+	c.cacheComparedTargets(logger, request, responses)
+
+	sendStart := time.Now()
+	if err := sendTrimmedChangedTargets(stream, responses, maxDist, request.GetOutputConfig()); err != nil {
+		return fmt.Errorf("send response: %w", err)
+	}
+	sendDuration := time.Since(sendStart)
+	e.DurationHistogram(opGetChangedTargets, "send_duration", metrics.FastDurationBuckets).RecordDuration(sendDuration)
+	logger.Info("GetChangedTargets: Successfully processed request (all targets)",
+		zap.Duration("send_duration", sendDuration),
+		zap.Duration("total_duration", time.Since(start)),
+	)
+	return nil
+}
+
 // fetchTargetGraphs fetches both revisions' target graphs concurrently. Each
 // fetch runs under its own cancellable context so that, when one fails, the
 // sibling is cancelled to avoid wasting work on a result that will be discarded.
@@ -273,43 +385,8 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 			} else {
 				revision = request.GetSecondRevision()
 			}
-			entityBuild, err := mapper.ProtoToBuildDescription(revision)
-			if err != nil {
-				results <- graphResult{order: idx, err: fmt.Errorf("convert build description: %w", err)}
-				return
-			}
-			entityReq := entity.GetTargetGraphRequest{
-				Build:             entityBuild,
-				ExcludeFilesRegex: request.GetRequestOptions().GetExtraExcludeFilesRegex(),
-				BypassCache:       request.GetBypassCache(),
-			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, e, entityReq)
-			if err != nil || graphReader == nil {
-				results <- graphResult{order: idx, err: err}
-				return
-			}
-			// A TGB-backed reader is handed over whole: the comparison path
-			// wants its random-access form, and draining it here would force
-			// the full decode the format exists to avoid.
-			if tgbReader, ok := graphReader.(*storage.TGBGraphReader); ok {
-				results <- graphResult{order: idx, graph: fetchedGraph{tgb: tgbReader}}
-				return
-			}
-			defer func() { _ = graphReader.Close() }()
-
-			var chunks []entity.GetTargetGraphResponse
-			for {
-				chunk, err := graphReader.Read()
-				if err == io.EOF {
-					results <- graphResult{order: idx, graph: fetchedGraph{chunks: chunks}}
-					return
-				}
-				if err != nil {
-					results <- graphResult{order: idx, err: err}
-					return
-				}
-				chunks = append(chunks, chunk)
-			}
+			graph, err := c.fetchSingleGraph(jobs[idx].ctx, e, revision, request.GetRequestOptions(), request.GetBypassCache())
+			results <- graphResult{order: idx, graph: graph, err: err}
 		}(i)
 	}
 
@@ -329,6 +406,14 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 		if jobs[res.order].err != nil {
 			other := (res.order + 1) % 2
 			if !jobs[other].completed {
+				// Deliberately not wrapped in a tangoerrors constructor here:
+				// this job isn't failing on its own account, it's collateral
+				// from its sibling's failure, so its classification should be
+				// whatever the sibling's own error already is. Plain %w lets
+				// GetErrorCode's errors.As traversal surface that classification
+				// (or fall through to the same infra default the sibling's
+				// error would get on its own) if this cause ever escapes the
+				// cancelled-flag filtering below.
 				jobs[other].cancel(fmt.Errorf("cancelled: sibling graph #%d failed: %w", res.order+1, jobs[res.order].err))
 				// explicitly mark that this job is cancelled, so we can
 				// ignore its error later
