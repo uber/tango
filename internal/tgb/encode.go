@@ -837,13 +837,19 @@ func (e *encoder) write(w io.Writer) error {
 // of (key, value) pairs: count (uvarint), then for each pair the key length
 // (uvarint), key bytes, value length (uvarint), value bytes.
 func encodeStringMap(m map[string]string) []byte {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
 	var buf []byte
 	buf = binary.AppendUvarint(buf, uint64(len(m)))
-	for k, v := range m {
+	for _, k := range keys {
 		buf = binary.AppendUvarint(buf, uint64(len(k)))
 		buf = append(buf, k...)
-		buf = binary.AppendUvarint(buf, uint64(len(v)))
-		buf = append(buf, v...)
+		buf = binary.AppendUvarint(buf, uint64(len(m[k])))
+		buf = append(buf, m[k]...)
 	}
 	return buf
 }
