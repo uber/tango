@@ -16,7 +16,6 @@ package graphrunner
 
 import (
 	"context"
-	"encoding/hex"
 	"time"
 
 	"github.com/uber-go/tally"
@@ -98,6 +97,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		FullHashRepos:     g.config.FullHashRepos,
 		ExcludedRegex:     append(g.config.ExcludedFiles, g.extraExcludedFiles...),
 		UseBzlmod:         bzlmodEnabled,
+		AllTargetsFiles:   g.config.AllTargetsFiles,
 	}
 
 	hashStart := time.Now()
@@ -105,16 +105,6 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	g.emitter.DurationHistogram(_opCompute, "target_hash_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(hashStart))
 	if err != nil {
 		return targethasher.EmptyResult(), err
-	}
-
-	if len(g.config.AllTargetsFiles) > 0 {
-		atfh := make(map[string]string, len(g.config.AllTargetsFiles))
-		for _, f := range g.config.AllTargetsFiles {
-			if h, ok := knownSourceHashes[f]; ok {
-				atfh[f] = hex.EncodeToString(h)
-			}
-		}
-		res.AllTargetsFileHashes = atfh
 	}
 
 	g.emitter.ValueHistogram(_opCompute, "target_count", metrics.LargeCountBuckets).RecordValue(float64(len(res.Targets)))
