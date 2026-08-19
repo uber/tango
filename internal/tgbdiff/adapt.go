@@ -79,6 +79,12 @@ func MergeChunks(chunks []entity.GetTargetGraphResponse) *tgb.Graph {
 			for k, v := range m.AttributeStringValueMapping {
 				g.Metadata.AttributeStringValueMapping[k] = v
 			}
+			for k, v := range m.AllTargetsFileHashes {
+				if g.Metadata.AllTargetsFileHashes == nil {
+					g.Metadata.AllTargetsFileHashes = make(map[string]string, len(m.AllTargetsFileHashes))
+				}
+				g.Metadata.AllTargetsFileHashes[k] = v
+			}
 		}
 	}
 	return g

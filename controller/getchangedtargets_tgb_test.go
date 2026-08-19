@@ -151,6 +151,110 @@ func TestGetChangedTargets_TGBNativePath(t *testing.T) {
 	assert.EqualValues(t, 0, counterValue(scope, "tgb_shadow_error"))
 }
 
+// tgbTestGraphChunksWithATFH builds a two-target graph with AllTargetsFileHashes
+// set in the metadata, for testing the TGB AllTargetsFiles trigger path.
+func tgbTestGraphChunksWithATFH(hash2 string, atfh map[string]string) []entity.GetTargetGraphResponse {
+	return []entity.GetTargetGraphResponse{
+		{Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: tgbHash1, RuleType: 100},
+			{ID: 2, Hash: hash2, RuleType: 100, DirectDependencies: []int32{1}},
+		}},
+		{Metadata: &entity.Metadata{
+			TargetIDMapping:      map[int32]string{1: "//app:target1", 2: "//app:target2"},
+			RuleTypeMapping:      map[int32]string{100: "go_library"},
+			AllTargetsFileHashes: atfh,
+		}},
+	}
+}
+
+// TestGetChangedTargets_TGBAllTargetsTrigger verifies that the TGB comparison
+// path checks AllTargetsFileHashes and, when a configured file differs,
+// reports every target in the second graph as changed with distance 0.
+func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(t.Context())
+	var sent []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, _ ...interface{}) error {
+		sent = append(sent, resp)
+		return nil
+	}).AnyTimes()
+
+	st := storage.NewMemoryStorage()
+	seedTreehash(t, st, "sha1", "treehash1")
+	seedTreehash(t, st, "sha2", "treehash2")
+	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
+		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash1", entity.ComputationStrategyUnset, nil),
+		tgbTestGraphChunksWithATFH(tgbHash2Old, map[string]string{".bazelrc": "old-hash"})))
+	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
+		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash2", entity.ComputationStrategyUnset, nil),
+		tgbTestGraphChunksWithATFH(tgbHash2Old, map[string]string{".bazelrc": "new-hash"})))
+
+	scope := tally.NewTestScope("", nil)
+	c := NewController(context.Background(), Params{
+		Logger:      zaptest.NewLogger(t),
+		Storage:     st,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		Scope:       scope,
+		GraphFormat: config.GraphFormatTGB,
+	})
+
+	request := changedTargetsRequest()
+	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
+	require.NoError(t, c.GetChangedTargets(request, stream))
+
+	changed, _ := changedTargetsSent(t, sent)
+	require.Len(t, changed, 2, "all targets from second graph should be reported as changed")
+	for _, ct := range changed {
+		assert.Equal(t, pb.CHANGE_TYPE_CHANGED, ct.GetChangeType())
+		assert.Equal(t, int32(0), ct.GetDistance())
+		assert.NotNil(t, ct.GetNewTarget())
+	}
+	assert.EqualValues(t, 1, counterValue(scope, "all_targets_triggered"))
+	assert.EqualValues(t, 0, counterValue(scope, "tgb_native_compare"), "trigger should skip the normal TGB diff")
+}
+
+// TestGetChangedTargets_TGBAllTargetsNoTrigger verifies that the TGB path
+// proceeds with normal comparison when AllTargetsFileHashes match.
+func TestGetChangedTargets_TGBAllTargetsNoTrigger(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(t.Context())
+	var sent []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, _ ...interface{}) error {
+		sent = append(sent, resp)
+		return nil
+	}).AnyTimes()
+
+	st := storage.NewMemoryStorage()
+	seedTreehash(t, st, "sha1", "treehash1")
+	seedTreehash(t, st, "sha2", "treehash2")
+	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
+		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash1", entity.ComputationStrategyUnset, nil),
+		tgbTestGraphChunksWithATFH(tgbHash2Old, map[string]string{".bazelrc": "same-hash"})))
+	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
+		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash2", entity.ComputationStrategyUnset, nil),
+		tgbTestGraphChunksWithATFH(tgbHash2New, map[string]string{".bazelrc": "same-hash"})))
+
+	scope := tally.NewTestScope("", nil)
+	c := NewController(context.Background(), Params{
+		Logger:      zaptest.NewLogger(t),
+		Storage:     st,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		Scope:       scope,
+		GraphFormat: config.GraphFormatTGB,
+	})
+
+	request := changedTargetsRequest()
+	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
+	require.NoError(t, c.GetChangedTargets(request, stream))
+
+	changed, _ := changedTargetsSent(t, sent)
+	require.Len(t, changed, 1, "only the hash-flipped target should be changed")
+	assert.EqualValues(t, 0, counterValue(scope, "all_targets_triggered"))
+	assert.EqualValues(t, 1, counterValue(scope, "tgb_native_compare"), "should use normal TGB diff")
+}
+
 // TestGetChangedTargets_TGBMixedFormatFallsBack covers the transitional
 // window right after a format flip: one revision's graph exists only as a
 // pre-flip gob stream, the other as a TGB blob. The comparison must fall back
