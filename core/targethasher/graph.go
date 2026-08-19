@@ -69,8 +69,10 @@ type HashConfig struct {
 	// @io_bazel_rules_go//:go_context_data ↔ nogo analyzers) must always be the first visitor in the cycle so
 	// the empty-slice sentinel lands consistently on the same dep edges across runs.
 	SequentialHashTargets []string
-	ExcludedRegex  []string
-	UseBzlmod      bool
+	ExcludedRegex         []string
+	UseBzlmod             bool
+	// AllTargetsFiles lists repo-relative paths whose hashes should be
+	// extracted from KnownSourceHashes into Result.AllTargetsFileHashes.
 	AllTargetsFiles []string
 }
 

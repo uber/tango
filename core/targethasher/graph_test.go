@@ -184,6 +184,59 @@ func TestFromProtoWithExcludedRegex(t *testing.T) {
 	assert.Empty(t, result.Targets["//vendor:lib"].Hash)
 }
 
+func TestFromProtoAllTargetsFileHashes(t *testing.T) {
+	t.Parallel()
+
+	qr := &buildpb.QueryResult{
+		Target: []*buildpb.Target{
+			{
+				Type: buildpb.Target_RULE.Enum(),
+				Rule: &buildpb.Rule{
+					Name:      StringPtr("//pkg:lib"),
+					RuleClass: StringPtr("go_library"),
+				},
+			},
+		},
+	}
+	knownSourceHashes := map[string][]byte{
+		".bazelrc":    {0xab, 0xcd},
+		"tools/bazel": {0xef, 0x01},
+		"unlisted":    {0x99},
+	}
+
+	tests := []struct {
+		name            string
+		allTargetsFiles []string
+		want            map[string]string
+	}{
+		{
+			name: "unset",
+			want: nil,
+		},
+		{
+			name:            "configured files present in known hashes",
+			allTargetsFiles: []string{".bazelrc", "tools/bazel"},
+			want:            map[string]string{".bazelrc": "abcd", "tools/bazel": "ef01"},
+		},
+		{
+			name:            "configured file missing from known hashes is skipped",
+			allTargetsFiles: []string{".bazelrc", "does/not/exist"},
+			want:            map[string]string{".bazelrc": "abcd"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result, err := FromProto(context.Background(), qr, t.TempDir(), HashConfig{
+				KnownSourceHashes: knownSourceHashes,
+				AllTargetsFiles:   tt.allTargetsFiles,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, result.AllTargetsFileHashes)
+		})
+	}
+}
+
 func TestFromProtoWithGeneratedFile(t *testing.T) {
 	qr := &buildpb.QueryResult{
 		Target: []*buildpb.Target{
