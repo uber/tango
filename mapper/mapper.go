@@ -134,6 +134,9 @@ func ResultToGraphChunks(ctx context.Context, result targethasher.Result, maxByt
 	if err != nil {
 		return nil, err
 	}
+	if len(meta.AllTargetsFileHashes) > 0 {
+		metaGroups[0].AllTargetsFileHashes = meta.AllTargetsFileHashes
+	}
 	for _, m := range metaGroups {
 		chunks = append(chunks, entity.GetTargetGraphResponse{Metadata: m})
 	}

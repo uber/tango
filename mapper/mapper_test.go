@@ -95,4 +95,22 @@ func TestResultToGraphChunks(t *testing.T) {
 		_, err := ResultToGraphChunks(ctx, result, 1<<20)
 		require.Error(t, err)
 	})
+
+	t.Run("propagates AllTargetsFileHashes into a metadata chunk", func(t *testing.T) {
+		t.Parallel()
+
+		hashes := map[string]string{".bazelrc": "abc123"}
+		result := targethasher.Result{AllTargetsFileHashes: hashes}
+
+		chunks, err := ResultToGraphChunks(t.Context(), result, 1<<20)
+		require.NoError(t, err)
+
+		var got map[string]string
+		for _, c := range chunks {
+			if c.Metadata != nil && len(c.Metadata.AllTargetsFileHashes) > 0 {
+				got = c.Metadata.AllTargetsFileHashes
+			}
+		}
+		assert.Equal(t, hashes, got)
+	})
 }
