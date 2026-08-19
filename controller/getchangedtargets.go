@@ -414,6 +414,22 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request *pb.GetCha
 // where exactly one revision's blob predates a format flip).
 func (c *controller) compareFetchedGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, first, second fetchedGraph, seedAttrs map[string]bool) ([]entity.GetChangedTargetsResponse, error) {
 	if first.tgb != nil && second.tgb != nil {
+		firstATFH, err := first.tgb.TGB().AllTargetsFileHashes()
+		if err != nil {
+			return nil, fmt.Errorf("read AllTargetsFileHashes from first TGB: %w", err)
+		}
+		secondATFH, err := second.tgb.TGB().AllTargetsFileHashes()
+		if err != nil {
+			return nil, fmt.Errorf("read AllTargetsFileHashes from second TGB: %w", err)
+		}
+		if allTargetsFileChanged(
+			&entity.Metadata{AllTargetsFileHashes: firstATFH},
+			&entity.Metadata{AllTargetsFileHashes: secondATFH},
+		) {
+			logger.Info("compareFetchedGraphs: AllTargetsFiles trigger matched (TGB), reporting all targets as changed")
+			e.Counter(opGetChangedTargets, "all_targets_triggered").Inc(1)
+			return c.allTargetsChangedFromTGB(ctx, second.tgb.TGB())
+		}
 		return c.compareTargetGraphsTGB(ctx, e, logger, first.tgb.TGB(), second.tgb.TGB(), seedAttrs)
 	}
 	firstChunks, err := first.materializeChunks()
@@ -718,6 +734,22 @@ func (c *controller) allTargetsChangedFromGraph(ctx context.Context, targetsByID
 		})
 	}
 	return c.resultToResponses(targetdiff.Result{ChangedTargets: changed})
+}
+
+// allTargetsChangedFromTGB builds a response stream marking every target in
+// the TGB reader's graph as changed with distance 0. Used when the
+// AllTargetsFiles trigger fires on the TGB comparison path.
+func (c *controller) allTargetsChangedFromTGB(ctx context.Context, r *tgb.Reader) ([]entity.GetChangedTargetsResponse, error) {
+	g, err := r.DecodeGraph()
+	if err != nil {
+		return nil, fmt.Errorf("decode TGB graph: %w", err)
+	}
+	targetsByID := make(map[int32]*entity.OptimizedTarget, len(g.Targets))
+	for i := range g.Targets {
+		t := &g.Targets[i]
+		targetsByID[t.ID] = t
+	}
+	return c.allTargetsChangedFromGraph(ctx, targetsByID, &g.Metadata)
 }
 
 // seedAttributesFor returns the RepositoryConfig.SeedAttributes

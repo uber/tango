@@ -179,17 +179,27 @@ func (r *Reader) DecodeGraph() (*Graph, error) {
 	// Build rule-type mapping: dict-index → string (already in ruleTypeMap).
 	// Tag mapping similarly.
 
-	g := &Graph{
-		Targets: targets,
-		Metadata: entity.Metadata{
-			TargetIDMapping:             targetIDMap,
-			RuleTypeMapping:             ruleTypeMap,
-			TagMapping:                  tagMap,
-			AttributeNameMapping:        attrNameMap,
-			AttributeStringValueMapping: attrValMap,
-		},
+	meta := entity.Metadata{
+		TargetIDMapping:             targetIDMap,
+		RuleTypeMapping:             ruleTypeMap,
+		TagMapping:                  tagMap,
+		AttributeNameMapping:        attrNameMap,
+		AttributeStringValueMapping: attrValMap,
 	}
-	return g, nil
+
+	if _, ok := r.cols[colAllTargetsFileHashes]; ok {
+		data, err := r.getColumn(colAllTargetsFileHashes)
+		if err != nil {
+			return nil, fmt.Errorf("tgb: decode AllTargetsFileHashes: %w", err)
+		}
+		m, err := decodeStringMap(data)
+		if err != nil {
+			return nil, fmt.Errorf("tgb: decode AllTargetsFileHashes: %w", err)
+		}
+		meta.AllTargetsFileHashes = m
+	}
+
+	return &Graph{Targets: targets, Metadata: meta}, nil
 }
 
 // ─── zstd decompression ───────────────────────────────────────────────────────
@@ -1050,6 +1060,49 @@ func (r *Reader) getColumnLocked(id uint64) ([]byte, error) {
 	}
 	r.decompressed[id] = out
 	return out, nil
+}
+
+// decodeStringMap deserializes the format produced by encodeStringMap: count
+// (uvarint), then count (key-length, key, value-length, value) pairs.
+func decodeStringMap(data []byte) (map[string]string, error) {
+	n, sz := binary.Uvarint(data)
+	if sz <= 0 {
+		return nil, fmt.Errorf("truncated count")
+	}
+	data = data[sz:]
+	m := make(map[string]string, n)
+	for i := uint64(0); i < n; i++ {
+		kLen, sz := binary.Uvarint(data)
+		if sz <= 0 || uint64(len(data)-sz) < kLen {
+			return nil, fmt.Errorf("truncated key at entry %d", i)
+		}
+		data = data[sz:]
+		key := string(data[:kLen])
+		data = data[kLen:]
+
+		vLen, sz := binary.Uvarint(data)
+		if sz <= 0 || uint64(len(data)-sz) < vLen {
+			return nil, fmt.Errorf("truncated value at entry %d", i)
+		}
+		data = data[sz:]
+		m[key] = string(data[:vLen])
+		data = data[vLen:]
+	}
+	return m, nil
+}
+
+// AllTargetsFileHashes returns the sidecar file-hash map stored in column 22,
+// or nil when the column is absent (old blobs or repos without AllTargetsFiles).
+// Only the single column is decompressed — no full graph decode.
+func (r *Reader) AllTargetsFileHashes() (map[string]string, error) {
+	if _, ok := r.cols[colAllTargetsFileHashes]; !ok {
+		return nil, nil
+	}
+	data, err := r.getColumn(colAllTargetsFileHashes)
+	if err != nil {
+		return nil, err
+	}
+	return decodeStringMap(data)
 }
 
 func (r *Reader) ensurePkgDict() error {

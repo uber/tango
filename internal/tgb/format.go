@@ -104,6 +104,10 @@ const (
 	// — ensureDepOffsets builds a full offset table and DepsCSR reads in bulk
 	// — so the encoder stopped writing it. Do not reuse the ID.
 	colNodeIndex = uint64(21)
+	// colAllTargetsFileHashes (22) stores the AllTargetsFileHashes sidecar:
+	// a length-prefixed sequence of (key, value) string pairs. Old readers
+	// that don't know this ID skip it; new readers on old blobs get nil.
+	colAllTargetsFileHashes = uint64(22)
 )
 
 // colCodec values stored in the directory.
@@ -135,7 +139,8 @@ var colNames = map[uint64]string{
 	colFlags:         "FLAGS",
 	colBlockDigest:   "BLOCK_DIGEST",
 	colBlockStart:    "BLOCK_START",
-	colNodeIndex:     "NODE_INDEX",
+	colNodeIndex:             "NODE_INDEX",
+	colAllTargetsFileHashes: "ALL_TARGETS_FILE_HASHES",
 }
 
 // ─── Header ───────────────────────────────────────────────────────────────────
