@@ -192,11 +192,11 @@ func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		Logger:      zaptest.NewLogger(t),
-		Storage:     st,
+		Logger:       zaptest.NewLogger(t),
+		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
-		Scope:       scope,
-		GraphFormat: config.GraphFormatTGB,
+		Scope:        scope,
+		GraphFormat:  config.GraphFormatTGB,
 	})
 
 	request := changedTargetsRequest()
@@ -238,11 +238,11 @@ func TestGetChangedTargets_TGBAllTargetsNoTrigger(t *testing.T) {
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		Logger:      zaptest.NewLogger(t),
-		Storage:     st,
+		Logger:       zaptest.NewLogger(t),
+		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
-		Scope:       scope,
-		GraphFormat: config.GraphFormatTGB,
+		Scope:        scope,
+		GraphFormat:  config.GraphFormatTGB,
 	})
 
 	request := changedTargetsRequest()

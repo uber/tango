@@ -187,16 +187,12 @@ func (r *Reader) DecodeGraph() (*Graph, error) {
 		AttributeStringValueMapping: attrValMap,
 	}
 
-	if _, ok := r.cols[colAllTargetsFileHashes]; ok {
-		data, err := r.getColumn(colAllTargetsFileHashes)
-		if err != nil {
-			return nil, fmt.Errorf("tgb: decode AllTargetsFileHashes: %w", err)
-		}
-		m, err := decodeStringMap(data)
-		if err != nil {
-			return nil, fmt.Errorf("tgb: decode AllTargetsFileHashes: %w", err)
-		}
-		meta.AllTargetsFileHashes = m
+	atfh, err := r.AllTargetsFileHashes()
+	if err != nil {
+		return nil, fmt.Errorf("tgb: decode AllTargetsFileHashes: %w", err)
+	}
+	if atfh != nil {
+		meta.AllTargetsFileHashes = atfh
 	}
 
 	return &Graph{Targets: targets, Metadata: meta}, nil
