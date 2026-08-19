@@ -40,6 +40,8 @@ var (
 	tgbHash1    = strings.Repeat("aa", 20)
 	tgbHash2Old = strings.Repeat("bb", 20)
 	tgbHash2New = strings.Repeat("cc", 20)
+	tgbHash3    = strings.Repeat("dd", 20)
+	tgbHash4    = strings.Repeat("ee", 20)
 )
 
 // tgbTestGraphChunks builds the two-target graph the gob-era streamChunks
@@ -151,16 +153,18 @@ func TestGetChangedTargets_TGBNativePath(t *testing.T) {
 	assert.EqualValues(t, 0, counterValue(scope, "tgb_shadow_error"))
 }
 
-// tgbTestGraphChunksWithATFH builds a two-target graph with AllTargetsFileHashes
+// tgbTestGraphChunksWithATFH builds a four-target graph with AllTargetsFileHashes
 // set in the metadata, for testing the TGB AllTargetsFiles trigger path.
 func tgbTestGraphChunksWithATFH(hash2 string, atfh map[string]string) []entity.GetTargetGraphResponse {
 	return []entity.GetTargetGraphResponse{
 		{Targets: []entity.OptimizedTarget{
 			{ID: 1, Hash: tgbHash1, RuleType: 100},
 			{ID: 2, Hash: hash2, RuleType: 100, DirectDependencies: []int32{1}},
+			{ID: 3, Hash: tgbHash3, RuleType: 100},
+			{ID: 4, Hash: tgbHash4, RuleType: 100, DirectDependencies: []int32{3}},
 		}},
 		{Metadata: &entity.Metadata{
-			TargetIDMapping:      map[int32]string{1: "//app:target1", 2: "//app:target2"},
+			TargetIDMapping:      map[int32]string{1: "//app:target1", 2: "//app:target2", 3: "//lib:util", 4: "//lib:core"},
 			RuleTypeMapping:      map[int32]string{100: "go_library"},
 			AllTargetsFileHashes: atfh,
 		}},
@@ -204,7 +208,7 @@ func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 	require.NoError(t, c.GetChangedTargets(request, stream))
 
 	changed, _ := changedTargetsSent(t, sent)
-	require.Len(t, changed, 2, "all targets from second graph should be reported as changed")
+	require.Len(t, changed, 4, "all targets from second graph should be reported as changed")
 	for _, ct := range changed {
 		assert.Equal(t, pb.CHANGE_TYPE_CHANGED, ct.GetChangeType())
 		assert.Equal(t, int32(0), ct.GetDistance())

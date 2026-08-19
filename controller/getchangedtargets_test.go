@@ -221,9 +221,10 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 			{ID: 1, Hash: "h1", RuleType: 100},
 			{ID: 2, Hash: "h2", RuleType: 100},
 			{ID: 3, Hash: "h3", RuleType: 100},
+			{ID: 4, Hash: "h4", RuleType: 100, DirectDependencies: []int32{3}},
 		}},
 		{Metadata: &entity.Metadata{
-			TargetIDMapping:      map[int32]string{1: "//app:a", 2: "//app:b", 3: "//app:c"},
+			TargetIDMapping:      map[int32]string{1: "//app:a", 2: "//app:b", 3: "//app:c", 4: "//lib:util"},
 			RuleTypeMapping:      map[int32]string{100: "go_library"},
 			AllTargetsFileHashes: map[string]string{".bazelrc": "new-hash"},
 		}},
@@ -236,7 +237,7 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 	for _, resp := range responses {
 		totalChanged += len(resp.ChangedTargets)
 	}
-	assert.Equal(t, 3, totalChanged, "all targets from second graph should be reported as changed")
+	assert.Equal(t, 4, totalChanged, "all targets from second graph should be reported as changed")
 	for _, resp := range responses {
 		for _, ct := range resp.ChangedTargets {
 			assert.Equal(t, entity.ChangeTypeChanged, ct.ChangeType)
