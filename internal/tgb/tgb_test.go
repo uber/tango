@@ -9,6 +9,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/tgb"
 )
@@ -169,6 +171,7 @@ func canonicalise(g *tgb.Graph) *tgb.Graph {
 			TagMapping:                  tagMap,
 			AttributeNameMapping:        anMap,
 			AttributeStringValueMapping: avMap,
+			AllTargetsFileHashes:        g.Metadata.AllTargetsFileHashes,
 		},
 	}
 }
@@ -308,6 +311,58 @@ func TestTinyGraphRoundTrip(t *testing.T) {
 		}
 		t.FailNow()
 	}
+}
+
+func TestAllTargetsFileHashesRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	t.Run("present", func(t *testing.T) {
+		t.Parallel()
+		g := buildTinyGraph()
+		g.Metadata.AllTargetsFileHashes = map[string]string{
+			".bazelrc":         "abc123",
+			"tools/bazel":      "def456",
+			"rules/go/sdk.bzl": "789ghi",
+		}
+
+		data := mustEncode(t, g, tgb.EncodeOptions{HashBytes: 8, BlockSize: 4})
+		got := mustDecode(t, data)
+
+		assert.Equal(t, g.Metadata.AllTargetsFileHashes, got.Metadata.AllTargetsFileHashes)
+
+		r, err := tgb.NewReader(data)
+		require.NoError(t, err)
+		atfh, err := r.AllTargetsFileHashes()
+		require.NoError(t, err)
+		assert.Equal(t, g.Metadata.AllTargetsFileHashes, atfh)
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		t.Parallel()
+		g := buildTinyGraph()
+
+		data := mustEncode(t, g, tgb.EncodeOptions{HashBytes: 8, BlockSize: 4})
+		got := mustDecode(t, data)
+
+		assert.Nil(t, got.Metadata.AllTargetsFileHashes)
+
+		r, err := tgb.NewReader(data)
+		require.NoError(t, err)
+		atfh, err := r.AllTargetsFileHashes()
+		require.NoError(t, err)
+		assert.Nil(t, atfh)
+	})
+
+	t.Run("empty map not encoded", func(t *testing.T) {
+		t.Parallel()
+		g := buildTinyGraph()
+		g.Metadata.AllTargetsFileHashes = map[string]string{}
+
+		data := mustEncode(t, g, tgb.EncodeOptions{HashBytes: 8, BlockSize: 4})
+		got := mustDecode(t, data)
+
+		assert.Nil(t, got.Metadata.AllTargetsFileHashes)
+	})
 }
 
 // ─── Test: property test over random small graphs ─────────────────────────────
