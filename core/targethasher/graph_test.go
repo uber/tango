@@ -184,6 +184,31 @@ func TestFromProtoWithExcludedRegex(t *testing.T) {
 	assert.Empty(t, result.Targets["//vendor:lib"].Hash)
 }
 
+func TestFromProtoWithDoubledPackageLabel(t *testing.T) {
+	// Simulates the pseudo-label Bazel query produces from a
+	// workspace-relative string attribute like resource_strip_prefix: the
+	// package gets doubled into the target name.
+	qr := &buildpb.QueryResult{
+		Target: []*buildpb.Target{
+			{
+				Type: buildpb.Target_RULE.Enum(),
+				Rule: &buildpb.Rule{
+					Name:      StringPtr("//pkg:app"),
+					RuleClass: StringPtr("kt_jvm_library"),
+					RuleInput: []string{"//pkg:pkg/resources"},
+				},
+			},
+		},
+	}
+
+	result, err := FromProto(context.Background(), qr, t.TempDir(), HashConfig{})
+	require.NoError(t, err)
+
+	assert.NotContains(t, result.Targets, "//pkg:pkg/resources")
+	assert.NotContains(t, result.Targets["//pkg:app"].Deps, "//pkg:pkg/resources")
+	assert.NotNil(t, result.Targets["//pkg:app"].Hash)
+}
+
 func TestFromProtoAllTargetsFileHashes(t *testing.T) {
 	t.Parallel()
 

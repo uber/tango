@@ -214,11 +214,20 @@ func removeURLAttrs(rule *buildpb.Rule) *buildpb.Rule {
 	return &copy
 }
 
+// isDoubledPackageLabel reports whether label's target portion already
+// starts with its own package, e.g. //pkg:pkg/resources. Bazel query can produce one by rendering
+// a workspace-relative string attribute (e.g. resource_strip_prefix) as a
+// pseudo-label. Such labels never correspond to a file on disk.
+func isDoubledPackageLabel(label string) bool {
+	l := labels.Parse(label)
+	return l.Package != "" && strings.HasPrefix(l.Target, l.Package+"/")
+}
+
 func toTarget(t *buildpb.Target) (*Target, error) {
 	switch *t.Type {
 	case buildpb.Target_RULE:
 		targetName := t.Rule.GetName()
-		deps := slices.Clone(t.Rule.GetRuleInput())
+		deps := slices.DeleteFunc(slices.Clone(t.Rule.GetRuleInput()), isDoubledPackageLabel)
 		// sorting dependencies of rules, just like we do when calculating hashes for these rules.
 		sort.Strings(deps)
 		h := newHash()
