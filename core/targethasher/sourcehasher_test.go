@@ -157,6 +157,34 @@ func TestDiskHashHelper_HashesDirectory(t *testing.T) {
 	assert.NotEmpty(t, got, "expected non-empty hash for directory")
 }
 
+func TestDiskHashHelper_MissingFileProducesDeterministicHash(t *testing.T) {
+	h := &diskHashHelper{
+		workspaceroot:   t.TempDir(),
+		knownFileHashes: map[string][]byte{},
+	}
+
+	sfA := &buildpb.SourceFile{
+		Name:     strPtr("//pkg:missing_a.txt"),
+		Location: strPtr(filepath.Join(t.TempDir(), "does", "not", "exist_a.txt")),
+	}
+	sfB := &buildpb.SourceFile{
+		Name:     strPtr("//pkg:missing_b.txt"),
+		Location: strPtr(filepath.Join(t.TempDir(), "does", "not", "exist_b.txt")),
+	}
+
+	hashA, err := h.HashSourceFile(context.Background(), sfA)
+	require.NoError(t, err)
+	assert.NotEmpty(t, hashA)
+
+	hashA2, err := h.HashSourceFile(context.Background(), sfA)
+	require.NoError(t, err)
+	assert.Equal(t, hashA, hashA2, "same missing file should produce the same hash")
+
+	hashB, err := h.HashSourceFile(context.Background(), sfB)
+	require.NoError(t, err)
+	assert.NotEqual(t, hashA, hashB, "different missing files should produce different hashes")
+}
+
 func strPtr(s string) *string { return &s }
 
 func TestDiskHashHelper_RespectsContextCancellation(t *testing.T) {

@@ -17,6 +17,7 @@ package targethasher
 import (
 	"context"
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -92,26 +93,34 @@ func (hh *diskHashHelper) HashSourceFile(ctx context.Context, sourceFile *buildp
 		return h, nil
 	}
 
+	h := newHash()
+	io.WriteString(h, sourceFile.GetName())
+
 	fi, err := os.Stat(location)
+	if errors.Is(err, os.ErrNotExist) {
+		return h.Sum(nil), nil
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	var hash hash.Hash
+	var contentHash hash.Hash
 	if fi.IsDir() {
-		hash, err = hashDir(ctx, location)
+		contentHash, err = hashDir(ctx, location)
 	} else {
-		hash, err = hashFile(location)
+		contentHash, err = hashFile(location)
 	}
 	if err != nil {
 		return nil, err
 	}
+
+	h.Write(contentHash.Sum(nil))
 
 	for _, v := range nonDefaultVisibilities {
-		hash.Write([]byte(v))
+		h.Write([]byte(v))
 	}
 
-	return hash.Sum(nil), nil
+	return h.Sum(nil), nil
 }
 
 func hashFile(path string) (hash.Hash, error) {
