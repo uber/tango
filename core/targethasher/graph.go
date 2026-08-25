@@ -321,6 +321,9 @@ func GetInternalTargetsWithoutHashAndRootInfo(ctx context.Context, r *buildpb.Qu
 		if t.GetRule() != nil && strings.HasPrefix(t.GetRule().GetName(), externalWorkspaceRulePrefix) {
 			continue
 		}
+		if t.GetSourceFile() != nil && isDoubledPackageLabel(t.GetSourceFile().GetName()) {
+			continue
+		}
 		internalProtos = append(internalProtos, t)
 	}
 

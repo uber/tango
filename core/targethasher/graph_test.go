@@ -185,9 +185,10 @@ func TestFromProtoWithExcludedRegex(t *testing.T) {
 }
 
 func TestFromProtoWithDoubledPackageLabel(t *testing.T) {
-	// Simulates the pseudo-label Bazel query produces from a
+	// Simulates the pseudo-labels Bazel query produces from a
 	// workspace-relative string attribute like resource_strip_prefix: the
-	// package gets doubled into the target name.
+	// package gets doubled into the target name. The label appears both as a
+	// RuleInput on the rule and as a standalone SourceFile proto entry.
 	qr := &buildpb.QueryResult{
 		Target: []*buildpb.Target{
 			{
@@ -196,6 +197,12 @@ func TestFromProtoWithDoubledPackageLabel(t *testing.T) {
 					Name:      StringPtr("//pkg:app"),
 					RuleClass: StringPtr("kt_jvm_library"),
 					RuleInput: []string{"//pkg:pkg/resources"},
+				},
+			},
+			{
+				Type: buildpb.Target_SOURCE_FILE.Enum(),
+				SourceFile: &buildpb.SourceFile{
+					Name: StringPtr("//pkg:pkg/resources"),
 				},
 			},
 		},
