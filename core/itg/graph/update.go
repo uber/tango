@@ -186,6 +186,23 @@ func computeAvailableHashes(
 
 // computeHashes computes hashes recursively for the given target ID.
 func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, error) {
+	computed := make(map[int][]byte)
+	hash, err := g.computeHashesRecursively(ctx, id, NewIntSet(), computed)
+	if err != nil {
+		return nil, err
+	}
+	for targetID, targetHash := range computed {
+		g.OptimizedTargets[targetID].Hash = targetHash
+	}
+	return hash, nil
+}
+
+func (g *OptimizedGraph) computeHashesRecursively(
+	ctx context.Context,
+	id int,
+	visiting IntSet,
+	computed map[int][]byte,
+) ([]byte, error) {
 	if ctx.Err() != nil {
 		return nil, context.Cause(ctx)
 	}
@@ -201,9 +218,16 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 	if target.Hash != nil {
 		return target.Hash, nil
 	}
+	if hash, ok := computed[id]; ok {
+		return hash, nil
+	}
+	if visiting.Contains(id) {
+		return []byte{}, nil
+	}
 
-	// mark as visiting to handle cycles
-	target.Hash = []byte{}
+	visiting.Insert(id)
+	defer visiting.Delete(id)
+
 	var hash []byte
 	switch g.RuleTypeIDToString[target.RuleType] {
 	case targethasher.SourceFileType, targethasher.PackageGroup:
@@ -214,7 +238,7 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 			singleDep = dep
 			break
 		}
-		dephash, err := g.computeHashes(ctx, singleDep)
+		dephash, err := g.computeHashesRecursively(ctx, singleDep, visiting, computed)
 		if err != nil {
 			return nil, err
 		}
@@ -230,7 +254,7 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 			return strings.Compare(g.TargetIDToString[i], g.TargetIDToString[j])
 		})
 		for _, dep := range depIDs {
-			dephash, err := g.computeHashes(ctx, dep)
+			dephash, err := g.computeHashesRecursively(ctx, dep, visiting, computed)
 			if err != nil {
 				return nil, err
 			}
@@ -239,7 +263,7 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 		hash = h.Sum(nil)
 	}
 	if hash != nil {
-		target.Hash = hash
+		computed[id] = hash
 	}
 	return hash, nil
 }

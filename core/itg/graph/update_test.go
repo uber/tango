@@ -15,8 +15,10 @@
 package graph
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
+	"encoding/gob"
 	"testing"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
@@ -230,5 +232,67 @@ func TestComputeHashes(t *testing.T) {
 		h.Write(hwod)
 		h.Write(depHash)
 		assert.Equal(t, h.Sum(nil), got)
+	})
+
+	t.Run("failed traversal restores hashes before retry", func(t *testing.T) {
+		t.Parallel()
+		goodName := "//pkg:a_good"
+		badName := "//pkg:z_bad.go"
+		rootName := "//pkg:root"
+		goodHashWithoutDeps := []byte{0x01, 0x02}
+		rootHashWithoutDeps := []byte{0x03, 0x04}
+		g := OptimizeGraph(map[string]*targethasher.Target{
+			goodName: {
+				Name:            goodName,
+				RuleType:        "go_library",
+				HashWithoutDeps: goodHashWithoutDeps,
+			},
+			badName: {
+				Name:     badName,
+				RuleType: targethasher.SourceFileType,
+			},
+			rootName: {
+				Name:            rootName,
+				RuleType:        "go_library",
+				HashWithoutDeps: rootHashWithoutDeps,
+				Deps:            []string{badName, goodName},
+			},
+		})
+		goodID := g.TargetNameToID[goodName]
+		badID := g.TargetNameToID[badName]
+		rootID := g.TargetNameToID[rootName]
+
+		_, err := g.computeHashes(context.Background(), rootID)
+		require.Error(t, err)
+		assert.Nil(t, g.OptimizedTargets[rootID].Hash)
+		assert.Nil(t, g.OptimizedTargets[goodID].Hash)
+		assert.Nil(t, g.OptimizedTargets[badID].Hash)
+
+		var persisted bytes.Buffer
+		require.NoError(t, gob.NewEncoder(&persisted).Encode(g))
+		var restored OptimizedGraph
+		require.NoError(t, gob.NewDecoder(&persisted).Decode(&restored))
+		assert.Nil(t, restored.OptimizedTargets[rootID].Hash)
+		assert.Nil(t, restored.OptimizedTargets[goodID].Hash)
+
+		badHash := []byte{0x05, 0x06}
+		g.OptimizedTargets[badID].Hash = badHash
+
+		got, err := g.computeHashes(context.Background(), rootID)
+		require.NoError(t, err)
+
+		goodHasher := sha1.New()
+		goodHasher.Write(goodHashWithoutDeps)
+		goodHash := goodHasher.Sum(nil)
+		rootHasher := sha1.New()
+		rootHasher.Write(rootHashWithoutDeps)
+		rootHasher.Write(goodHash)
+		rootHasher.Write(badHash)
+		expected := rootHasher.Sum(nil)
+
+		assert.Equal(t, goodHash, g.OptimizedTargets[goodID].Hash)
+		assert.Equal(t, expected, got)
+		assert.Equal(t, expected, g.OptimizedTargets[rootID].Hash)
+		assert.NotEmpty(t, got)
 	})
 }
