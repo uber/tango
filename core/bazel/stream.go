@@ -23,20 +23,18 @@ import (
 	"google.golang.org/protobuf/encoding/protodelim"
 )
 
-func streamOutput(ctx context.Context, src io.Reader, dst io.Writer) error {
+func streamOutput(src io.Reader, dst io.Writer) error {
 	_, err := io.Copy(dst, src)
-	if cause := context.Cause(ctx); cause != nil {
-		return cause
+	if err != nil {
+		// Keep draining even if the destination fails so the command-side copy
+		// goroutine cannot remain blocked on the bridge pipe.
+		_, _ = io.Copy(io.Discard, src)
 	}
 	return err
 }
 
 func streamAndParseTargets(ctx context.Context, src io.Reader, dst io.Writer) (*buildpb.QueryResult, error) {
-	queryResult, err := getQueryResult(ctx, src, dst)
-	if cause := context.Cause(ctx); cause != nil {
-		return nil, cause
-	}
-	return queryResult, err
+	return getQueryResult(ctx, src, dst)
 }
 
 // cancelCheckInterval is how often we poll ctx.Err() inside per-target hot loops.

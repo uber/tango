@@ -16,7 +16,6 @@ package bazel
 
 import (
 	"context"
-	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -79,7 +78,7 @@ func TestNewBazelClient_WithNilExecCommand(t *testing.T) {
 
 	cmd := client.execCommandContext(context.Background(), "test", "arg1")
 	require.NotNil(t, cmd)
-	execCmd, ok := cmd.(*exec.Cmd)
+	execCmd, ok := cmd.(*execCommander)
 	require.True(t, ok)
 	assert.Equal(t, "/workspace", execCmd.Dir)
 	assert.Contains(t, execCmd.Env, "KEY=value")

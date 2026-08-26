@@ -29,6 +29,7 @@ go_test(
     embed = [":bazel"],
     deps = [
         "//core/bazel/commandermock",
+        "//core/execcmd",
         "@com_github_bazelbuild_buildtools//build_proto",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",

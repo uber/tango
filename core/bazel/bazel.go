@@ -86,7 +86,7 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 				cmd.Env = append(cmd.Env, key+"="+value)
 			}
 			cmd.Stdin = nil
-			return cmd
+			return &execCommander{Cmd: cmd}
 		}
 	}
 	timeout := p.QueryTimeout

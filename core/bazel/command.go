@@ -16,11 +16,20 @@ package bazel
 
 import (
 	"io"
+	"os/exec"
 )
 
 type commander interface {
-	StdoutPipe() (io.ReadCloser, error)
-	StderrPipe() (io.ReadCloser, error)
-	Start() error
+	Start(stdout, stderr io.Writer) error
 	Wait() error
+}
+
+type execCommander struct {
+	*exec.Cmd
+}
+
+func (c *execCommander) Start(stdout, stderr io.Writer) error {
+	c.Stdout = stdout
+	c.Stderr = stderr
+	return c.Cmd.Start()
 }

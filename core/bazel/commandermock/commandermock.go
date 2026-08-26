@@ -41,47 +41,17 @@ func (m *Mockcommander) EXPECT() *MockcommanderMockRecorder {
 }
 
 // Start mocks base method.
-func (m *Mockcommander) Start() error {
+func (m *Mockcommander) Start(stdout, stderr io.Writer) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Start")
+	ret := m.ctrl.Call(m, "Start", stdout, stderr)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Start indicates an expected call of Start.
-func (mr *MockcommanderMockRecorder) Start() *gomock.Call {
+func (mr *MockcommanderMockRecorder) Start(stdout, stderr any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*Mockcommander)(nil).Start))
-}
-
-// StderrPipe mocks base method.
-func (m *Mockcommander) StderrPipe() (io.ReadCloser, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StderrPipe")
-	ret0, _ := ret[0].(io.ReadCloser)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// StderrPipe indicates an expected call of StderrPipe.
-func (mr *MockcommanderMockRecorder) StderrPipe() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StderrPipe", reflect.TypeOf((*Mockcommander)(nil).StderrPipe))
-}
-
-// StdoutPipe mocks base method.
-func (m *Mockcommander) StdoutPipe() (io.ReadCloser, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StdoutPipe")
-	ret0, _ := ret[0].(io.ReadCloser)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// StdoutPipe indicates an expected call of StdoutPipe.
-func (mr *MockcommanderMockRecorder) StdoutPipe() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StdoutPipe", reflect.TypeOf((*Mockcommander)(nil).StdoutPipe))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*Mockcommander)(nil).Start), stdout, stderr)
 }
 
 // Wait mocks base method.

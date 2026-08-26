@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -58,15 +59,10 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	defer cancel()
 	// setup bazel query command
 	cmd := b.setupCommand(cmdCtx, query, startupOptions, additionalArgs...)
-	// Get pipes for stdout and stderr BEFORE starting the process
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, err
-	}
+	stdout, stdoutWriter := io.Pipe()
+	defer func() { _ = stdout.Close() }()
+	stderr, stderrWriter := io.Pipe()
+	defer func() { _ = stderr.Close() }()
 	// In streamLogs mode, stderr goes straight to os.Stderr so operators see
 	// bazel progress live; otherwise it's captured for inclusion in failure
 	// errors (see wrapQueryFailure).
@@ -74,29 +70,45 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 	if b.streamLogs {
 		stderrSink = os.Stderr
 	}
-	// orchestrate `allOfFailFast`
-	// create a `g` group and a new `gCtx` derived from our 15 minute timeout `ctx`.
-	g, gCtx := errgroup.WithContext(cmdCtx)
-
-	// Start the process
-	if err = cmd.Start(); err != nil {
-		return nil, err
-	}
-	// stream and parse targets
-	g.Go(func() error {
+	var readers errgroup.Group
+	// Readers must keep draining until Wait returns. If cancellation made them
+	// stop early, os/exec's copy goroutines could block writing to these bridge
+	// pipes and prevent WaitDelay from completing command cleanup.
+	drainCtx := context.WithoutCancel(cmdCtx)
+	readers.Go(func() error {
 		var err error
-		queryResults, err = streamAndParseTargets(gCtx, stdout, &stdoutBuf)
+		queryResults, err = streamAndParseTargets(drainCtx, stdout, &stdoutBuf)
 		return err
 	})
-	// stream stderr
-	g.Go(func() error {
-		return streamOutput(gCtx, stderr, stderrSink)
+	readers.Go(func() error {
+		return streamOutput(stderr, stderrSink)
 	})
-	streamErr := g.Wait()
-	// Wait closes the StdoutPipe and StderrPipe after observing process exit.
-	// Drain both streams first so a fast-exiting Bazel process cannot close a
-	// pipe while a reader is still consuming its buffered output.
+
+	// Supplying io.Pipe writers makes os/exec own the actual child pipes and
+	// their copy goroutines. Wait can therefore run while the readers drain,
+	// and WaitDelay can close inherited child descriptors after process exit.
+	if err := cmd.Start(stdoutWriter, stderrWriter); err != nil {
+		_ = stdoutWriter.Close()
+		_ = stderrWriter.Close()
+		_ = readers.Wait()
+		return nil, err
+	}
 	waitErr := cmd.Wait()
+	// os/exec does not own the bridge writers, so close them after its copy
+	// goroutines have stopped, then join both readers before inspecting output.
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
+	streamErr := readers.Wait()
+	if ctxErr := context.Cause(cmdCtx); ctxErr != nil {
+		cause := error(ctxErr)
+		if waitErr != nil && !errors.Is(waitErr, ctxErr) {
+			cause = errors.Join(cause, waitErr)
+		}
+		if streamErr != nil && !errors.Is(streamErr, ctxErr) {
+			cause = errors.Join(cause, streamErr)
+		}
+		return nil, b.wrapQueryFailure(cmdCtx, "bazel query canceled", cause, &stderrBuf)
+	}
 	if waitErr != nil {
 		return queryResults, b.wrapQueryFailure(cmdCtx, "bazel query failed", waitErr, &stderrBuf)
 	}
@@ -116,7 +128,7 @@ func (b *BazelClient) executeQueryInternal(ctx context.Context, query string, st
 // contents are appended so the failure is self-contained. When streamLogs is
 // on the operator has already seen stderr live, so it's omitted.
 func (b *BazelClient) wrapQueryFailure(ctx context.Context, msg string, cause error, stderrBuf *bytes.Buffer) error {
-	if ctxErr := ctx.Err(); ctxErr == context.DeadlineExceeded {
+	if ctxErr := ctx.Err(); ctxErr == context.DeadlineExceeded && !errors.Is(cause, ctxErr) {
 		cause = fmt.Errorf("%w: %w", ctxErr, cause)
 	}
 	tail := ""
