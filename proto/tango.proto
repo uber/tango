@@ -71,8 +71,6 @@ message OutputConfig {
     bool include_attributes = 2;
     // Indicates if hashes should be computed for each target and included in the response
     bool include_hashes = 3;
-    // Indicates if only root targets (i.e. targets that are not depended on by any other targets) should be included in the response
-    bool roots_only = 4;
     // Maximum BFS distance from a distance-0 seed to include in the response.
     // Semantics match ChangedTarget.distance: -1 = no filtering (default behavior),
     // 0 = only seeds, 1 = seeds and their immediate reverse deps, etc.
