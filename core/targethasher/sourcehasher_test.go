@@ -157,6 +157,111 @@ func TestDiskHashHelper_HashesDirectory(t *testing.T) {
 	assert.NotEmpty(t, got, "expected non-empty hash for directory")
 }
 
+func TestHashDir_RenameChangesHash(t *testing.T) {
+	before := t.TempDir()
+	after := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(before, "before.txt"), []byte("same contents"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(after, "after.txt"), []byte("same contents"), 0o644))
+
+	assert.NotEqual(t, hashDirectoryForTest(t, before), hashDirectoryForTest(t, after))
+}
+
+func TestHashDir_HashesSymlinkEntriesAndTargets(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "first.txt"), []byte("same contents"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "second.txt"), []byte("same contents"), 0o644))
+
+	withoutSymlink := hashDirectoryForTest(t, root)
+	link := filepath.Join(root, "link")
+	if err := os.Symlink("first.txt", link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	firstTarget := hashDirectoryForTest(t, root)
+	assert.NotEqual(t, withoutSymlink, firstTarget)
+
+	require.NoError(t, os.Remove(link))
+	require.NoError(t, os.Symlink("second.txt", link))
+	secondTarget := hashDirectoryForTest(t, root)
+	assert.NotEqual(t, firstTarget, secondTarget)
+
+	require.NoError(t, os.Rename(link, filepath.Join(root, "renamed-link")))
+	assert.NotEqual(t, secondTarget, hashDirectoryForTest(t, root))
+}
+
+func TestHashDir_NormalizesAbsoluteSymlinkTargets(t *testing.T) {
+	left := t.TempDir()
+	right := t.TempDir()
+	writeDirectoryTestFile(t, left, "target.txt", "same contents")
+	writeDirectoryTestFile(t, right, "target.txt", "same contents")
+
+	if err := os.Symlink(filepath.Join(left, "target.txt"), filepath.Join(left, "link")); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	require.NoError(t, os.Symlink(filepath.Join(right, "target.txt"), filepath.Join(right, "link")))
+
+	assert.Equal(t, hashDirectoryForTest(t, left), hashDirectoryForTest(t, right))
+}
+
+func TestHashDir_IsDeterministicAcrossCreationOrder(t *testing.T) {
+	left := t.TempDir()
+	right := t.TempDir()
+
+	for _, relativePath := range []string{"z.txt", filepath.Join("nested", "b.txt"), filepath.Join("nested", "a.txt")} {
+		writeDirectoryTestFile(t, left, relativePath, relativePath)
+	}
+	for _, relativePath := range []string{filepath.Join("nested", "a.txt"), filepath.Join("nested", "b.txt"), "z.txt"} {
+		writeDirectoryTestFile(t, right, relativePath, relativePath)
+	}
+
+	leftHash := hashDirectoryForTest(t, left)
+	assert.Equal(t, leftHash, hashDirectoryForTest(t, left))
+	assert.Equal(t, leftHash, hashDirectoryForTest(t, right))
+}
+
+func TestHashDir_DistinguishesDirectoryStructures(t *testing.T) {
+	t.Run("regular file from nested file", func(t *testing.T) {
+		fileTree := t.TempDir()
+		nestedTree := t.TempDir()
+		writeDirectoryTestFile(t, fileTree, "entry", "same contents")
+		writeDirectoryTestFile(t, nestedTree, filepath.Join("entry", "child"), "same contents")
+
+		assert.NotEqual(t, hashDirectoryForTest(t, fileTree), hashDirectoryForTest(t, nestedTree))
+	})
+
+	t.Run("empty directory from empty tree", func(t *testing.T) {
+		emptyTree := t.TempDir()
+		directoryTree := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(directoryTree, "empty"), 0o755))
+
+		assert.NotEqual(t, hashDirectoryForTest(t, emptyTree), hashDirectoryForTest(t, directoryTree))
+	})
+}
+
+func TestHashDir_OmitsFileMode(t *testing.T) {
+	regularTree := t.TempDir()
+	executableTree := t.TempDir()
+	writeDirectoryTestFile(t, regularTree, "tool", "same contents")
+	writeDirectoryTestFile(t, executableTree, "tool", "same contents")
+	require.NoError(t, os.Chmod(filepath.Join(regularTree, "tool"), 0o644))
+	require.NoError(t, os.Chmod(filepath.Join(executableTree, "tool"), 0o755))
+
+	assert.Equal(t, hashDirectoryForTest(t, regularTree), hashDirectoryForTest(t, executableTree))
+}
+
+func hashDirectoryForTest(t *testing.T, root string) []byte {
+	t.Helper()
+	h, err := hashDir(context.Background(), root)
+	require.NoError(t, err)
+	return h.Sum(nil)
+}
+
+func writeDirectoryTestFile(t *testing.T, root, relativePath, contents string) {
+	t.Helper()
+	path := filepath.Join(root, relativePath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o644))
+}
+
 func TestDiskHashHelper_MissingFileProducesDeterministicHash(t *testing.T) {
 	h := &diskHashHelper{
 		workspaceroot:   t.TempDir(),

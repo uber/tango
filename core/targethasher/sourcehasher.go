@@ -40,9 +40,15 @@ const (
 	_defaultSourceFileVisibility = "//visibility:private"
 )
 
-// cancelCheckInterval is the number of files hashed between cancellation
-// checks during a directory walk.
+// cancelCheckInterval is the number of directory entries processed between
+// cancellation checks during a directory walk.
 const cancelCheckInterval = 1024
+
+const (
+	directoryEntryMarker byte = iota
+	regularFileEntryMarker
+	symlinkEntryMarker
+)
 
 // SourceHasher provides hashes for source nodes in the target graph. These
 // can be calculated based on disk contents or form other sources such as a
@@ -146,36 +152,99 @@ func hashFile(path string) (hash.Hash, error) {
 	return hash, nil
 }
 
+// hashDir returns a deterministic hash of a directory tree by streaming
+// WalkDir's lexical traversal into the digest without buffering the tree. It
+// hashes each entry's local name and platform-independent kind together with
+// regular-file contents or symlink targets, while excluding checkout location
+// and filesystem mode bits.
 func hashDir(ctx context.Context, root string) (hash.Hash, error) {
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
 
 	dirHash := newHash()
-	var fileCount int
-	walkDirFunc := func(path string, d fs.DirEntry, err error) error {
+	var entryCount int
+	walkDirFunc := func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
-		if d.Type().IsRegular() {
-			if fileCount%cancelCheckInterval == 0 {
-				if err := context.Cause(ctx); err != nil {
-					return err
-				}
+		if path == root {
+			return nil
+		}
+		if entryCount%cancelCheckInterval == 0 {
+			if err := context.Cause(ctx); err != nil {
+				return err
 			}
-			fileCount++
+		}
+		entryCount++
+
+		switch {
+		case entry.Type()&fs.ModeSymlink != 0:
+			writeDirectoryEntryHeader(dirHash, symlinkEntryMarker, entry.Name())
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			target, err = stableSymlinkTarget(path, target)
+			if err != nil {
+				return err
+			}
+			writeFramedDirectoryBytes(dirHash, []byte(target))
+		case entry.IsDir():
+			writeDirectoryEntryHeader(dirHash, directoryEntryMarker, entry.Name())
+		default:
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("unsupported directory entry %q with mode %s", path, info.Mode())
+			}
+			writeDirectoryEntryHeader(dirHash, regularFileEntryMarker, entry.Name())
 			fileHash, err := hashFile(path)
 			if err != nil {
 				return err
 			}
-			dirHash.Write(fileHash.Sum(nil))
+			writeDirectoryBytes(dirHash, fileHash.Sum(nil))
 		}
 		return nil
 	}
 
 	err := filepath.WalkDir(root, walkDirFunc)
 	return dirHash, err
+}
+
+func stableSymlinkTarget(path, target string) (string, error) {
+	if filepath.IsAbs(target) {
+		relativeTarget, err := filepath.Rel(filepath.Dir(path), target)
+		if err != nil {
+			return "", fmt.Errorf("make symlink target %q relative to %q: %w", target, path, err)
+		}
+		target = relativeTarget
+	}
+	return filepath.ToSlash(filepath.Clean(target)), nil
+}
+
+func writeDirectoryEntryHeader(h hash.Hash, marker byte, name string) {
+	writeDirectoryBytes(h, []byte{marker})
+	writeFramedDirectoryBytes(h, []byte(name))
+}
+
+func writeFramedDirectoryBytes(h hash.Hash, value []byte) {
+	writeDirectoryUint64(h, uint64(len(value)))
+	writeDirectoryBytes(h, value)
+}
+
+func writeDirectoryUint64(h hash.Hash, value uint64) {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], value)
+	writeDirectoryBytes(h, encoded[:])
+}
+
+func writeDirectoryBytes(h hash.Hash, value []byte) {
+	// hash.Hash.Write is specified to consume all bytes and never return an
+	// error, so there is no actionable error to propagate here.
+	_, _ = h.Write(value)
 }
 
 func filterVisibilityLabels(labels []string) (res []string) {
