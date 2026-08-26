@@ -2,22 +2,35 @@
 # Supported types: "memory", "disk"
 storage:
   type: "memory"
-  # Disk storage configuration (used when type is "disk")
+  # Required when type is "disk".
   # disk:
   #   root_path: "/tmp/tango-storage"
 
 # Repository configuration
 repository:
   - remote: "https://github.com/uber/tango.git"
-    full_hash_repos:
-      - ""
+    # External repositories to hash file-by-file. The main repository is always fully hashed.
+    full_hash_repos: []
+    # Regular expressions matched against target labels.
     excluded_files:
       - "^@@?bazel_tools/"
     bzlmod_enabled: true
-    query_timeout_seconds: 300
+    # Empty uses a downloaded and cached Bazelisk binary.
+    bazel_command_path: ""
+    bazel_extra_args: []
+    bazel_startup_options: []
+    stream_bazel_logs: false
+    query_timeout_seconds: 600
+    # Empty means all attributes can identify a directly changed target.
+    seed_attributes: []
+    # Exact repo-relative paths whose changes should invalidate every target.
+    all_targets_files: []
 
 # Service configuration
 service:
   max_worker_pool_size: 5
-  # root for origin clones and worker checkouts; required
+  # Root for origin clones and worker checkouts; required.
   workspaces_root_path: "/tmp/tango-repo-manager"
+  max_message_bytes: 4250000
+  graph_format: "gob"
+  shadow_compare: false

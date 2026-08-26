@@ -4,11 +4,42 @@ A demonstration server that shows how to run Tango end-to-end. It boots a YARPC/
 
 ## Configuration
 
-The server reads `tango-config.yaml`. Top-level sections:
+The server reads [`tango-config.yaml`](tango-config.yaml). Unknown fields are rejected, so configuration typos fail at startup.
 
-- `storage` — `type: memory` (default) or `type: disk` with a `disk.root_path`. Unknown storage types are rejected at parse time.
-- `repository` — a list of remotes Tango is allowed to operate on. Each entry supports `remote` (required), `full_hash_repos` (list of query-scope prefixes for full hashing), `excluded_files` (regexes of files to skip), `exclude_external_targets`, `bzlmod_enabled`, `bazel_command` (path to the Bazel binary), `bazel_extra_args`, `bazel_startup_options`, `stream_bazel_logs`, and `query_timeout` (seconds; defaults to 900, i.e. 15 minutes).
-- `service` — `worker_pool_size` (required, > 0), `repo_manager_clone_path` (root for origin clones; defaults to `$TMPDIR/tango-repo-manager`), `worker_root_path` (root for per-worker checkouts; defaults to `repo_manager_clone_path/.workers`), and `max_message_bytes` (max serialized bytes per streamed gRPC message; defaults to ~4.25 MB). Both directories are created on start and removed on clean shutdown.
+### Storage
+
+| Field | Required/default | Description |
+|---|---|---|
+| `storage.type` | Optional; defaults to `memory` | Storage backend. Accepted values are `memory` and `disk`. |
+| `storage.disk.root_path` | Required when `storage.type` is `disk` | Directory used by the disk storage backend. |
+
+### Repositories
+
+`repository` is a list of per-repository settings. Each `remote` must be unique and must exactly match the remote sent by clients.
+
+| Field | Required/default | Description |
+|---|---|---|
+| `repository[].remote` | Required | URL Tango clones and uses to look up this entry. |
+| `repository[].full_hash_repos` | Optional; defaults to `[]` | External repositories whose individual files should be hashed instead of sharing the repository-rule hash. The main repository is always fully hashed. |
+| `repository[].excluded_files` | Optional; defaults to `[]` | Regular expressions for target labels to exclude from the hashed graph. |
+| `repository[].bzlmod_enabled` | Optional; defaults to `true` | Whether the repository uses Bzlmod. Set to `false` for legacy WORKSPACE dependency resolution. |
+| `repository[].bazel_command_path` | Optional; defaults to empty | Bazel executable path. When empty, Tango downloads and caches Bazelisk automatically. |
+| `repository[].bazel_extra_args` | Optional; defaults to `[]` | Additional arguments passed to `bazel query` after the subcommand. |
+| `repository[].bazel_startup_options` | Optional; defaults to `[]` | Bazel startup options placed before the `query` subcommand. |
+| `repository[].stream_bazel_logs` | Optional; defaults to `false` | Whether Bazel stderr is streamed to the server process while a query runs. |
+| `repository[].query_timeout_seconds` | Optional; defaults to `600` for omitted or non-positive values | Bazel query timeout in seconds. |
+| `repository[].seed_attributes` | Optional; defaults to `[]` | Attribute names that can make a target directly changed. When empty, all attributes are considered. |
+| `repository[].all_targets_files` | Optional; defaults to `[]` | Exact repo-relative paths whose content changes make every target in the newer graph changed. |
+
+### Service
+
+| Field | Required/default | Description |
+|---|---|---|
+| `service.max_worker_pool_size` | Required; must be greater than `0` | Maximum concurrent requests per repository. |
+| `service.workspaces_root_path` | Required | Root directory for origin clones and worker checkouts. The example server creates it at startup and removes it on clean shutdown. |
+| `service.max_message_bytes` | Optional; defaults to `4250000` for omitted or non-positive values | Maximum serialized bytes per streamed gRPC message. |
+| `service.graph_format` | Optional; defaults to `gob` | Cached target-graph format. Accepted values are `gob` and `tgb`. |
+| `service.shadow_compare` | Optional; defaults to `false` | With `graph_format: tgb`, also runs the incumbent comparison in the background and reports mismatches without changing the served result. |
 
 ## Running
 
