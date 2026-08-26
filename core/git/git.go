@@ -89,6 +89,40 @@ func New(directory string, logger *zap.Logger) Interface {
 	}
 }
 
+// RestoreWorktree discards tracked, untracked, and ignored changes from a Git
+// worktree and restores all initialized submodules to their recorded commits.
+func RestoreWorktree(ctx context.Context, directory string) error {
+	return restoreWorktree(ctx, directory, &osExecRunner{})
+}
+
+func restoreWorktree(ctx context.Context, directory string, runner commandRunner) error {
+	ctx, cancel := context.WithTimeout(ctx, _gitTimeout)
+	defer cancel()
+
+	statusArgs := []string{"status", "--porcelain", "--untracked-files=all", "--ignored", "--ignore-submodules=none"}
+	status, err := runner.output(ctx, directory, "git", statusArgs...)
+	if err != nil {
+		return wrapError(ctx, statusArgs, err)
+	}
+	if len(bytes.TrimSpace(status)) == 0 {
+		return nil
+	}
+
+	commands := [][]string{
+		{"reset", "--hard", "HEAD"},
+		{"clean", "-ffdx"},
+		{"submodule", "foreach", "--recursive", "git", "reset", "--hard", "HEAD"},
+		{"submodule", "foreach", "--recursive", "git", "clean", "-ffdx"},
+		{"submodule", "update", "--init", "--recursive", "--force"},
+	}
+	for _, args := range commands {
+		if err := runner.run(ctx, directory, "git", args...); err != nil {
+			return wrapError(ctx, args, err)
+		}
+	}
+	return nil
+}
+
 // wrapError wraps a non-nil err with the failing git command's arguments,
 // additionally wrapping ErrFatal if the command exited with a fatal (128) or
 // usage (129) exit code, as opposed to a non-fatal, conditional exit code

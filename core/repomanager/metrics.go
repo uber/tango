@@ -25,9 +25,10 @@ import (
 const (
 	_opLease = "lease"
 
-	_stepEnsureOrigin = "ensure_origin_duration"
-	_stepWaitSlot     = "wait_slot_duration"
-	_stepCreateWorker = "create_worker_duration"
+	_stepEnsureOrigin  = "ensure_origin_duration"
+	_stepWaitSlot      = "wait_slot_duration"
+	_stepCreateWorker  = "create_worker_duration"
+	_stepRestoreWorker = "restore_worker_duration"
 )
 
 func recordStep(e *metrics.Emitter, name string, start time.Time, buckets tally.DurationBuckets) {

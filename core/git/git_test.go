@@ -220,6 +220,67 @@ func TestSubmoduleUpdate_usesRunnerWithDirAndArgs(t *testing.T) {
 	assert.EqualValues(t, []string{"submodule", "update", "--init", "--recursive"}, c.args)
 }
 
+func TestRestoreWorktree_usesDestructiveCleanupSequence(t *testing.T) {
+	m := &mockRunner{out: []byte(" M tracked.txt\n")}
+	require.NoError(t, restoreWorktree(context.Background(), "/repo", m))
+
+	require.Len(t, m.calls, 6)
+	assert.Equal(t, "output", m.calls[0].kind)
+	assert.EqualValues(t, []string{"status", "--porcelain", "--untracked-files=all", "--ignored", "--ignore-submodules=none"}, m.calls[0].args)
+	assert.EqualValues(t, []string{"reset", "--hard", "HEAD"}, m.calls[1].args)
+	assert.EqualValues(t, []string{"clean", "-ffdx"}, m.calls[2].args)
+	assert.EqualValues(t, []string{"submodule", "foreach", "--recursive", "git", "reset", "--hard", "HEAD"}, m.calls[3].args)
+	assert.EqualValues(t, []string{"submodule", "foreach", "--recursive", "git", "clean", "-ffdx"}, m.calls[4].args)
+	assert.EqualValues(t, []string{"submodule", "update", "--init", "--recursive", "--force"}, m.calls[5].args)
+	for _, call := range m.calls[1:] {
+		assert.Equal(t, "run", call.kind)
+		assert.Equal(t, "/repo", call.dir)
+		assert.Equal(t, "git", call.name)
+	}
+}
+
+func TestRestoreWorktree_skipsCleanupWhenAlreadyClean(t *testing.T) {
+	m := &mockRunner{}
+	require.NoError(t, restoreWorktree(context.Background(), "/repo", m))
+
+	require.Len(t, m.calls, 1)
+	assert.Equal(t, "output", m.calls[0].kind)
+	assert.Equal(t, "/repo", m.calls[0].dir)
+	assert.Equal(t, "git", m.calls[0].name)
+	assert.EqualValues(t, []string{"status", "--porcelain", "--untracked-files=all", "--ignored", "--ignore-submodules=none"}, m.calls[0].args)
+}
+
+func TestRestoreWorktree_removesTrackedAndUntrackedChanges(t *testing.T) {
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init")
+	runGit(t, repoDir, "config", "user.email", "test@example.com")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	runGit(t, repoDir, "config", "commit.gpgsign", "false")
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, ".gitignore"), []byte("ignored.txt\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "tracked.txt"), []byte("original\n"), 0o644))
+	runGit(t, repoDir, "add", ".gitignore", "tracked.txt")
+	runGit(t, repoDir, "commit", "-m", "initial")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "tracked.txt"), []byte("dirty\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "untracked.txt"), []byte("untracked\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "ignored.txt"), []byte("ignored\n"), 0o644))
+	runGit(t, repoDir, "add", "tracked.txt")
+
+	require.NoError(t, RestoreWorktree(context.Background(), repoDir))
+
+	content, err := os.ReadFile(filepath.Join(repoDir, "tracked.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "original\n", string(content))
+	assert.NoFileExists(t, filepath.Join(repoDir, "untracked.txt"))
+	assert.NoFileExists(t, filepath.Join(repoDir, "ignored.txt"))
+
+	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
+	cmd.Dir = repoDir
+	output, err := cmd.Output()
+	require.NoError(t, err)
+	assert.Empty(t, output)
+}
+
 func TestDiffWithStatus_parsesNameStatusOutput(t *testing.T) {
 	tests := []struct {
 		name    string

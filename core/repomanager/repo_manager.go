@@ -50,6 +50,7 @@ type repoManager struct {
 	logger               *zap.Logger
 	emitter              *metrics.Emitter
 	poolSize             int
+	restoreWorker        func(context.Context, string) error
 
 	mu    sync.Mutex
 	pools map[string]*workerPool
@@ -109,6 +110,7 @@ func NewRepoManager(appCtx context.Context, p Params) (RepoManager, error) {
 		logger:               p.Logger,
 		emitter:              metrics.New(p.Scope).SubScope("repo_manager"),
 		poolSize:             p.PoolSize,
+		restoreWorker:        git.RestoreWorktree,
 		pools:                make(map[string]*workerPool),
 		appCtx:               appCtx,
 	}, nil
@@ -177,13 +179,31 @@ func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (
 		return nil, fmt.Errorf("pool for repo %s: %w", repo, waitErr)
 	}
 
-	// Lazily create the worker clone on first use
+	// Restore reused workers before handing them to another request. If the
+	// worktree cannot be verified clean, quarantine it by recreating the clone.
+	var restoreErr error
+	if slot.created {
+		restoreStart := time.Now()
+		restoreErr = r.restoreWorker(ctx, slot.dir)
+		recordStep(e, _stepRestoreWorker, restoreStart, metrics.FastDurationBuckets)
+		if restoreErr != nil {
+			r.logger.Warn("failed to restore worker; recreating it",
+				zap.String("directory", slot.dir),
+				zap.Error(restoreErr))
+			slot.created = false
+		}
+	}
+
+	// Lazily create new workers and synchronously recreate quarantined workers.
 	if !slot.created {
 		createStart := time.Now()
 		err := r.createWorker(ctx, pool.originDir, slot.dir)
 		recordStep(e, _stepCreateWorker, createStart, metrics.FastDurationBuckets)
 		if err != nil {
 			pool.avail <- slot // return slot so others can retry
+			if restoreErr != nil {
+				return nil, fmt.Errorf("restore worker failed (%v); recreate worker: %w", restoreErr, err)
+			}
 			return nil, fmt.Errorf("create worker: %w", err)
 		}
 		slot.created = true
@@ -227,7 +247,9 @@ func (p *workerPool) ensureOrigin(ctx context.Context, g git.Interface, remote s
 // createWorker creates a worker by cloning the origin with --local
 // (fast and space-efficient).
 func (r *repoManager) createWorker(ctx context.Context, originDir, workerDir string) error {
-	os.RemoveAll(workerDir) // clean up any partial/corrupted previous state
+	if err := os.RemoveAll(workerDir); err != nil {
+		return fmt.Errorf("remove previous worker: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(workerDir), 0o755); err != nil {
 		return err
 	}

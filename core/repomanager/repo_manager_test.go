@@ -19,23 +19,41 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tangogit "github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
+	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
 
+type requestFunc func(context.Context) error
+
+func (f requestFunc) Apply(ctx context.Context) error {
+	return f(ctx)
+}
+
 func newTestRepoManager(t *testing.T, appCtx context.Context, p Params) RepoManager {
 	t.Helper()
 	rm, err := NewRepoManager(appCtx, p)
 	require.NoError(t, err)
+	rm.(*repoManager).restoreWorker = func(context.Context, string) error { return nil }
 	return rm
+}
+
+func runRepoGit(t *testing.T, directory string, args ...string) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "git", args...)
+	cmd.Dir = directory
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v: %s", args, output)
 }
 
 func TestNewRepoManager_InvalidPoolSize(t *testing.T) {
@@ -112,6 +130,91 @@ func TestLease_ReusesWorker_AfterRelease(t *testing.T) {
 
 	// Second lease reuses the same worker — no new clones
 	ws2, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote})
+	require.NoError(t, err)
+	assert.Equal(t, workerDir, ws2.Path())
+	require.NoError(t, ws2.Release())
+}
+
+func TestLease_RestoresWorkerAfterFailedMaterialization(t *testing.T) {
+	sourceDir := filepath.Join(t.TempDir(), "source")
+	require.NoError(t, os.MkdirAll(sourceDir, 0o755))
+	runRepoGit(t, sourceDir, "init")
+	runRepoGit(t, sourceDir, "config", "user.email", "test@example.com")
+	runRepoGit(t, sourceDir, "config", "user.name", "Test User")
+	runRepoGit(t, sourceDir, "config", "commit.gpgsign", "false")
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, ".gitignore"), []byte("generated.txt\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(sourceDir, "tracked.txt"), []byte("original\n"), 0o644))
+	runRepoGit(t, sourceDir, "add", ".gitignore", "tracked.txt")
+	runRepoGit(t, sourceDir, "commit", "-m", "initial")
+
+	root := t.TempDir()
+	rm, err := NewRepoManager(context.Background(), Params{
+		Git:                  tangogit.New(t.TempDir(), zap.NewNop()),
+		Logger:               zap.NewNop(),
+		RepoManagerClonePath: root,
+		PoolSize:             1,
+	})
+	require.NoError(t, err)
+
+	ws1, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: sourceDir})
+	require.NoError(t, err)
+	workerDir := ws1.Path()
+	reuseMarker := filepath.Join(workerDir, ".git", "reuse-marker")
+	require.NoError(t, os.WriteFile(reuseMarker, []byte("keep"), 0o644))
+
+	materializeErr := ws1.ApplyRequests(context.Background(), []workspace.Request{
+		requestFunc(func(context.Context) error {
+			require.NoError(t, os.WriteFile(filepath.Join(workerDir, "tracked.txt"), []byte("dirty\n"), 0o644))
+			require.NoError(t, os.WriteFile(filepath.Join(workerDir, "untracked.txt"), []byte("untracked\n"), 0o644))
+			require.NoError(t, os.WriteFile(filepath.Join(workerDir, "generated.txt"), []byte("generated\n"), 0o644))
+			runRepoGit(t, workerDir, "add", "tracked.txt")
+			return assert.AnError
+		}),
+	})
+	require.ErrorIs(t, materializeErr, assert.AnError)
+	require.NoError(t, ws1.Release())
+
+	ws2, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: sourceDir})
+	require.NoError(t, err)
+	assert.Equal(t, workerDir, ws2.Path())
+	assert.FileExists(t, reuseMarker, "a successfully restored worker should be reused rather than recloned")
+
+	content, err := os.ReadFile(filepath.Join(workerDir, "tracked.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "original\n", string(content))
+	assert.NoFileExists(t, filepath.Join(workerDir, "untracked.txt"))
+	assert.NoFileExists(t, filepath.Join(workerDir, "generated.txt"))
+
+	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
+	cmd.Dir = workerDir
+	output, err := cmd.Output()
+	require.NoError(t, err)
+	assert.Empty(t, output)
+	require.NoError(t, ws2.Release())
+}
+
+func TestLease_RecreatesWorker_WhenRestoreFails(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+	g := gitmock.NewMockInterface(ctrl)
+
+	root := t.TempDir()
+	remote := "git@github.com:org/repo"
+	originDir := filepath.Join(root, "org/repo")
+	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+
+	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
+	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(nil).Times(2)
+
+	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop(), RepoManagerClonePath: root, PoolSize: 1})
+	manager := rm.(*repoManager)
+	manager.restoreWorker = func(context.Context, string) error { return assert.AnError }
+
+	ws1, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
+	require.NoError(t, err)
+	require.NoError(t, ws1.Release())
+
+	ws2, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
 	require.NoError(t, err)
 	assert.Equal(t, workerDir, ws2.Path())
 	require.NoError(t, ws2.Release())
