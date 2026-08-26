@@ -21,6 +21,7 @@ import (
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/bazel/bazelmock"
 	gitmock "github.com/uber/tango/core/git/gitmock"
@@ -60,6 +61,105 @@ func TestCompute_CallsBazelAndReturnsResult(t *testing.T) {
 	assert.Equal(t, 1, len(res.Targets))
 	assert.Equal(t, ruleName, res.Targets[ruleName].Name)
 	assert.Equal(t, ruleClass, res.Targets[ruleName].Rule.GetRuleClass())
+}
+
+func TestCompute_ConfiguresBazelDependencyMode(t *testing.T) {
+	enabled := true
+	disabled := false
+	tests := []struct {
+		name          string
+		bzlmodEnabled *bool
+		expectedMode  bazelDependencyMode
+		expectedQuery string
+		expectedArgs  []string
+	}{
+		{
+			name: "defaults to Bzlmod",
+			expectedMode: bazelDependencyMode{
+				useBzlmod: true,
+				query:     "deps(//...:all-targets)",
+				queryArgs: [2]string{"--enable_bzlmod=true", "--enable_workspace=false"},
+			},
+			expectedQuery: "deps(//...:all-targets)",
+			expectedArgs: []string{
+				"--order_output=no",
+				"--proto:locations",
+				"--noproto:default_values",
+				"--keep_going",
+				"--enable_bzlmod=true",
+				"--enable_workspace=false",
+			},
+		},
+		{
+			name:          "explicitly selects Bzlmod",
+			bzlmodEnabled: &enabled,
+			expectedMode: bazelDependencyMode{
+				useBzlmod: true,
+				query:     "deps(//...:all-targets)",
+				queryArgs: [2]string{"--enable_bzlmod=true", "--enable_workspace=false"},
+			},
+			expectedQuery: "deps(//...:all-targets)",
+			expectedArgs: []string{
+				"--order_output=no",
+				"--proto:locations",
+				"--noproto:default_values",
+				"--keep_going",
+				"--enable_bzlmod=true",
+				"--enable_workspace=false",
+			},
+		},
+		{
+			name:          "explicitly selects WORKSPACE",
+			bzlmodEnabled: &disabled,
+			expectedMode: bazelDependencyMode{
+				query:     "//external:all-targets + deps(//...:all-targets)",
+				queryArgs: [2]string{"--enable_bzlmod=false", "--enable_workspace=true"},
+			},
+			expectedQuery: "//external:all-targets + deps(//...:all-targets)",
+			expectedArgs: []string{
+				"--order_output=no",
+				"--proto:locations",
+				"--noproto:default_values",
+				"--keep_going",
+				"--enable_bzlmod=false",
+				"--enable_workspace=true",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expectedMode, resolveBazelDependencyMode(tt.bzlmodEnabled))
+
+			ctrl := gomock.NewController(t)
+			bazelMock := bazelmock.NewMockBazel(ctrl)
+			gitMock := gitmock.NewMockInterface(ctrl)
+			gitMock.EXPECT().FileHashes(gomock.Any(), "HEAD").Return(map[string][]byte{}, nil)
+			bazelMock.EXPECT().ExecuteQuery(gomock.Any(), gomock.Any()).DoAndReturn(
+				func(_ context.Context, req *bazel.QueryRequest) (*bazel.QueryResponse, error) {
+					assert.Equal(t, tt.expectedQuery, req.Query)
+					assert.Equal(t, []string{"--batch"}, req.StartupOptions)
+					assert.Equal(t, tt.expectedArgs, req.AdditionalArgs)
+					return &bazel.QueryResponse{Result: &buildpb.QueryResult{}}, nil
+				},
+			)
+
+			gr := NewNativeGraphRunner(NativeGraphRunnerParams{
+				BazelClient: bazelMock,
+				GitClient:   gitMock,
+				Config: config.RepositoryConfig{
+					BzlmodEnabled:       tt.bzlmodEnabled,
+					BazelExtraArgs:      []string{"--keep_going"},
+					BazelStartupOptions: []string{"--batch"},
+				},
+			})
+			ws := workspace.NewWorkspace(workspace.WorkspaceParams{Path: t.TempDir()})
+
+			res, err := gr.Compute(context.Background(), ws)
+			require.NoError(t, err)
+			assert.Empty(t, res.Targets)
+		})
+	}
 }
 
 func TestCompute_PropagatesError(t *testing.T) {

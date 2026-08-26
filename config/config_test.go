@@ -75,6 +75,33 @@ service:
 	assert.Equal(t, 1000000, cfg.Service.MaxMessageBytes)
 }
 
+func TestParseBytes_RejectsBazelDependencyModeArgs(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		flag  string
+	}{
+		{name: "Bzlmod enabled in query args", field: "bazel_extra_args", flag: "--enable_bzlmod=true"},
+		{name: "Bzlmod disabled in query args", field: "bazel_extra_args", flag: "--noenable_bzlmod"},
+		{name: "WORKSPACE enabled in query args", field: "bazel_extra_args", flag: "--enable_workspace"},
+		{name: "WORKSPACE disabled in startup options", field: "bazel_startup_options", flag: "--noenable_workspace"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yamlStr := `
+repository:
+  - remote: "https://example.com/repo.git"
+    ` + tt.field + `: ["` + tt.flag + `"]
+service:
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
+`
+			_, err := ParseBytes([]byte(yamlStr))
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestParseBytes_StorageValidation(t *testing.T) {
 	tests := []struct {
 		name    string

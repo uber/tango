@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strings"
 
 	yaml "github.com/goccy/go-yaml"
 )
@@ -105,6 +106,12 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 		if config.Repository[i].BzlmodEnabled == nil {
 			config.Repository[i].BzlmodEnabled = &_bzlmodEnabledDefault
 		}
+		if err := validateBazelDependencyModeArgs(i, "bazel_extra_args", config.Repository[i].BazelExtraArgs); err != nil {
+			return nil, err
+		}
+		if err := validateBazelDependencyModeArgs(i, "bazel_startup_options", config.Repository[i].BazelStartupOptions); err != nil {
+			return nil, err
+		}
 		// Default query_timeout_seconds: 600 seconds (10 minutes).
 		if config.Repository[i].QueryTimeoutSeconds <= 0 {
 			config.Repository[i].QueryTimeoutSeconds = DefaultQueryTimeoutSeconds
@@ -112,4 +119,20 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 		config.repositoryByRemote[remote] = &config.Repository[i]
 	}
 	return &config, nil
+}
+
+func validateBazelDependencyModeArgs(repositoryIndex int, field string, args []string) error {
+	for _, arg := range args {
+		flag, _, _ := strings.Cut(arg, "=")
+		switch flag {
+		case "--enable_bzlmod", "--noenable_bzlmod", "--enable_workspace", "--noenable_workspace":
+			return fmt.Errorf(
+				"repository[%d].%s must not set Bazel dependency mode flag %q; use bzlmod_enabled",
+				repositoryIndex,
+				field,
+				arg,
+			)
+		}
+	}
+	return nil
 }

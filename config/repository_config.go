@@ -35,14 +35,16 @@ type RepositoryConfig struct {
 	FullHashRepos []string `yaml:"full_hash_repos"`
 	ExcludedFiles []string `yaml:"excluded_files"`
 	// BzlmodEnabled indicates whether this repository uses Bzlmod for external
-	// dependency management. Defaults to true if unset. Set to false only for
-	// repositories still using WORKSPACE.
+	// dependency management. Tango explicitly disables WORKSPACE when true and
+	// enables WORKSPACE while disabling Bzlmod when false. Defaults to true if
+	// unset.
 	BzlmodEnabled *bool `yaml:"bzlmod_enabled"`
 	// BazelCommandPath overrides the Bazel binary path. When empty, Tango
 	// automatically downloads and caches Bazelisk from GitHub.
 	BazelCommandPath string `yaml:"bazel_command_path"`
 	// BazelExtraArgs are extra arguments passed to `bazel query` invocations,
 	// inserted between the `query` subcommand and the query expression.
+	// Dependency-mode flags are reserved; use BzlmodEnabled instead.
 	BazelExtraArgs []string `yaml:"bazel_extra_args"`
 	// BazelStartupOptions are Bazel startup flags placed before the `query` subcommand (e.g. "--batch"); empty by default.
 	BazelStartupOptions []string `yaml:"bazel_startup_options"`

@@ -130,6 +130,45 @@ func TestExecuteQuery_WithStartupOptions(t *testing.T) {
 	}, capturedArgs)
 }
 
+func TestSetupCommand_ConstructsBazelDependencyModeArguments(t *testing.T) {
+	tests := []struct {
+		name     string
+		modeArgs []string
+	}{
+		{
+			name:     "Bzlmod",
+			modeArgs: []string{"--enable_bzlmod=true", "--enable_workspace=false"},
+		},
+		{
+			name:     "WORKSPACE",
+			modeArgs: []string{"--enable_bzlmod=false", "--enable_workspace=true"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedArgs []string
+			client, err := NewBazelClient(context.Background(), Params{
+				BazelCommand:  "bazel",
+				WorkspacePath: "/tmp/test",
+				EnvVarsMap:    map[string]string{},
+				Logger:        zap.NewNop(),
+				ExecCommandContext: func(_ context.Context, _ string, arg ...string) commander {
+					capturedArgs = arg
+					return nil
+				},
+			})
+			require.NoError(t, err)
+
+			client.setupCommand(context.Background(), "//...", []string{"--batch"}, tt.modeArgs...)
+
+			expected := []string{"--batch", "query"}
+			expected = append(expected, tt.modeArgs...)
+			expected = append(expected, "--output=streamed_proto", "//...")
+			assert.Equal(t, expected, capturedArgs)
+		})
+	}
+}
+
 func TestExecuteQueryInternal_DrainsStreamsBeforeWait(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	ctrl := gomock.NewController(t)

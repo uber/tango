@@ -43,6 +43,26 @@ type NativeGraphRunnerParams struct {
 	Scope              tally.Scope
 }
 
+type bazelDependencyMode struct {
+	useBzlmod bool
+	query     string
+	queryArgs [2]string
+}
+
+func resolveBazelDependencyMode(enabled *bool) bazelDependencyMode {
+	if enabled == nil || *enabled {
+		return bazelDependencyMode{
+			useBzlmod: true,
+			query:     "deps(//...:all-targets)",
+			queryArgs: [2]string{"--enable_bzlmod=true", "--enable_workspace=false"},
+		}
+	}
+	return bazelDependencyMode{
+		query:     "//external:all-targets + deps(//...:all-targets)",
+		queryArgs: [2]string{"--enable_bzlmod=false", "--enable_workspace=true"},
+	}
+}
+
 // graph runner takes in a bazel query request and computes the graph
 func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
 	return &nativeGraphRunner{
@@ -58,21 +78,17 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	op := metrics.Begin(g.emitter, _opCompute, metrics.SlowDurationBuckets)
 	defer func() { op.Complete(retErr) }()
 
-	bzlmodEnabled := g.config.BzlmodEnabled == nil || *g.config.BzlmodEnabled
-	query := "deps(//...:all-targets)"
-	if !bzlmodEnabled {
-		// //external is only queryable under legacy WORKSPACE resolution;
-		// Bzlmod repos resolve external deps under @@<module> instead.
-		query = "//external:all-targets + " + query
-	}
-	additionalArgs := append(
-		[]string{"--order_output=no", "--proto:locations", "--noproto:default_values"},
-		g.config.BazelExtraArgs...,
-	)
+	mode := resolveBazelDependencyMode(g.config.BzlmodEnabled)
+	additionalArgs := make([]string, 0, 3+len(g.config.BazelExtraArgs)+len(mode.queryArgs))
+	additionalArgs = append(additionalArgs, "--order_output=no", "--proto:locations", "--noproto:default_values")
+	additionalArgs = append(additionalArgs, g.config.BazelExtraArgs...)
+	// Keep Tango's selected dependency mode last so programmatically-created
+	// configs cannot override it with BazelExtraArgs.
+	additionalArgs = append(additionalArgs, mode.queryArgs[:]...)
 
 	bazelStart := time.Now()
 	queryResult, err := g.bazel.ExecuteQuery(ctx, &bazel.QueryRequest{
-		Query:          query,
+		Query:          mode.query,
 		StartupOptions: g.config.BazelStartupOptions,
 		// --order_output=no will make Bazel execute query faster
 		// --proto:locations: we need to get external file location to make CTC more accurate
@@ -100,7 +116,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		KnownSourceHashes: knownSourceHashes,
 		FullHashRepos:     g.config.FullHashRepos,
 		ExcludedRegex:     excludedRegex,
-		UseBzlmod:         bzlmodEnabled,
+		UseBzlmod:         mode.useBzlmod,
 		AllTargetsFiles:   g.config.AllTargetsFiles,
 	}
 
