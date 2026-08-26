@@ -94,10 +94,16 @@ func (g *OptimizedGraph) UpdateGraph(
 		return err
 	}
 
-	// prioritize computing hashes of targets that could create cycles
+	return g.computeInvalidatedHashes(ctx, allInvalidated)
+}
+
+// computeInvalidatedHashes computes invalidated target hashes in the same
+// deterministic traversal order used by full graph hashing.
+func (g *OptimizedGraph) computeInvalidatedHashes(ctx context.Context, invalidated IntSet) error {
+	// Prioritize configured targets that could create cycles.
 	for _, target := range sequentialHashTargets {
 		id, ok := g.TargetNameToID[target]
-		if !ok || !allInvalidated.Contains(id) {
+		if !ok || !invalidated.Contains(id) {
 			continue
 		}
 		if _, err := g.computeHashes(ctx, id); err != nil {
@@ -105,8 +111,27 @@ func (g *OptimizedGraph) UpdateGraph(
 		}
 	}
 
-	// update hashes for invalidated targets
-	for id := range allInvalidated {
+	ids := invalidated.UnsortedList()
+	slices.SortStableFunc(ids, func(i, j int) int {
+		return strings.Compare(g.TargetIDToString[i], g.TargetIDToString[j])
+	})
+
+	// Full graph hashing starts from lexicographically sorted topological roots.
+	// Doing the same here preserves its cycle entry points for rooted cycles.
+	for _, id := range ids {
+		target, ok := g.OptimizedTargets[id]
+		if !ok || len(target.ReverseDeps) != 0 {
+			continue
+		}
+		if _, err := g.computeHashes(ctx, id); err != nil {
+			return err
+		}
+	}
+
+	// Any remaining invalidated targets are either already hashed dependencies or
+	// root-unreachable cycles. The first lexicographic member is their canonical
+	// cycle breaker, matching full graph hashing's cyclic-target fallback.
+	for _, id := range ids {
 		if _, err := g.computeHashes(ctx, id); err != nil {
 			return err
 		}
