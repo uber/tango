@@ -11,15 +11,16 @@ A BuildKite CI machine runs `bazel query` over the monorepo at the *before* and 
 1. Each graph is serialized and uploaded to TerraBlob.
 2. A server downloads both graphs and diffs them to produce the affected set.
 
-Every stage is currently paying for a representation that was chosen for
-convenience rather than for the shape of the data or the shape of the query.
+This document describes TGB on-disk format version 3. The codec accepts an explicit hash width of 8, 16, or 20 bytes, while the production adapter writes full 20-byte SHA-1 hashes and uses a 512-node block-size parameter.
 
-### 1.1 What it costs today
+The measurements in §7 are a historical benchmark snapshot collected with 8-byte hashes and the original 4096-node block-size parameter. They explain the design trade-offs, but their blob sizes and block counts do not describe the current production encoding.
+
+### 1.1 Legacy baseline costs
 
 Measured on a large go monorepo with ~3M nodes and ~14M edges, from an actual `bazel query --output=streamed_proto` over the whole monorepo:
 
 
-| Stage                  | Cost today                                           |
+| Stage                  | Legacy cost                                          |
 | ---------------------- | ---------------------------------------------------- |
 | Serialized size (gob)  | **548.8 MB** per revision                            |
 | Serialized size (JSON) | **937.6 MB** per revision                            |
@@ -27,15 +28,15 @@ Measured on a large go monorepo with ~3M nodes and ~14M edges, from an actual `b
 | Compare                | **15.7 s** (leaf change) to **29.6 s** (wide change) |
 
 
-### 1.2 Why it is large
+### 1.2 Why the legacy representation is large
 
-The current encoding scheme for tango's graph binary suffers from 5 major issues:
+The legacy gob encoding suffered from five major issues:
 
 
 | Cause                         | Cost                                                                                                                                                                              |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | No compression anywhere       | The gob stream is written raw through `io.Pipe` into `Storage.Put`. Bazel label text is extremely repetitive and compresses 5–10×.                                                |
-| `Hash` stored as a hex string | 40 ASCII bytes per node where 8 raw bytes suffice.                                                                                                                                |
+| `Hash` stored as a hex string | 40 ASCII bytes per node where 20 raw bytes preserve the full SHA-1 value.                                                                                                          |
 | Dependency edges as `[]int32` | Full 4-byte IDs, no delta coding, despite deps being strongly clustered near their parent in label order.                                                                         |
 | Row-oriented records          | Every node carries its own field tags and lengths; gob emits per-value type framing. Volatile and stable data are interleaved, so nothing can be cached or reused across commits. |
 | Reflection-driven codec       | `encoding/gob` walks struct types at runtime and allocates per value.                                                                                                             |
@@ -61,12 +62,12 @@ That work is proportional to the size of the graph, not to the size of the chang
 1. Small on the wire.
 2. Fast decode.
 3. Comparable without decoding. The common case should happen by bulk `memcmp`, never by a map lookup.
-4. Byte-identical output. The new comparison must produce exactly the same `DiffResult` as today's algorithm. i.e. this should be a drop-in replacement.
+4. Byte-identical output. The TGB comparison must produce exactly the same `DiffResult` as the reference algorithm; it is a drop-in replacement.
 
 **Non-Goals**
 
-- Random access to a single target by label. The proposed format here can technically support it via dictionary restart points, but nothing in the pipeline needs it yet. This can be implemented as needed in the future.
-- Streaming decode. The blob is fetched whole. The proposed format will have to substantially change for this to be supported, since the columnar layout does prevent this from occurring in streaming fashion.
+- Random access to a single target by label. The format can technically support it via dictionary restart points, but nothing in the pipeline needs it yet.
+- Streaming decode. The blob is fetched whole; supporting streaming decode would require a substantial format change because of the columnar layout.
 
 ---
 
@@ -102,17 +103,18 @@ That work is proportional to the size of the graph, not to the size of the chang
 ### Header — 64 bytes, little-endian
 
 
-| Offset | Size | Field                                                                          |
-| ------ | ---- | ------------------------------------------------------------------------------ |
-| 0      | 4    | magic `"TGB1"`                                                                 |
-| 4      | 2    | formatVersion                                                                  |
-| 6      | 2    | flags (bit 0: hashes truncated to 8 B; bit 1: reverse-CSR present, *reserved*) |
-| 8      | 8    | nodeCount                                                                      |
-| 16     | 8    | edgeCount                                                                      |
-| 24     | 8    | blockSize                                                                      |
-| 32     | 24   | reserved, zero                                                                 |
-| 56     | 4    | checksum (CRC32C) over bytes 0..55                                             |
-| 60     | 4    | reserved, zero                                                                 |
+| Offset | Size | Field                                                                                         |
+| ------ | ---- | --------------------------------------------------------------------------------------------- |
+| 0      | 4    | magic `"TGB1"`                                                                                |
+| 4      | 2    | formatVersion = 3                                                                             |
+| 6      | 2    | flags; bit 0 is reserved and must be zero, bit 1 is reserved for reverse-CSR presence         |
+| 8      | 8    | nodeCount                                                                                     |
+| 16     | 8    | edgeCount                                                                                     |
+| 24     | 8    | blockSize                                                                                     |
+| 32     | 2    | hashBytes: fixed `HASH` stride for this blob, one of 8, 16, or 20                             |
+| 34     | 22   | reserved, zero                                                                                |
+| 56     | 4    | checksum (CRC32C) over bytes 0..55                                                            |
+| 60     | 4    | reserved, zero                                                                                |
 
 
 
@@ -136,7 +138,7 @@ from there can fetch any single column with one ranged read. `NewReader` validat
 `uvarint id`, `byte codec` (0 = raw, 1 = zstd), `uvarint offset`,
 `uvarint compressedSize`, `uvarint rawSize`.
 
-Columns may appear in any order; an absent column decodes as empty.
+Columns may appear in any order. Readers skip unknown column IDs, and optional columns may be absent.
 
 ---
 
@@ -149,24 +151,29 @@ index" always means this ordinal, and it is the currency the entire comparison
 runs in.
 
 
-| ID    | Name                                  | Codec   | Contents                                        |
-| ----- | ------------------------------------- | ------- | ----------------------------------------------- |
-| 1     | `PKG_DICT`                            | zstd    | Front-coded sorted package paths                |
-| 2     | `NAME_DICT`                           | zstd    | Front-coded sorted target names                 |
-| 3     | `NODE_PKG`                            | zstd    | Per node: uvarint delta of package ID           |
-| 4     | `NODE_NAME`                           | zstd    | Per node: name ID, delta-coded within a package |
-| 5     | `HASH`                                | **raw** | Per node: 8 bytes, truncated Merkle hash        |
-| 6     | `DEG`                                 | zstd    | Per node: uvarint out-degree                    |
-| 7     | `DEPS`                                | zstd    | Delta-coded dependency node indices             |
-| 8     | `RULETYPE`                            | zstd    | Per node: uvarint rule-type dict ID             |
-| 9     | `RULETYPE_DICT`                       | zstd    | Front-coded sorted rule-type strings            |
-| 10–12 | `TAG_DEG`, `TAGS`, `TAG_DICT`         | zstd    | Same shape as deps                              |
-| 13–15 | `ATTR_DEG`, `ATTR_NAME`, `ATTR_VALUE` | zstd    | Per node: attribute name/value dict IDs         |
-| 16–17 | `ATTR_NAME_DICT`, `ATTR_VALUE_DICT`   | zstd    | Front-coded sorted strings                      |
-| 18    | `FLAGS`                               | zstd    | Two bitsets, `root` then `external`             |
-| 19    | `BLOCK_DIGEST`                        | raw     | Per block: 8-byte structural digest             |
-| 20    | `BLOCK_START`                         | zstd    | Per block: uvarint delta of first node index    |
-| 21    | `NODE_INDEX`                          | zstd    | Sampled byte offsets into `DEPS` (see §8.6)     |
+| ID    | Name                                  | Codec   | Contents                                                                 |
+| ----- | ------------------------------------- | ------- | ------------------------------------------------------------------------ |
+| 1     | `PKG_DICT`                            | zstd    | Front-coded sorted package paths                                         |
+| 2     | `NAME_DICT`                           | zstd    | Front-coded sorted target names                                          |
+| 3     | `NODE_PKG`                            | zstd    | Per node: uvarint delta of package ID                                    |
+| 4     | `NODE_NAME`                           | zstd    | Per node: name ID, delta-coded within a package                          |
+| 5     | `HASH`                                | **raw** | Per node: `hashBytes` bytes; production stores the full 20-byte SHA-1   |
+| 6     | `DEG`                                 | zstd    | Per node: uvarint out-degree                                             |
+| 7     | `DEPS`                                | zstd    | Delta-coded dependency node indices                                      |
+| 8     | `RULETYPE`                            | zstd    | Per node: uvarint rule-type dict ID                                      |
+| 9     | `RULETYPE_DICT`                       | zstd    | Front-coded sorted rule-type strings                                     |
+| 10–12 | `TAG_DEG`, `TAGS`, `TAG_DICT`         | zstd    | Same shape as deps                                                       |
+| 13–15 | `ATTR_DEG`, `ATTR_NAME`, `ATTR_VALUE` | zstd    | Per node: attribute name/value dict IDs                                  |
+| 16–17 | `ATTR_NAME_DICT`, `ATTR_VALUE_DICT`   | zstd    | Front-coded sorted strings                                               |
+| 18    | `FLAGS`                               | zstd    | Three bitsets: `root`, `external`, then empty-cycle-hash sentinel        |
+| 19    | `BLOCK_DIGEST`                        | raw     | Per block: 8-byte structural digest                                      |
+| 20    | `BLOCK_START`                         | zstd    | Per block: uvarint delta of first node index                             |
+| 21    | `NODE_INDEX`                          | —       | Reserved; version 3 encoders do not write this formerly active column    |
+| 22    | `ALL_TARGETS_FILE_HASHES`             | zstd    | Optional length-prefixed key/value sidecar for `AllTargetsFileHashes`    |
+
+Each `FLAGS` bitset occupies `ceil(nodeCount / 8)` bytes. The third bitset distinguishes the empty hash used as Tango's cycle sentinel from a real all-zero digest, because both have identical bytes in the fixed-stride `HASH` column.
+
+Column 21 remains reserved and must not be reused. It formerly carried sampled `DEPS` offsets, but current readers build a complete offset table or consume dependencies in bulk, so version 3 encoders omit it. Column 22 is active and is emitted when `AllTargetsFileHashes` is non-empty.
 
 
 
@@ -206,24 +213,21 @@ rest      : uvarint(dep[k] - dep[k-1])
 
 Encoding the first dep *relative to the node itself* is what exploits locality. For example: a `go_library` depends on its own source files and on siblings, all of which is sort of adjacent to it. 
 
-Measured: **9.96 MB compressed for 13.8M edges = 0.72 bytes per edge**, against 4 bytes today.
+Measured in the historical benchmark: **9.96 MB compressed for 13.8M edges = 0.72 bytes per edge**, against 4 bytes in the legacy `[]int32` representation.
 
 Dependency arrays are concatenated with no per-node framing; `DEG` supplies the boundaries.
 
 ### 5.5 `HASH` — deliberately uncompressed
 
-Truncated to the leading 8 bytes of the SHA-1 Merkle hash. This column is not
-compressed, and that is the point:
+The version 3 header stores the hash stride explicitly as `hashBytes`, which must be 8, 16, or 20. The `HASH` column concatenates exactly that many leading SHA-1 bytes per node and is deliberately uncompressed:
 
 - Hashes are uniformly random, so compression buys under 1% anyway.
-- Leaving it raw makes it a flat `[]byte` with fixed stride 8. Comparing 4096
-consecutive nodes across two revisions is `bytes.Equal` over a 32 KB slice —
-memory-bandwidth-bound.
+- Leaving the column raw makes it a flat `[]byte` whose fixed stride comes from the header, allowing aligned runs to be compared with `bytes.Equal`.
+- Readers reject a blob whose `HASH` size is not exactly `nodeCount * hashBytes`, and comparisons reject inputs with different strides.
 
-Cost: 21.52 MB, **41% of the entire 52.2 MB blob**. A full linear scan of both
-revisions costs about 5 ms.
+The production adapter always selects 20 bytes, preserving the complete SHA-1 value with no truncation. Direct codec users may select 8 or 16 bytes when the correctness trade-off is acceptable; the historical measurements in §7 used 8 bytes. At the production stride, comparing 512 consecutive nodes reads a 10 KiB slice.
 
-**Collision risk.** Across 5.6M values (both revisions) the birthday probability of any 8-byte collision is roughly 8×10^-7. A collision produces a false *negative* — a changed target reported as unchanged — which in this pipeline means a test that should have run does not. That is a real correctness risk, hence the hash stride width must be configurable. The header has a flag bit for it.
+An empty upstream hash is Tango's cycle sentinel. Its `HASH` bytes are zero, and the third `FLAGS` bitset preserves the distinction from a real all-zero digest.
 
 ### 5.6 `BLOCK_DIGEST` and content-defined boundaries
 
@@ -233,7 +237,7 @@ Blocks partition the node sequence. A boundary is cut after node `i` when
 xxhash64(label_i) & (blockSize-1) == 0
 ```
 
-with `blockSize` a power of two (4096 default), plus a forced cut if a block would exceed `blockSize*8` nodes.
+with `blockSize` a power of two, plus a forced cut if a block reaches `blockSize*8` nodes. The codec default and production setting are both 512, so the content-defined boundary interval averages 512 nodes and the forced maximum is 4096 nodes.
 
 Boundaries are **content-defined, not positional**. 
 
@@ -281,11 +285,13 @@ Comparing the joined label strings here *doesn't work* here - that walks two lis
 
 ### 6.2 Phase 1 — bulk hash comparison
 
-For each aligned run, one `bytes.Equal` over `HASH[beforeStart*8 : (beforeStart+len)*8]` against the corresponding after slice. Equal means every node in the run is unchanged, established in one call.
+For each aligned run, one `bytes.Equal` over `HASH[beforeStart*hashBytes : (beforeStart+len)*hashBytes]` against the corresponding after slice. Equal hash bytes establish that every ordinary hash in the run is unchanged in one call.
 
-Where a run differs, bisect: split in half, compare each half, recurse to individual 8-byte entries. With `k` changed nodes in a run of `n`, that is `O(k log(n/k))` comparisons rather than `n`.
+Where a run differs, bisect: split in half, compare each half, and recurse to individual `hashBytes` entries. With `k` changed nodes in a run of `n`, that is `O(k log(n/k))` comparisons rather than `n`.
 
-This is the structural inversion versus today's code, which does one map lookup and one string comparison per node *in the graph*. Here unchanged nodes cost approximately nothing and the work scales with the size of the change.
+After the byte comparison, compare the empty-cycle-hash sentinel bits for aligned nodes whose hash bytes matched. This detects transitions between the empty sentinel and a real all-zero digest.
+
+This is the structural inversion versus the legacy path, which does one map lookup and one string comparison per node *in the graph*. Here unchanged nodes cost approximately nothing and the work scales with the size of the change.
 
 Note that phase 0 skipping a block does **not** skip it in phase 1 — matched blocks go into aligned runs and are hash-compared like everything else. This is what makes the weak block-digest contract sound: the digest only has to certify label correspondence, and the hashes are checked independently.
 
@@ -310,7 +316,7 @@ Phase 2 classified some changed nodes as *seeds* (distance 0). Phase 3 must assi
 2. **It is a whole-graph traversal.** Every other phase touches work
   proportional to the *changed* set; a breadth-first search can reach a  large fraction of the graph (a changed core library reaches almost all  of it), so the per-node and per-edge constants dominate.
 
-Today's implementation pays those constants in the worst currency available: the reverse adjacency is a `map[string][]string` — millions of string hashes to look up a node, a heap-allocated slice per node grown by `append`, every neighbour list somewhere else in memory. The BFS then chases pointers through all of it. The replacement below does the same traversal with two integer arrays and a bitset.
+The reference implementation pays those constants in the worst currency available: the reverse adjacency is a `map[string][]string` — millions of string hashes to look up a node, a heap-allocated slice per node grown by `append`, every neighbour list somewhere else in memory. The TGB path does the same traversal with two integer arrays and a bitset.
 
 **The representation: CSR from first principles.** After phase 0, every node in the after graph is identified by a dense integer index `0..n-1` (its position in label-sorted order), so "adjacency" no longer needs a map — an array indexed by node works. The naive array-of-slices (`[][]int32`) still costs one allocation and one pointer indirection per node. CSR — *compressed sparse row*, borrowed from sparse matrix storage — flattens all of it into exactly two arrays:
 
@@ -343,22 +349,24 @@ Every pass is a straight sequential scan; the output is deterministic (within on
 
 
 
-## 7. Measured results
+## 7. Historical measured results
+
+These measurements predate the production parameters. They used 8-byte hashes and the original 4096-node block-size setting; current production uses 20-byte hashes and 512. Keep the figures as evidence for the algorithmic design, not as current production size or block-count estimates.
 
 Real `go-code` graph: 2,821,235 nodes, 13,783,851 edges, 1,794,002 source-file nodes (63.6%), 375 rule types, 262.6 MB of raw label text.
 
 ### 7.1 Size
 
 
-| codec       | size        | vs today  |
-| ----------- | ----------- | --------- |
-| gob (today) | 548.8 MB    | 1.00×     |
-| gob + zstd  | 180.7 MB    | 0.33×     |
-| json        | 937.6 MB    | 1.71×     |
-| **TGB**     | **52.2 MB** | **0.10×** |
+| codec                  | size        | vs legacy gob |
+| ---------------------- | ----------- | ------------- |
+| gob baseline           | 548.8 MB    | 1.00×         |
+| gob + zstd             | 180.7 MB    | 0.33×         |
+| json                    | 937.6 MB    | 1.71×         |
+| **TGB benchmark build** | **52.2 MB** | **0.10×**     |
 
 
-**10.5× smaller than today.** Per-column, the top consumers:
+**10.5× smaller than the legacy gob baseline in this benchmark configuration.** Per-column, the top consumers:
 
 
 | column                    | raw MB     | comp MB   | B/node   |
@@ -387,7 +395,7 @@ TGB has the fastest decode with less than half the allocation, and comparable al
 ### 7.3 Comparison
 
 
-| change shape         | changed nodes   | refdiff (today) | fastdiff          | compare-only      | end-to-end    |
+| change shape         | changed nodes   | refdiff baseline | fastdiff          | compare-only      | end-to-end    |
 | -------------------- | --------------- | --------------- | ----------------- | ----------------- | ------------- |
 | leaf (`HEAD~1→HEAD`) | 30 (0.001%)     | 15.72 / 13.51 s | **1.11 / 1.18 s** | **14.2× / 11.4×** | ~23× / ~19×   |
 | wide blast radius    | 813,096 (28.8%) | 29.60 / 31.35 s | **3.74 / 4.11 s** | **7.9× / 7.6×**   | 10.4× / 10.1× |
