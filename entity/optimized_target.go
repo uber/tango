@@ -65,11 +65,11 @@ type Metadata struct {
 	TagMapping                  map[int32]string `json:"tag_mapping"`
 	AttributeNameMapping        map[int32]string `json:"attribute_name_mapping"`
 	AttributeStringValueMapping map[int32]string `json:"attribute_string_value_mapping"`
-	// AllTargetsFileHashes maps repo-relative file paths to their
-	// hex-encoded content hashes for files listed in
-	// RepositoryConfig.AllTargetsFiles. Nil when the repository has no
-	// AllTargetsFiles configured, or when the graph was stored in a format
-	// that predates this field (e.g. TGB).
+	// AllTargetsFileHashes maps every repo-relative path listed in
+	// RepositoryConfig.AllTargetsFiles to its hex-encoded content hash.
+	// An empty value represents a configured path that is absent from the
+	// revision. Nil means no paths were configured or the stored graph
+	// predates this field.
 	AllTargetsFileHashes map[string]string `json:"all_targets_file_hashes,omitempty"`
 }
 

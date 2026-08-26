@@ -231,6 +231,7 @@ func TestFromProtoAllTargetsFileHashes(t *testing.T) {
 
 	tests := []struct {
 		name            string
+		knownHashes     map[string][]byte
 		allTargetsFiles []string
 		want            map[string]string
 	}{
@@ -240,20 +241,28 @@ func TestFromProtoAllTargetsFileHashes(t *testing.T) {
 		},
 		{
 			name:            "configured files present in known hashes",
+			knownHashes:     knownSourceHashes,
 			allTargetsFiles: []string{".bazelrc", "tools/bazel"},
 			want:            map[string]string{".bazelrc": "abcd", "tools/bazel": "ef01"},
 		},
 		{
-			name:            "configured file missing from known hashes is skipped",
+			name:            "configured file missing from known hashes is represented",
+			knownHashes:     knownSourceHashes,
 			allTargetsFiles: []string{".bazelrc", "does/not/exist"},
-			want:            map[string]string{".bazelrc": "abcd"},
+			want:            map[string]string{".bazelrc": "abcd", "does/not/exist": ""},
+		},
+		{
+			name:            "all configured files missing from known hashes",
+			knownHashes:     map[string][]byte{},
+			allTargetsFiles: []string{".bazelrc", "tools/bazel"},
+			want:            map[string]string{".bazelrc": "", "tools/bazel": ""},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			result, err := FromProto(context.Background(), qr, t.TempDir(), HashConfig{
-				KnownSourceHashes: knownSourceHashes,
+				KnownSourceHashes: tt.knownHashes,
 				AllTargetsFiles:   tt.allTargetsFiles,
 			})
 			require.NoError(t, err)

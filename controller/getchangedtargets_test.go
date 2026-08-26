@@ -158,19 +158,25 @@ func TestAllTargetsFileChanged(t *testing.T) {
 			want: false,
 		},
 		{
-			name:   "first nil",
+			name:   "configured state missing from first",
 			second: map[string]string{".bazelrc": "abc"},
-			want:   false,
+			want:   true,
 		},
 		{
-			name:  "second nil",
+			name:  "configured state missing from second",
 			first: map[string]string{".bazelrc": "abc"},
-			want:  false,
+			want:  true,
 		},
 		{
 			name:   "same hashes",
 			first:  map[string]string{".bazelrc": "abc", "tools/bazel": "def"},
 			second: map[string]string{".bazelrc": "abc", "tools/bazel": "def"},
+			want:   false,
+		},
+		{
+			name:   "same missing files",
+			first:  map[string]string{".bazelrc": "", "tools/bazel": ""},
+			second: map[string]string{".bazelrc": "", "tools/bazel": ""},
 			want:   false,
 		},
 		{
@@ -180,15 +186,27 @@ func TestAllTargetsFileChanged(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "new file in second not in first",
+			name:   "configured file added",
+			first:  map[string]string{".bazelrc": ""},
+			second: map[string]string{".bazelrc": "abc"},
+			want:   true,
+		},
+		{
+			name:   "configured file deleted",
+			first:  map[string]string{".bazelrc": "abc"},
+			second: map[string]string{".bazelrc": ""},
+			want:   true,
+		},
+		{
+			name:   "configured key missing from first",
 			first:  map[string]string{".bazelrc": "abc"},
 			second: map[string]string{".bazelrc": "abc", "tools/bazel": "def"},
 			want:   true,
 		},
 		{
-			name:   "file missing from first",
-			first:  map[string]string{"tools/bazel": "def"},
-			second: map[string]string{".bazelrc": "abc", "tools/bazel": "def"},
+			name:   "configured key missing from second",
+			first:  map[string]string{".bazelrc": "abc", "tools/bazel": "def"},
+			second: map[string]string{".bazelrc": "abc"},
 			want:   true,
 		},
 	}

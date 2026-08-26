@@ -53,6 +53,10 @@ const (
 	GeneratedFileType = "generated file"
 
 	UnknownRuleType = "unknown rule"
+
+	// missingAllTargetsFileHash represents a configured AllTargetsFiles path
+	// that is absent from the repository revision.
+	missingAllTargetsFileHash = ""
 )
 
 // HashConfig fine tunes behaviors during target hashing.
@@ -118,11 +122,10 @@ type Result struct {
 	//		For more info see https://docs.bazel.build/versions/master/build-ref.html#label_directory.
 	Warnings map[string]error
 
-	// AllTargetsFileHashes maps repo-relative file paths to their
-	// hex-encoded content hashes for files listed in
-	// RepositoryConfig.AllTargetsFiles. Populated from git ls-tree during
-	// graph computation; nil when the repository has no AllTargetsFiles
-	// configured.
+	// AllTargetsFileHashes maps every repo-relative path listed in
+	// RepositoryConfig.AllTargetsFiles to its hex-encoded content hash.
+	// A configured path that is absent from the revision maps to an empty
+	// string. The map is nil when no AllTargetsFiles are configured.
 	AllTargetsFileHashes map[string]string
 }
 
@@ -157,9 +160,10 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 		return result, err
 	}
 
-	if len(hashConfig.AllTargetsFiles) > 0 && len(hashConfig.KnownSourceHashes) > 0 {
+	if len(hashConfig.AllTargetsFiles) > 0 {
 		atfh := make(map[string]string, len(hashConfig.AllTargetsFiles))
 		for _, f := range hashConfig.AllTargetsFiles {
+			atfh[f] = missingAllTargetsFileHash
 			if h, ok := hashConfig.KnownSourceHashes[f]; ok {
 				atfh[f] = hex.EncodeToString(h)
 			}

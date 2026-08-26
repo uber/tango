@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"time"
 
 	"github.com/uber/tango/core/cachekey"
@@ -701,21 +702,10 @@ func getTargetsAndMetadata(ctx context.Context, graph []entity.GetTargetGraphRes
 	return targets, merged, nil
 }
 
-// allTargetsFileChanged reports whether any file in the AllTargetsFileHashes
-// sidecar differs between the two metadata sets. Returns false when either
-// metadata has no AllTargetsFileHashes (e.g. TGB-stored graphs or repos
-// without AllTargetsFiles configured).
+// allTargetsFileChanged reports whether the complete configured
+// AllTargetsFileHashes state differs between the two metadata sets.
 func allTargetsFileChanged(first, second *entity.Metadata) bool {
-	if len(first.AllTargetsFileHashes) == 0 || len(second.AllTargetsFileHashes) == 0 {
-		return false
-	}
-	for file, newHash := range second.AllTargetsFileHashes {
-		oldHash, ok := first.AllTargetsFileHashes[file]
-		if !ok || oldHash != newHash {
-			return true
-		}
-	}
-	return false
+	return !maps.Equal(first.AllTargetsFileHashes, second.AllTargetsFileHashes)
 }
 
 // allTargetsChangedFromGraph builds a GetChangedTargetsResponse stream that
