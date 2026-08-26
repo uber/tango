@@ -15,8 +15,10 @@
 package targethasher
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash"
@@ -26,7 +28,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
@@ -192,196 +193,284 @@ func externalTargetForRule(t string) string {
 	return externalWorkspaceRulePrefix + strings.TrimLeft(strings.Split(t, "//")[0], "@")
 }
 
-// HashRuleCommon hashes the common elements of a buildpb.Rule.
-func HashRuleCommon(r *buildpb.Rule, h hash.Hash) {
-	// Name                        *string
-	io.WriteString(h, r.GetName())
-	// RuleClass                   *string
-	io.WriteString(h, r.GetRuleClass())
-	// Location                    *string
-	// don't hash location, as it machine local paths
-	// Attribute                   []*Attribute
-	// Before hashing, sort to guarantee consistency
-	attributes := slices.Clone(r.GetAttribute())
-	sort.Slice(attributes, func(i, j int) bool {
-		return attributes[i].GetName() < attributes[j].GetName()
-	})
-	for _, attr := range attributes {
-		hashAttributes(h, attr)
-	}
-	// RuleInput                   []string
-	// Before hashing, sort to guarantee consistency
-	ruleInputs := slices.Clone(r.GetRuleInput())
-	sort.Strings(ruleInputs)
-	for _, ri := range ruleInputs {
-		io.WriteString(h, ri)
-	}
-	// RuleOutput                  []string
-	// Before hashing, sort to guarantee consistency
-	ruleOutputs := slices.Clone(r.GetRuleOutput())
-	sort.Strings(ruleOutputs)
-	for _, ro := range ruleOutputs {
-		io.WriteString(h, ro)
-	}
-	// DefaultSetting              []string
-	// Before hashing, sort to guarantee consistency
-	defaultSettings := slices.Clone(r.GetDefaultSetting())
-	sort.Strings(defaultSettings)
-	for _, d := range defaultSettings {
-		io.WriteString(h, d)
-	}
-	// SkylarkAttributeAspects     []*AttributeAspect
-	// don't need to hash this, aspects don't appear in our query.
-	// SkylarkEnvironmentHashCode  *string
-	io.WriteString(h, r.GetSkylarkEnvironmentHashCode())
+type canonicalValueType byte
+
+const (
+	canonicalMessage canonicalValueType = iota + 1
+	canonicalString
+	canonicalBool
+	canonicalInt32
+	canonicalEnum
+	canonicalList
+)
+
+type canonicalEncoder struct {
+	buffer bytes.Buffer
 }
 
-func hashAttributes(h hash.Hash, a *buildpb.Attribute) {
-	// generator_location is present if the rule is generated from a macro, but
-	// should not be hashed as the generating macro's location in a build file
-	// is irrelevant for our purposes
-	if a.GetName() == "generator_location" {
+// HashRuleCommon hashes the common elements of a buildpb.Rule using explicit
+// field, type, presence, and length framing.
+func HashRuleCommon(r *buildpb.Rule, h hash.Hash) {
+	var encoder canonicalEncoder
+	var rule []byte
+	if r != nil {
+		rule = encodeRule(r)
+	}
+	encoder.writeField("rule", canonicalMessage, r != nil, rule)
+	_, _ = h.Write(encoder.buffer.Bytes())
+}
+
+func encodeRule(r *buildpb.Rule) []byte {
+	return encodeMessage("Rule", func(encoder *canonicalEncoder) {
+		encoder.writeOptionalString("name", r.Name)
+		encoder.writeOptionalString("rule_class", r.RuleClass)
+
+		// Location is machine-local and intentionally excluded.
+		ruleAttributes := r.GetAttribute()
+		attributes := make([]*buildpb.Attribute, 0, len(ruleAttributes))
+		for _, attribute := range ruleAttributes {
+			if attribute == nil {
+				continue
+			}
+			// generator_location identifies a macro call site and does not affect
+			// the rule's behavior.
+			if attribute.GetName() == "generator_location" {
+				continue
+			}
+			attributes = append(attributes, attribute)
+		}
+		// Bazel rule classes enforce unique attribute names, so sorting by name
+		// provides a deterministic order for rule instances.
+		sort.Slice(attributes, func(i, j int) bool {
+			return attributes[i].GetName() < attributes[j].GetName()
+		})
+		encodedAttributes := make([][]byte, 0, len(attributes))
+		for _, attribute := range attributes {
+			encodedAttributes = append(encodedAttributes, encodeAttribute(attribute))
+		}
+		encoder.writeList("attribute", canonicalMessage, encodedAttributes)
+		encoder.writeSortedStrings("rule_input", r.GetRuleInput())
+		encoder.writeSortedStrings("rule_output", r.GetRuleOutput())
+		encoder.writeSortedStrings("default_setting", r.GetDefaultSetting())
+
+		// Aspects do not appear in the query representation and remain excluded.
+		encoder.writeOptionalString("skylark_environment_hash_code", r.SkylarkEnvironmentHashCode)
+	})
+}
+
+func encodeAttribute(attribute *buildpb.Attribute) []byte {
+	if attribute == nil {
+		return nil
+	}
+
+	return encodeMessage("Attribute", func(encoder *canonicalEncoder) {
+		encoder.writeOptionalString("name", attribute.Name)
+
+		// Parseable locations are machine-local and intentionally excluded.
+		encoder.writeOptionalBool("explicitly_specified", attribute.ExplicitlySpecified)
+		encoder.writeOptionalBool("nodep", attribute.Nodep)
+		writeOptionalEnum(encoder, "type", attribute.Type)
+		encoder.writeOptionalInt32("int_value", attribute.IntValue)
+		encoder.writeOptionalString("string_value", attribute.StringValue)
+		encoder.writeOptionalBool("boolean_value", attribute.BooleanValue)
+		writeOptionalEnum(encoder, "tristate_value", attribute.TristateValue)
+		encoder.writeSortedStrings("string_list_value", attribute.GetStringListValue())
+		writeSortedMessages(encoder, "string_dict_value", attribute.GetStringDictValue(), encodeStringDictEntry)
+		writeSortedMessages(encoder, "fileset_list_value", attribute.GetFilesetListValue(), encodeFilesetEntry)
+		writeSortedMessages(encoder, "label_list_dict_value", attribute.GetLabelListDictValue(), encodeLabelListDictEntry)
+		writeSortedMessages(encoder, "string_list_dict_value", attribute.GetStringListDictValue(), encodeStringListDictEntry)
+		encoder.writeSortedInt32s("int_list_value", attribute.GetIntListValue())
+		writeSortedMessages(encoder, "label_dict_unary_value", attribute.GetLabelDictUnaryValue(), encodeLabelDictUnaryEntry)
+		writeSortedMessages(encoder, "label_keyed_string_dict_value", attribute.GetLabelKeyedStringDictValue(), encodeLabelKeyedStringDictEntry)
+
+		// License, deprecated string-dict-unary values, and selector lists retain
+		// their existing exclusion from rule hashes.
+	})
+}
+
+func encodeStringDictEntry(entry *buildpb.StringDictEntry) []byte {
+	if entry == nil {
+		return nil
+	}
+	return encodeMessage("StringDictEntry", func(encoder *canonicalEncoder) {
+		encoder.writeOptionalString("key", entry.Key)
+		encoder.writeOptionalString("value", entry.Value)
+	})
+}
+
+func encodeFilesetEntry(entry *buildpb.FilesetEntry) []byte {
+	if entry == nil {
+		return nil
+	}
+	return encodeMessage("FilesetEntry", func(encoder *canonicalEncoder) {
+		encoder.writeOptionalString("source", entry.Source)
+		encoder.writeOptionalString("destination_directory", entry.DestinationDirectory)
+		encoder.writeOptionalBool("files_present", entry.FilesPresent)
+		encoder.writeSortedStrings("file", entry.GetFile())
+		encoder.writeSortedStrings("exclude", entry.GetExclude())
+		writeOptionalEnum(encoder, "symlink_behavior", entry.SymlinkBehavior)
+		encoder.writeOptionalString("strip_prefix", entry.StripPrefix)
+	})
+}
+
+func encodeLabelListDictEntry(entry *buildpb.LabelListDictEntry) []byte {
+	if entry == nil {
+		return nil
+	}
+	return encodeMessage("LabelListDictEntry", func(encoder *canonicalEncoder) {
+		encoder.writeOptionalString("key", entry.Key)
+		encoder.writeSortedStrings("value", entry.GetValue())
+	})
+}
+
+func encodeStringListDictEntry(entry *buildpb.StringListDictEntry) []byte {
+	if entry == nil {
+		return nil
+	}
+	return encodeMessage("StringListDictEntry", func(encoder *canonicalEncoder) {
+		encoder.writeOptionalString("key", entry.Key)
+		encoder.writeSortedStrings("value", entry.GetValue())
+	})
+}
+
+func encodeLabelDictUnaryEntry(entry *buildpb.LabelDictUnaryEntry) []byte {
+	if entry == nil {
+		return nil
+	}
+	return encodeMessage("LabelDictUnaryEntry", func(encoder *canonicalEncoder) {
+		encoder.writeOptionalString("key", entry.Key)
+		encoder.writeOptionalString("value", entry.Value)
+	})
+}
+
+func encodeLabelKeyedStringDictEntry(entry *buildpb.LabelKeyedStringDictEntry) []byte {
+	if entry == nil {
+		return nil
+	}
+	return encodeMessage("LabelKeyedStringDictEntry", func(encoder *canonicalEncoder) {
+		encoder.writeOptionalString("key", entry.Key)
+		encoder.writeOptionalString("value", entry.Value)
+	})
+}
+
+func encodeMessage(typeName string, writeFields func(*canonicalEncoder)) []byte {
+	var encoder canonicalEncoder
+	encoder.writeField("message_type", canonicalString, true, []byte(typeName))
+	writeFields(&encoder)
+	return encoder.buffer.Bytes()
+}
+
+func (e *canonicalEncoder) writeField(name string, valueType canonicalValueType, present bool, payload []byte) {
+	e.writeBytes([]byte(name))
+	_ = e.buffer.WriteByte(byte(valueType))
+	if !present {
+		_ = e.buffer.WriteByte(0)
 		return
 	}
-	// Name                           *string
-	io.WriteString(h, a.GetName())
-	// DEPRECATEDParseableLocation    *Location
-	// note: Location contains machine specific elements, don't hash
-	// ExplicitlySpecified            *bool
-	if a.GetExplicitlySpecified() {
-		h.Write([]byte{1})
+	_ = e.buffer.WriteByte(1)
+	e.writeBytes(payload)
+}
+
+func (e *canonicalEncoder) writeOptionalString(name string, value *string) {
+	if value == nil {
+		e.writeField(name, canonicalString, false, nil)
+		return
 	}
-	// Nodep                          *bool
-	if a.GetNodep() {
-		h.Write([]byte{1})
+	e.writeField(name, canonicalString, true, []byte(*value))
+}
+
+func (e *canonicalEncoder) writeOptionalBool(name string, value *bool) {
+	if value == nil {
+		e.writeField(name, canonicalBool, false, nil)
+		return
 	}
-	// Type                           *Attribute_Discriminator
-	io.WriteString(h, a.GetType().String())
-	// IntValue                       *int32
-	if a.IntValue != nil {
-		io.WriteString(h, strconv.Itoa(int(a.GetIntValue())))
+	payload := byte(0)
+	if *value {
+		payload = 1
 	}
-	// StringValue                    *string
-	io.WriteString(h, a.GetStringValue())
-	// BooleanValue                   *bool
-	if a.GetBooleanValue() {
-		h.Write([]byte{1})
+	e.writeField(name, canonicalBool, true, []byte{payload})
+}
+
+func (e *canonicalEncoder) writeOptionalInt32(name string, value *int32) {
+	if value == nil {
+		e.writeField(name, canonicalInt32, false, nil)
+		return
 	}
-	// TristateValue                  *Attribute_Tristate
-	if a.TristateValue != nil {
-		io.WriteString(h, a.GetTristateValue().String())
+	e.writeField(name, canonicalInt32, true, encodeInt32(*value))
+}
+
+func writeOptionalEnum[T ~int32](e *canonicalEncoder, name string, value *T) {
+	if value == nil {
+		e.writeField(name, canonicalEnum, false, nil)
+		return
 	}
-	// StringListValue                []string
-	// Before hashing, sort to guarantee consistency
-	stringListValue := slices.Clone(a.GetStringListValue())
-	sort.Strings(stringListValue)
-	for _, s := range stringListValue {
-		io.WriteString(h, s)
+	e.writeField(name, canonicalEnum, true, encodeInt32(int32(*value)))
+}
+
+func (e *canonicalEncoder) writeSortedStrings(name string, values []string) {
+	sorted := slices.Clone(values)
+	sort.Strings(sorted)
+	elements := make([][]byte, 0, len(sorted))
+	for _, value := range sorted {
+		elements = append(elements, []byte(value))
 	}
-	// License                        *License
-	// StringDictValue                []*StringDictEntry
-	// Before hashing, sort to guarantee consistency
-	stringDictValue := slices.Clone(a.GetStringDictValue())
-	sort.Slice(stringDictValue, func(i, j int) bool {
-		return stringDictValue[i].GetKey() < stringDictValue[j].GetKey()
+	e.writeList(name, canonicalString, elements)
+}
+
+func (e *canonicalEncoder) writeSortedInt32s(name string, values []int32) {
+	sorted := slices.Clone(values)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i] < sorted[j]
 	})
-	for _, d := range stringDictValue {
-		io.WriteString(h, d.GetKey())
-		io.WriteString(h, d.GetValue())
+	elements := make([][]byte, 0, len(sorted))
+	for _, value := range sorted {
+		elements = append(elements, encodeInt32(value))
 	}
-	// FilesetListValue               []*FilesetEntry
-	// Before hashing, sort to guarantee consistency
-	filesetListValue := slices.Clone(a.GetFilesetListValue())
-	sort.Slice(filesetListValue, func(i, j int) bool {
-		return filesetListValue[i].GetSource() < filesetListValue[j].GetSource()
-	})
-	for _, f := range filesetListValue {
-		// Source               *string
-		io.WriteString(h, f.GetSource())
-		// DestinationDirectory *string
-		io.WriteString(h, f.GetDestinationDirectory())
-		// FilesPresent         *bool
-		if f.GetFilesPresent() {
-			h.Write([]byte{1})
+	e.writeList(name, canonicalInt32, elements)
+}
+
+func writeSortedMessages[T any](e *canonicalEncoder, name string, values []*T, encode func(*T) []byte) {
+	elements := make([][]byte, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
 		}
-		// File                 []string
-		// Before hashing, sort to guarantee consistency
-		files := slices.Clone(f.GetFile())
-		sort.Strings(files)
-		for _, file := range files {
-			io.WriteString(h, file)
-		}
-		// Exclude              []string
-		// Before hashing, sort to guarantee consistency
-		excludedFiles := slices.Clone(f.GetExclude())
-		sort.Strings(excludedFiles)
-		for _, file := range excludedFiles {
-			io.WriteString(h, file)
-		}
-		// SymlinkBehavior      *FilesetEntry_SymlinkBehavior
-		io.WriteString(h, f.GetSymlinkBehavior().String())
-		// StripPrefix          *string
-		io.WriteString(h, f.GetStripPrefix())
+		elements = append(elements, encode(value))
 	}
-	// LabelListDictValue             []*LabelListDictEntry
-	// Before hashing, sort to guarantee consistency
-	labelListDictValue := slices.Clone(a.GetLabelListDictValue())
-	sort.Slice(labelListDictValue, func(i, j int) bool {
-		return labelListDictValue[i].GetKey() < labelListDictValue[j].GetKey()
+	sortElements(elements)
+	e.writeList(name, canonicalMessage, elements)
+}
+
+func (e *canonicalEncoder) writeList(name string, elementType canonicalValueType, elements [][]byte) {
+	var payload canonicalEncoder
+	_ = payload.buffer.WriteByte(byte(elementType))
+	payload.writeUvarint(uint64(len(elements)))
+	for _, element := range elements {
+		_ = payload.buffer.WriteByte(1)
+		payload.writeBytes(element)
+	}
+	e.writeField(name, canonicalList, true, payload.buffer.Bytes())
+}
+
+func (e *canonicalEncoder) writeBytes(value []byte) {
+	e.writeUvarint(uint64(len(value)))
+	_, _ = e.buffer.Write(value)
+}
+
+func (e *canonicalEncoder) writeUvarint(value uint64) {
+	var encoded [binary.MaxVarintLen64]byte
+	length := binary.PutUvarint(encoded[:], value)
+	_, _ = e.buffer.Write(encoded[:length])
+}
+
+func encodeInt32(value int32) []byte {
+	var encoded [4]byte
+	binary.BigEndian.PutUint32(encoded[:], uint32(value))
+	return encoded[:]
+}
+
+func sortElements(elements [][]byte) {
+	sort.Slice(elements, func(i, j int) bool {
+		return bytes.Compare(elements[i], elements[j]) < 0
 	})
-	for _, ll := range labelListDictValue {
-		io.WriteString(h, ll.GetKey())
-		// Before hashing, sort to guarantee consistency
-		llv := slices.Clone(ll.GetValue())
-		sort.Strings(llv)
-		for _, v := range llv {
-			io.WriteString(h, v)
-		}
-	}
-	// StringListDictValue            []*StringListDictEntry
-	// Before hashing, sort to guarantee consistency
-	stringListDictValue := slices.Clone(a.GetStringListDictValue())
-	sort.Slice(stringListDictValue, func(i, j int) bool {
-		return stringListDictValue[i].GetKey() < stringListDictValue[j].GetKey()
-	})
-	for _, sl := range stringListDictValue {
-		io.WriteString(h, sl.GetKey())
-		// Before hashing, sort to guarantee consistency
-		slv := slices.Clone(sl.GetValue())
-		sort.Strings(slv)
-		for _, v := range slv {
-			io.WriteString(h, v)
-		}
-	}
-	// IntListValue                   []int32
-	// Before hashing, sort to guarantee consistency
-	intListValue := slices.Clone(a.GetIntListValue())
-	sort.Slice(intListValue, func(i, j int) bool {
-		return intListValue[i] < intListValue[j]
-	})
-	for _, i := range intListValue {
-		io.WriteString(h, strconv.Itoa(int(i)))
-	}
-	// LabelDictUnaryValue            []*LabelDictUnaryEntry
-	// Before hashing, sort to guarantee consistency
-	labelDictUnaryValue := slices.Clone(a.GetLabelDictUnaryValue())
-	sort.Slice(labelDictUnaryValue, func(i, j int) bool {
-		return labelDictUnaryValue[i].GetKey() < labelDictUnaryValue[j].GetKey()
-	})
-	for _, d := range labelDictUnaryValue {
-		io.WriteString(h, d.GetKey())
-		io.WriteString(h, d.GetValue())
-	}
-	// LabelKeyedStringDictValue      []*LabelKeyedStringDictEntry
-	// Before hashing, sort to guarantee consistency
-	labelKeyedStringDictValue := slices.Clone(a.GetLabelKeyedStringDictValue())
-	sort.Slice(labelKeyedStringDictValue, func(i, j int) bool {
-		return labelKeyedStringDictValue[i].GetKey() < labelKeyedStringDictValue[j].GetKey()
-	})
-	for _, d := range labelKeyedStringDictValue {
-		io.WriteString(h, d.GetKey())
-		io.WriteString(h, d.GetValue())
-	}
-	// SelectorList                   *Attribute_SelectorList
-	// pass on this for now
 }

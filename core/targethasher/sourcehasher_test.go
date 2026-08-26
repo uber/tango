@@ -187,6 +187,254 @@ func TestDiskHashHelper_MissingFileProducesDeterministicHash(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
+func valuePtr[T any](value T) *T { return &value }
+
+func hashRuleForTest(rule *buildpb.Rule) []byte {
+	h := newHash()
+	HashRuleCommon(rule, h)
+	return h.Sum(nil)
+}
+
+func TestHashRuleCommon_DistinguishesStructuralCollisions(t *testing.T) {
+	tests := []struct {
+		name  string
+		left  *buildpb.Rule
+		right *buildpb.Rule
+	}{
+		{
+			name: "rule field boundaries",
+			left: &buildpb.Rule{
+				Name:      strPtr("a"),
+				RuleClass: strPtr("bc"),
+			},
+			right: &buildpb.Rule{
+				Name:      strPtr("ab"),
+				RuleClass: strPtr("c"),
+			},
+		},
+		{
+			name: "collection element boundaries",
+			left: &buildpb.Rule{
+				Name:      strPtr("//pkg:target"),
+				RuleClass: strPtr("test_rule"),
+				Attribute: []*buildpb.Attribute{{
+					Name:            strPtr("values"),
+					Type:            buildpb.Attribute_STRING_LIST.Enum(),
+					StringListValue: []string{"a", "bc"},
+				}},
+			},
+			right: &buildpb.Rule{
+				Name:      strPtr("//pkg:target"),
+				RuleClass: strPtr("test_rule"),
+				Attribute: []*buildpb.Attribute{{
+					Name:            strPtr("values"),
+					Type:            buildpb.Attribute_STRING_LIST.Enum(),
+					StringListValue: []string{"ab", "c"},
+				}},
+			},
+		},
+		{
+			name: "collection field boundaries",
+			left: &buildpb.Rule{
+				Name:       strPtr("//pkg:target"),
+				RuleClass:  strPtr("test_rule"),
+				RuleInput:  []string{"a"},
+				RuleOutput: []string{"bc"},
+			},
+			right: &buildpb.Rule{
+				Name:       strPtr("//pkg:target"),
+				RuleClass:  strPtr("test_rule"),
+				RuleInput:  []string{"ab"},
+				RuleOutput: []string{"c"},
+			},
+		},
+		{
+			name: "scalar field and type boundaries",
+			left: &buildpb.Rule{
+				Name:      strPtr("//pkg:target"),
+				RuleClass: strPtr("test_rule"),
+				Attribute: []*buildpb.Attribute{{
+					Name:     strPtr("value"),
+					IntValue: valuePtr[int32](1),
+				}},
+			},
+			right: &buildpb.Rule{
+				Name:      strPtr("//pkg:target"),
+				RuleClass: strPtr("test_rule"),
+				Attribute: []*buildpb.Attribute{{
+					Name:        strPtr("value"),
+					StringValue: strPtr("1"),
+				}},
+			},
+		},
+		{
+			name: "optional scalar presence",
+			left: &buildpb.Rule{
+				Name:      strPtr("//pkg:target"),
+				RuleClass: strPtr("test_rule"),
+				Attribute: []*buildpb.Attribute{{
+					Name: strPtr("value"),
+				}},
+			},
+			right: &buildpb.Rule{
+				Name:      strPtr("//pkg:target"),
+				RuleClass: strPtr("test_rule"),
+				Attribute: []*buildpb.Attribute{{
+					Name:                strPtr("value"),
+					ExplicitlySpecified: valuePtr(false),
+				}},
+			},
+		},
+		{
+			name: "nested message field boundaries",
+			left: &buildpb.Rule{
+				Name:      strPtr("//pkg:target"),
+				RuleClass: strPtr("test_rule"),
+				Attribute: []*buildpb.Attribute{{
+					Name: strPtr("values"),
+					Type: buildpb.Attribute_STRING_DICT.Enum(),
+					StringDictValue: []*buildpb.StringDictEntry{{
+						Key:   strPtr("a"),
+						Value: strPtr("bc"),
+					}},
+				}},
+			},
+			right: &buildpb.Rule{
+				Name:      strPtr("//pkg:target"),
+				RuleClass: strPtr("test_rule"),
+				Attribute: []*buildpb.Attribute{{
+					Name: strPtr("values"),
+					Type: buildpb.Attribute_STRING_DICT.Enum(),
+					StringDictValue: []*buildpb.StringDictEntry{{
+						Key:   strPtr("ab"),
+						Value: strPtr("c"),
+					}},
+				}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotEqual(t, hashRuleForTest(tt.left), hashRuleForTest(tt.right))
+		})
+	}
+}
+
+func TestHashRuleCommon_IsDeterministicAcrossCollectionOrder(t *testing.T) {
+	left := &buildpb.Rule{
+		Name:           strPtr("//pkg:target"),
+		RuleClass:      strPtr("test_rule"),
+		RuleInput:      []string{"//pkg:b", "//pkg:a"},
+		RuleOutput:     []string{"out_b", "out_a"},
+		DefaultSetting: []string{"z", "a"},
+		Attribute: []*buildpb.Attribute{
+			{
+				Name:            strPtr("tags"),
+				Type:            buildpb.Attribute_STRING_LIST.Enum(),
+				StringListValue: []string{"beta", "alpha"},
+			},
+			{
+				Name: strPtr("mapping"),
+				Type: buildpb.Attribute_STRING_DICT.Enum(),
+				StringDictValue: []*buildpb.StringDictEntry{
+					{Key: strPtr("z"), Value: strPtr("last")},
+					{Key: strPtr("a"), Value: strPtr("first")},
+				},
+			},
+			{
+				Name: strPtr("filesets"),
+				Type: buildpb.Attribute_FILESET_ENTRY_LIST.Enum(),
+				FilesetListValue: []*buildpb.FilesetEntry{
+					{
+						Source:               strPtr("//pkg:z"),
+						DestinationDirectory: strPtr("dest-z"),
+						File:                 []string{"b", "a"},
+						Exclude:              []string{"d", "c"},
+					},
+					{
+						Source:               strPtr("//pkg:a"),
+						DestinationDirectory: strPtr("dest-a"),
+					},
+				},
+			},
+		},
+	}
+	right := &buildpb.Rule{
+		Name:           strPtr("//pkg:target"),
+		RuleClass:      strPtr("test_rule"),
+		RuleInput:      []string{"//pkg:a", "//pkg:b"},
+		RuleOutput:     []string{"out_a", "out_b"},
+		DefaultSetting: []string{"a", "z"},
+		Attribute: []*buildpb.Attribute{
+			{
+				Name: strPtr("filesets"),
+				Type: buildpb.Attribute_FILESET_ENTRY_LIST.Enum(),
+				FilesetListValue: []*buildpb.FilesetEntry{
+					{
+						Source:               strPtr("//pkg:a"),
+						DestinationDirectory: strPtr("dest-a"),
+					},
+					{
+						Source:               strPtr("//pkg:z"),
+						DestinationDirectory: strPtr("dest-z"),
+						File:                 []string{"a", "b"},
+						Exclude:              []string{"c", "d"},
+					},
+				},
+			},
+			{
+				Name: strPtr("mapping"),
+				Type: buildpb.Attribute_STRING_DICT.Enum(),
+				StringDictValue: []*buildpb.StringDictEntry{
+					{Key: strPtr("a"), Value: strPtr("first")},
+					{Key: strPtr("z"), Value: strPtr("last")},
+				},
+			},
+			{
+				Name:            strPtr("tags"),
+				Type:            buildpb.Attribute_STRING_LIST.Enum(),
+				StringListValue: []string{"alpha", "beta"},
+			},
+		},
+	}
+
+	leftHash := hashRuleForTest(left)
+	assert.Equal(t, leftHash, hashRuleForTest(left))
+	assert.Equal(t, leftHash, hashRuleForTest(right))
+}
+
+func TestHashRuleCommon_IgnoresNilMessages(t *testing.T) {
+	withNilMessages := &buildpb.Rule{
+		Name:      strPtr("//pkg:target"),
+		RuleClass: strPtr("test_rule"),
+		Attribute: []*buildpb.Attribute{
+			nil,
+			{
+				Name: strPtr("mapping"),
+				Type: buildpb.Attribute_STRING_DICT.Enum(),
+				StringDictValue: []*buildpb.StringDictEntry{
+					nil,
+					{Key: strPtr("key"), Value: strPtr("value")},
+				},
+			},
+		},
+	}
+	withoutNilMessages := &buildpb.Rule{
+		Name:      strPtr("//pkg:target"),
+		RuleClass: strPtr("test_rule"),
+		Attribute: []*buildpb.Attribute{{
+			Name: strPtr("mapping"),
+			Type: buildpb.Attribute_STRING_DICT.Enum(),
+			StringDictValue: []*buildpb.StringDictEntry{
+				{Key: strPtr("key"), Value: strPtr("value")},
+			},
+		}},
+	}
+
+	assert.Equal(t, hashRuleForTest(withoutNilMessages), hashRuleForTest(withNilMessages))
+}
+
 func TestDiskHashHelper_RespectsContextCancellation(t *testing.T) {
 	tmp := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmp, "file.txt"), []byte("x"), 0o644))
