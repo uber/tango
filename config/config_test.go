@@ -28,6 +28,7 @@ func minimal() string {
 	return `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 2
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -49,6 +50,7 @@ func TestParseBytes_ExplicitValues(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
     query_timeout_seconds: 60
     bzlmod_enabled: false
     full_hash_repos: ["//"]
@@ -88,6 +90,7 @@ storage:
   type: "memory"
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -98,6 +101,7 @@ service:
 			yaml: `
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -112,6 +116,7 @@ storage:
     root_path: "/tmp/store"
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -125,6 +130,7 @@ storage:
   type: "disk"
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -140,6 +146,7 @@ storage:
     root_path: ""
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -153,6 +160,7 @@ storage:
   type: "s3"
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -175,6 +183,7 @@ func TestParseBytes_UnknownFieldsRejected(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -188,6 +197,7 @@ func TestParseBytes_WorkerPoolSizeRequired(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 0
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -200,6 +210,19 @@ func TestParseBytes_EmptyRemoteRejected(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: ""
+    repository_id: "test-repository"
+service:
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
+`
+	_, err := ParseBytes([]byte(yamlStr))
+	require.Error(t, err)
+}
+
+func TestParseBytes_RepositoryIDRequired(t *testing.T) {
+	yamlStr := `
+repository:
+  - remote: "https://example.com/repo.git"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -212,7 +235,9 @@ func TestParseBytes_DuplicateRemoteRejected(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -225,6 +250,7 @@ func TestParseBytes_WorkspacesRootPathRequired(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
 `
@@ -254,6 +280,7 @@ func TestGetRepositoryConfig(t *testing.T) {
 	repo, ok := cfg.GetRepositoryConfig("https://example.com/repo.git")
 	assert.True(t, ok)
 	assert.Equal(t, "https://example.com/repo.git", repo.Remote)
+	assert.Equal(t, "test-repository", repo.RepositoryID)
 
 	_, ok = cfg.GetRepositoryConfig("https://missing.com/repo.git")
 	assert.False(t, ok)

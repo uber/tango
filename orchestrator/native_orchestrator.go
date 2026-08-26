@@ -34,7 +34,6 @@ import (
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
-	"github.com/uber/tango/internal/url"
 	"github.com/uber/tango/mapper"
 	"github.com/uber/tango/observability/metrics"
 	"go.uber.org/zap"
@@ -107,18 +106,21 @@ func NewNativeOrchestrator(appCtx context.Context, p Params) (Orchestrator, erro
 // GetTargetGraph is used to compute the target graph locally.
 // It leases a workspace, checks out the base revision, applies the change requests, and computes the target graph.
 func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (_ storage.GraphReader, retErr error) {
-	e := b.emitter.Tagged(map[string]string{metrics.TagRepo: url.ToShortRemote(req.Build.Remote)})
+	build := req.Build
+	repoCfg, ok := b.config.GetRepositoryConfig(build.Remote)
+	if !ok {
+		return nil, fmt.Errorf("repository remote %q is not configured", build.Remote)
+	}
+	e := b.emitter.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID})
 	op := metrics.Begin(e, _opGetTargetGraph, metrics.SlowDurationBuckets)
 	defer func() { op.Complete(retErr) }()
-	build := req.Build
-	logger := b.logger.With(zap.Any("build_description", build))
+	logger := b.logger.With(
+		zap.String("repository", repoCfg.RepositoryID),
+		zap.String("base_sha", build.BaseSha),
+		zap.Stringer("strategy", build.Strategy),
+	)
 	logger.Info("GetTargetGraph: Processing request")
 
-	remote := build.Remote
-	repoCfg, ok := b.config.GetRepositoryConfig(remote)
-	if !ok {
-		return nil, fmt.Errorf("no repository configuration found for remote %q", remote)
-	}
 	leaseStart := time.Now()
 	ws, err := b.repoManager.Lease(ctx, build)
 	recordStep(e, "lease_duration", leaseStart, metrics.FastDurationBuckets)
@@ -138,7 +140,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	err = ws.Checkout(ctx, build.Remote, build.BaseSha)
 	recordStep(e, "checkout_duration", checkoutStart, metrics.FastDurationBuckets)
 	if err != nil {
-		return nil, classifyGitError(fmt.Errorf("checkout %s@%s: %w", build.Remote, build.BaseSha, err))
+		return nil, classifyGitError(fmt.Errorf("checkout repository %s at %s: %w", repoCfg.RepositoryID, build.BaseSha, err))
 	}
 	logger.Info("GetTargetGraph: Checked out base revision")
 
@@ -160,18 +162,18 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	err = ws.ApplyRequests(ctx, requests)
 	recordStep(e, "apply_requests_duration", applyStart, metrics.FastDurationBuckets)
 	if err != nil {
-		return nil, classifyGitError(fmt.Errorf("apply requests for %s@%s: %w", build.Remote, build.BaseSha, err))
+		return nil, classifyGitError(fmt.Errorf("apply requests for repository %s at %s: %w", repoCfg.RepositoryID, build.BaseSha, err))
 	}
 	logger.Info("GetTargetGraph: Applied requests", zap.Int("request_count", len(requests)))
 
 	// Compute the treehash and download the target graph from storage if exists.
 	treehash, err := gitModule.RevParse(ctx, "HEAD^{tree}")
 	if err != nil {
-		return nil, classifyGitError(fmt.Errorf("compute treehash for %s@%s: %w", build.Remote, build.BaseSha, err))
+		return nil, classifyGitError(fmt.Errorf("compute treehash for repository %s at %s: %w", repoCfg.RepositoryID, build.BaseSha, err))
 	}
-	treehashPath := cachekey.GetGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
+	treehashPath := cachekey.GetGraphByTreeHash(repoCfg.RepositoryID, treehash, build.Strategy, req.ExcludeFilesRegex)
 	useTGB := b.config.Service.GraphFormat == config.GraphFormatTGB
-	tgbPath := cachekey.GetTGBGraphByTreeHash(build.Remote, treehash, build.Strategy, req.ExcludeFilesRegex)
+	tgbPath := cachekey.GetTGBGraphByTreeHash(repoCfg.RepositoryID, treehash, build.Strategy, req.ExcludeFilesRegex)
 	if !req.BypassCache {
 		cacheReadStart := time.Now()
 		graphReader, err := b.readCachedGraph(ctx, logger, useTGB, tgbPath, treehashPath)
@@ -193,7 +195,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	// resolve it without waiting for the graph to finish.
 	go func() {
 		bgOp := metrics.Begin(e, _opTreehashCacheWrite, metrics.FastDurationBuckets)
-		thCachePath := cachekey.GetTreehashCachePath(build)
+		thCachePath := cachekey.GetTreehashCachePath(repoCfg.RepositoryID, build)
 		putErr := b.storage.Put(b.appCtx, storage.UploadRequest{
 			Key:    thCachePath,
 			Reader: bytes.NewReader([]byte(treehash)),
@@ -230,7 +232,7 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 				GitClient:          gitModule,
 				Config:             repoCfg,
 				ExtraExcludedFiles: req.ExcludeFilesRegex,
-				Scope:              b.scope.Tagged(map[string]string{metrics.TagRepo: url.ToShortRemote(build.Remote)}),
+				Scope:              b.scope.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID}),
 			})
 		default:
 			return nil, tangoerrors.NewUser(fmt.Errorf("unknown computation strategy: %d", build.Strategy))

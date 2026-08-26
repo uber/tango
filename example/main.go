@@ -81,6 +81,7 @@ func run() error {
 		Logger:               logger,
 		RepoManagerClonePath: repoManagerClonePath,
 		PoolSize:             cfg.Service.MaxWorkerPoolSize,
+		RepoConfig:           cfg,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create repo manager: %w", err)

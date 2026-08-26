@@ -99,6 +99,9 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 		if remote == "" {
 			return nil, fmt.Errorf("repository[%d].remote must not be empty", i)
 		}
+		if config.Repository[i].RepositoryID == "" {
+			return nil, fmt.Errorf("repository[%d].repository_id must not be empty", i)
+		}
 		if _, exists := config.repositoryByRemote[remote]; exists {
 			return nil, fmt.Errorf("duplicate repository remote %q", remote)
 		}

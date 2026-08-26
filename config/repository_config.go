@@ -29,6 +29,10 @@ type RepositoryConfig struct {
 	// unique across all entries and match exactly what clients send in
 	// BuildDescription.remote.
 	Remote string `yaml:"remote"`
+	// RepositoryID is the required operator-provided name used for metrics,
+	// repository workspaces, and cache keys. It must be safe for all three and
+	// uniquely identify this repository across Tango installations.
+	RepositoryID string `yaml:"repository_id"`
 	// TODO: FullHashRepos, ExcludedFiles, and StreamBazelLogs are not
 	// documented in config/README.md. Delete them if they turn out to be
 	// unneeded, otherwise document them there.

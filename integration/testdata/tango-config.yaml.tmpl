@@ -3,6 +3,7 @@ storage:
 
 repository:
   - remote: {{.Remote}}
+    repository_id: "integration-repository"
 {{- if .BazelCommand}}
     bazel_command_path: {{.BazelCommand}}
 {{- end}}

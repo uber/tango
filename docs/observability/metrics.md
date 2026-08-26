@@ -162,7 +162,11 @@ Each component stores the `*metrics.Emitter` it was constructed with. At the top
 
 ```go
 func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest) (_ storage.GraphReader, retErr error) {
-    e := b.emitter.Tagged(map[string]string{metrics.TagRepo: url.ToShortRemote(req.Build.Remote)})
+    repoCfg, ok := b.config.GetRepositoryConfig(req.Build.Remote)
+    if !ok {
+        return nil, fmt.Errorf("repository remote %q is not configured", req.Build.Remote)
+    }
+    e := b.emitter.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID})
     op := metrics.Begin(e, _opGetTargetGraph, metrics.SlowDurationBuckets)
     defer func() { op.Complete(retErr) }()
 
@@ -175,7 +179,11 @@ The controller follows the same shape; each RPC passes its own operation name an
 
 ```go
 func (c *controller) GetChangedTargets(req *pb.GetChangedTargetsRequest, stream pb.Tango_GetChangedTargetsServer) (retErr error) {
-    e := c.emitter.Tagged(map[string]string{metrics.TagRepo: url.ToShortRemote(req.GetFirstRevision().GetRemote())})
+    repoCfg, err := c.resolveRepository(req.GetFirstRevision().GetRemote())
+    if err != nil {
+        return err
+    }
+    e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID})
     op := metrics.Begin(e, opGetChangedTargets, metrics.SlowDurationBuckets)
     defer func() { op.Complete(retErr) }()
 
@@ -217,4 +225,4 @@ fetch service:tango name:controller.get_changed_targets.target_count | histogram
 
 ## Request-specific tags
 
-Each distinct tag value is a new series, so tag values must be bounded — never request IDs, commit hashes, paths, or raw repo URLs. `repo` is safe only with an explicit cardinality budget and a normalized, allow-listed value; the handlers above apply it that way (`ToShortRemote`).
+Each distinct tag value is a new series, so tag values must come from a bounded set — never request IDs, commit hashes, paths, or raw repo URLs. Every repository configuration supplies a mandatory `repository_id` that operators guarantee is safe for metric labels, filesystem paths, and cache keys. Request handlers require an exact configured-remote match before cache or workspace access, then reuse that configured ID; unconfigured requests use the shared `unknown` label.

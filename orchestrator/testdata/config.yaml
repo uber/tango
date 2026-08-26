@@ -1,5 +1,6 @@
 repository:
   - remote: "git@github:uber/tango"
+    repository_id: "tango"
     full_hash_repos:
       - "//"
       - "//external"

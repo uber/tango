@@ -9,6 +9,8 @@ storage:
 # Repository configuration
 repository:
   - remote: "https://github.com/uber/tango.git"
+    # Required safe name that uniquely identifies this repository across Tango installations.
+    repository_id: "tango"
     # External repositories to hash file-by-file. The main repository is always fully hashed.
     full_hash_repos: []
     # Regular expressions matched against target labels.
