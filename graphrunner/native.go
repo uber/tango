@@ -92,10 +92,14 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		return targethasher.EmptyResult(), err
 	}
 
+	// Copy configured exclusions so appending request-specific entries cannot
+	// mutate the shared configuration's backing array.
+	excludedRegex := append([]string(nil), g.config.ExcludedFiles...)
+	excludedRegex = append(excludedRegex, g.extraExcludedFiles...)
 	hashConfig := targethasher.HashConfig{
 		KnownSourceHashes: knownSourceHashes,
 		FullHashRepos:     g.config.FullHashRepos,
-		ExcludedRegex:     append(g.config.ExcludedFiles, g.extraExcludedFiles...),
+		ExcludedRegex:     excludedRegex,
 		UseBzlmod:         bzlmodEnabled,
 		AllTargetsFiles:   g.config.AllTargetsFiles,
 	}
