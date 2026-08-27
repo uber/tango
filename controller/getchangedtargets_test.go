@@ -226,10 +226,11 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 	firstGraph := []entity.GetTargetGraphResponse{
 		{Targets: []entity.OptimizedTarget{
 			{ID: 1, Hash: "h1", RuleType: 100},
-			{ID: 2, Hash: "h2", RuleType: 100},
+			{ID: 2, Hash: "h2-old", RuleType: 100},
+			{ID: 5, Hash: "h5", RuleType: 100},
 		}},
 		{Metadata: &entity.Metadata{
-			TargetIDMapping:      map[int32]string{1: "//app:a", 2: "//app:b"},
+			TargetIDMapping:      map[int32]string{1: "//app:a", 2: "//app:b", 5: "//legacy:deleted"},
 			RuleTypeMapping:      map[int32]string{100: "go_library"},
 			AllTargetsFileHashes: map[string]string{".bazelrc": "old-hash"},
 		}},
@@ -237,7 +238,7 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 	secondGraph := []entity.GetTargetGraphResponse{
 		{Targets: []entity.OptimizedTarget{
 			{ID: 1, Hash: "h1", RuleType: 100},
-			{ID: 2, Hash: "h2", RuleType: 100},
+			{ID: 2, Hash: "h2-new", RuleType: 100},
 			{ID: 3, Hash: "h3", RuleType: 100},
 			{ID: 4, Hash: "h4", RuleType: 100, DirectDependencies: []int32{3}},
 		}},
@@ -251,18 +252,54 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 	responses, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), firstGraph, secondGraph, nil)
 	require.NoError(t, err)
 
-	var totalChanged int
+	var metadata *entity.Metadata
 	for _, resp := range responses {
-		totalChanged += len(resp.ChangedTargets)
-	}
-	assert.Equal(t, 4, totalChanged, "all targets from second graph should be reported as changed")
-	for _, resp := range responses {
-		for _, ct := range resp.ChangedTargets {
-			assert.Equal(t, entity.ChangeTypeChanged, ct.ChangeType)
-			assert.Equal(t, int32(0), ct.Distance)
-			assert.NotNil(t, ct.NewTarget)
+		if resp.Metadata != nil {
+			metadata = resp.Metadata
 		}
 	}
+	require.NotNil(t, metadata)
+
+	byName := make(map[string]*entity.ChangedTarget)
+	for responseIndex := range responses {
+		for targetIndex := range responses[responseIndex].ChangedTargets {
+			changed := &responses[responseIndex].ChangedTargets[targetIndex]
+			target := changed.NewTarget
+			if target == nil {
+				target = changed.OldTarget
+			}
+			require.NotNil(t, target)
+			name := metadata.TargetIDMapping[target.ID]
+			require.NotEmpty(t, name)
+			byName[name] = changed
+		}
+	}
+	require.Len(t, byName, 5)
+
+	assertChange := func(name string, wantType entity.ChangeType, wantOld, wantNew bool) {
+		t.Helper()
+		changed := byName[name]
+		require.NotNil(t, changed, name)
+		assert.Equal(t, wantType, changed.ChangeType, name)
+		assert.Equal(t, int32(0), changed.Distance, name)
+		if wantOld {
+			require.NotNil(t, changed.OldTarget, name)
+			assert.Equal(t, name, metadata.TargetIDMapping[changed.OldTarget.ID])
+		} else {
+			assert.Nil(t, changed.OldTarget, name)
+		}
+		if wantNew {
+			require.NotNil(t, changed.NewTarget, name)
+			assert.Equal(t, name, metadata.TargetIDMapping[changed.NewTarget.ID])
+		} else {
+			assert.Nil(t, changed.NewTarget, name)
+		}
+	}
+	assertChange("//app:a", entity.ChangeTypeChanged, true, true)
+	assertChange("//app:b", entity.ChangeTypeChanged, true, true)
+	assertChange("//app:c", entity.ChangeTypeNew, false, true)
+	assertChange("//lib:util", entity.ChangeTypeNew, false, true)
+	assertChange("//legacy:deleted", entity.ChangeTypeDeleted, true, false)
 }
 
 func TestCompareTargetGraphs_AllTargetsFileNoTrigger(t *testing.T) {

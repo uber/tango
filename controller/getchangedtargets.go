@@ -429,7 +429,7 @@ func (c *controller) compareFetchedGraphs(ctx context.Context, e *metrics.Emitte
 		) {
 			logger.Info("compareFetchedGraphs: AllTargetsFiles trigger matched (TGB), reporting all targets as changed")
 			e.Counter(opGetChangedTargets, "all_targets_triggered").Inc(1)
-			return c.allTargetsChangedFromTGB(ctx, second.tgb.TGB())
+			return c.allTargetsChangedFromTGB(ctx, first.tgb.TGB(), second.tgb.TGB())
 		}
 		return c.compareTargetGraphsTGB(ctx, e, logger, first.tgb.TGB(), second.tgb.TGB(), seedAttrs)
 	}
@@ -564,7 +564,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	if allTargetsFileChanged(firstMetadata, secondMetadata) {
 		logger.Info("compareTargetGraphs: AllTargetsFiles trigger matched, reporting all targets as changed")
 		e.Counter(opGetChangedTargets, "all_targets_triggered").Inc(1)
-		return c.allTargetsChangedFromGraph(ctx, secondTargetsByID, secondMetadata)
+		return c.allTargetsChangedFromGraph(ctx, firstTargetsByID, firstMetadata, secondTargetsByID, secondMetadata)
 	}
 
 	before, err := toDiffGraph(ctx, firstTargetsByID, firstMetadata, seedAttrs)
@@ -708,38 +708,107 @@ func allTargetsFileChanged(first, second *entity.Metadata) bool {
 	return !maps.Equal(first.AllTargetsFileHashes, second.AllTargetsFileHashes)
 }
 
-// allTargetsChangedFromGraph builds a GetChangedTargetsResponse stream that
-// marks every target in the second graph as ChangeTypeChanged with distance 0.
-// Used when an AllTargetsFiles trigger fires.
-func (c *controller) allTargetsChangedFromGraph(ctx context.Context, targetsByID map[int32]*entity.OptimizedTarget, meta *entity.Metadata) ([]entity.GetChangedTargetsResponse, error) {
-	graph, err := toDiffGraph(ctx, targetsByID, meta, nil)
+// allTargetsChangedFromGraph builds an AllTargetsFiles-triggered response from
+// two graph streams. Targets present in both revisions are promoted to CHANGED
+// at distance 0 while ordinary NEW and DELETED classifications are retained.
+func (c *controller) allTargetsChangedFromGraph(
+	ctx context.Context,
+	beforeTargetsByID map[int32]*entity.OptimizedTarget,
+	beforeMeta *entity.Metadata,
+	afterTargetsByID map[int32]*entity.OptimizedTarget,
+	afterMeta *entity.Metadata,
+) ([]entity.GetChangedTargetsResponse, error) {
+	before, err := toDiffGraph(ctx, beforeTargetsByID, beforeMeta, nil)
 	if err != nil {
 		return nil, err
 	}
-	changed := make([]*targetdiff.ChangedTarget, 0, len(graph))
-	for _, target := range graph {
-		changed = append(changed, &targetdiff.ChangedTarget{
-			ChangeType: targetdiff.ChangeTypeChanged,
-			After:      target,
-		})
+	after, err := toDiffGraph(ctx, afterTargetsByID, afterMeta, nil)
+	if err != nil {
+		return nil, err
 	}
-	return c.resultToResponses(targetdiff.Result{ChangedTargets: changed})
+	result, err := allTargetsChanged(ctx, before, after)
+	if err != nil {
+		return nil, err
+	}
+	return c.resultToResponses(result)
 }
 
-// allTargetsChangedFromTGB builds a response stream marking every target in
-// the TGB reader's graph as changed with distance 0. Used when the
-// AllTargetsFiles trigger fires on the TGB comparison path.
-func (c *controller) allTargetsChangedFromTGB(ctx context.Context, r *tgb.Reader) ([]entity.GetChangedTargetsResponse, error) {
-	g, err := r.DecodeGraph()
+// allTargetsChanged retains the ordinary comparison's membership changes and
+// promotes every target present in both revisions to a distance-zero CHANGED
+// result because the global input change may affect it independently of its
+// target hash.
+func allTargetsChanged(ctx context.Context, before, after targetdiff.Graph) (targetdiff.Result, error) {
+	changed := make([]*targetdiff.ChangedTarget, 0, len(before)+len(after))
+	i := 0
+	for name, beforeTarget := range before {
+		if i%cancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return targetdiff.Result{}, context.Cause(ctx)
+			}
+		}
+		i++
+		afterTarget, exists := after[name]
+		if !exists {
+			changed = append(changed, &targetdiff.ChangedTarget{
+				ChangeType: targetdiff.ChangeTypeDeleted,
+				Before:     beforeTarget,
+			})
+			continue
+		}
+		changed = append(changed, &targetdiff.ChangedTarget{
+			ChangeType: targetdiff.ChangeTypeChanged,
+			Before:     beforeTarget,
+			After:      afterTarget,
+		})
+	}
+
+	i = 0
+	for name, afterTarget := range after {
+		if i%cancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return targetdiff.Result{}, context.Cause(ctx)
+			}
+		}
+		i++
+		if _, exists := before[name]; exists {
+			continue
+		}
+		changed = append(changed, &targetdiff.ChangedTarget{
+			ChangeType: targetdiff.ChangeTypeNew,
+			After:      afterTarget,
+		})
+	}
+	return targetdiff.Result{ChangedTargets: changed}, nil
+}
+
+// allTargetsChangedFromTGB decodes both TGB revisions and applies the same
+// AllTargetsFiles classification rules as the chunk comparison path.
+func (c *controller) allTargetsChangedFromTGB(ctx context.Context, beforeReader, afterReader *tgb.Reader) ([]entity.GetChangedTargetsResponse, error) {
+	beforeGraph, err := beforeReader.DecodeGraph()
 	if err != nil {
-		return nil, fmt.Errorf("decode TGB graph: %w", err)
+		return nil, fmt.Errorf("decode first TGB graph: %w", err)
 	}
-	targetsByID := make(map[int32]*entity.OptimizedTarget, len(g.Targets))
-	for i := range g.Targets {
-		t := &g.Targets[i]
-		targetsByID[t.ID] = t
+	afterGraph, err := afterReader.DecodeGraph()
+	if err != nil {
+		return nil, fmt.Errorf("decode second TGB graph: %w", err)
 	}
-	return c.allTargetsChangedFromGraph(ctx, targetsByID, &g.Metadata)
+	beforeTargetsByID := make(map[int32]*entity.OptimizedTarget, len(beforeGraph.Targets))
+	for i := range beforeGraph.Targets {
+		target := &beforeGraph.Targets[i]
+		beforeTargetsByID[target.ID] = target
+	}
+	afterTargetsByID := make(map[int32]*entity.OptimizedTarget, len(afterGraph.Targets))
+	for i := range afterGraph.Targets {
+		target := &afterGraph.Targets[i]
+		afterTargetsByID[target.ID] = target
+	}
+	return c.allTargetsChangedFromGraph(
+		ctx,
+		beforeTargetsByID,
+		&beforeGraph.Metadata,
+		afterTargetsByID,
+		&afterGraph.Metadata,
+	)
 }
 
 // seedAttributesFor returns the RepositoryConfig.SeedAttributes
