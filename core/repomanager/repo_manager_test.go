@@ -16,6 +16,7 @@ package repomanager
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	tangogit "github.com/uber/tango/core/git"
 	gitmock "github.com/uber/tango/core/git/gitmock"
 	"github.com/uber/tango/core/workspace"
@@ -36,12 +38,24 @@ import (
 
 type requestFunc func(context.Context) error
 
+type testRepositoryConfigProvider struct{}
+
+func (testRepositoryConfigProvider) GetRepositoryConfig(remote string) (config.RepositoryConfig, bool) {
+	return config.RepositoryConfig{
+		Remote:       remote,
+		RepositoryID: testRepositoryID(remote),
+	}, true
+}
+
 func (f requestFunc) Apply(ctx context.Context) error {
 	return f(ctx)
 }
 
 func newTestRepoManager(t *testing.T, appCtx context.Context, p Params) RepoManager {
 	t.Helper()
+	if p.RepoConfig == nil {
+		p.RepoConfig = testRepositoryConfigProvider{}
+	}
 	rm, err := NewRepoManager(appCtx, p)
 	require.NoError(t, err)
 	rm.(*repoManager).restoreWorker = func(context.Context, string) error { return nil }
@@ -54,6 +68,18 @@ func runRepoGit(t *testing.T, directory string, args ...string) {
 	cmd.Dir = directory
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v: %s", args, output)
+}
+
+func testOriginDir(root, remote string) string {
+	return filepath.Join(root, testRepositoryID(remote))
+}
+
+func testWorkerDir(root, remote string, worker int) string {
+	return filepath.Join(root, ".workers", testRepositoryID(remote), fmt.Sprintf("worker-%d", worker))
+}
+
+func testRepositoryID(remote string) string {
+	return fmt.Sprintf("repository-%x", sha256.Sum256([]byte(remote)))
 }
 
 func TestNewRepoManager_InvalidPoolSize(t *testing.T) {
@@ -72,8 +98,8 @@ func TestLease_ClonesOriginAndCreatesWorker(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+	originDir := testOriginDir(root, remote)
+	workerDir := testWorkerDir(root, remote, 1)
 
 	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
 	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(nil)
@@ -92,8 +118,8 @@ func TestLease_SkipsOriginClone_WhenExists(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+	originDir := testOriginDir(root, remote)
+	workerDir := testWorkerDir(root, remote, 1)
 
 	require.NoError(t, os.MkdirAll(filepath.Join(originDir, ".git"), 0o755))
 
@@ -114,8 +140,8 @@ func TestLease_ReusesWorker_AfterRelease(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+	originDir := testOriginDir(root, remote)
+	workerDir := testWorkerDir(root, remote, 1)
 
 	// Exactly 1 origin + 1 worker clone total
 	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
@@ -153,6 +179,7 @@ func TestLease_RestoresWorkerAfterFailedMaterialization(t *testing.T) {
 		Logger:               zap.NewNop(),
 		RepoManagerClonePath: root,
 		PoolSize:             1,
+		RepoConfig:           testRepositoryConfigProvider{},
 	})
 	require.NoError(t, err)
 
@@ -200,8 +227,8 @@ func TestLease_RecreatesWorker_WhenRestoreFails(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+	originDir := testOriginDir(root, remote)
+	workerDir := testWorkerDir(root, remote, 1)
 
 	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
 	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(nil).Times(2)
@@ -227,11 +254,11 @@ func TestLease_CreatesMultipleWorkers(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
+	originDir := testOriginDir(root, remote)
 
 	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
 	for i := 1; i <= 2; i++ {
-		dir := filepath.Join(root, ".workers", "org/repo", fmt.Sprintf("worker-%d", i))
+		dir := testWorkerDir(root, remote, i)
 		g.EXPECT().Clone(gomock.Any(), originDir, dir, "--local", "-c", "gc.auto=0").Return(nil)
 	}
 
@@ -255,8 +282,8 @@ func TestLease_BlocksUntilReturn(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+	originDir := testOriginDir(root, remote)
+	workerDir := testWorkerDir(root, remote, 1)
 
 	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
 	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(nil)
@@ -301,8 +328,8 @@ func TestLease_CtxCanceled(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+	originDir := testOriginDir(root, remote)
+	workerDir := testWorkerDir(root, remote, 1)
 
 	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
 	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(nil)
@@ -329,8 +356,8 @@ func TestLease_CtxDeadlineExceeded(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+	originDir := testOriginDir(root, remote)
+	workerDir := testWorkerDir(root, remote, 1)
 
 	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
 	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(nil)
@@ -357,7 +384,7 @@ func TestLease_OriginCloneFails(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	g.EXPECT().Clone(gomock.Any(), remote, filepath.Join(root, "org/repo"), "-c", "gc.auto=0").Return(assert.AnError)
+	g.EXPECT().Clone(gomock.Any(), remote, testOriginDir(root, remote), "-c", "gc.auto=0").Return(assert.AnError)
 
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop(), RepoManagerClonePath: root, PoolSize: 1})
 	_, err := rm.Lease(context.Background(), entity.BuildDescription{Remote: remote})
@@ -372,8 +399,8 @@ func TestLease_WorkerCloneFails(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+	originDir := testOriginDir(root, remote)
+	workerDir := testWorkerDir(root, remote, 1)
 
 	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
 	g.EXPECT().Clone(gomock.Any(), originDir, workerDir, "--local", "-c", "gc.auto=0").Return(assert.AnError)
@@ -391,10 +418,12 @@ func TestLease_DiscoversExistingWorker(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
+	originDir := testOriginDir(root, remote)
+	workerDir := testWorkerDir(root, remote, 1)
 
 	// Pre-create origin and worker from a "previous run"
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "org/repo", ".git"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, ".workers", "org/repo", "worker-1", ".git"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(originDir, ".git"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(workerDir, ".git"), 0o755))
 
 	// No Clone calls — everything already exists
 	rm := newTestRepoManager(t, context.Background(), Params{Git: g, Logger: zap.NewNop(), RepoManagerClonePath: root, PoolSize: 1})
@@ -410,13 +439,13 @@ func TestLease_DifferentRepos_IndependentPools(t *testing.T) {
 	g := gitmock.NewMockInterface(ctrl)
 
 	root := t.TempDir()
-	remote1 := "git@github.com:org/repo1"
-	remote2 := "git@github.com:org/repo2"
+	remote1 := "git@github.com:org/repo"
+	remote2 := "git@gitlab.com:org/repo"
 
-	origin1 := filepath.Join(root, "org/repo1")
-	origin2 := filepath.Join(root, "org/repo2")
-	worker1 := filepath.Join(root, ".workers", "org/repo1", "worker-1")
-	worker2 := filepath.Join(root, ".workers", "org/repo2", "worker-1")
+	origin1 := testOriginDir(root, remote1)
+	origin2 := testOriginDir(root, remote2)
+	worker1 := testWorkerDir(root, remote1, 1)
+	worker2 := testWorkerDir(root, remote2, 1)
 
 	g.EXPECT().Clone(gomock.Any(), remote1, origin1, "-c", "gc.auto=0").Return(nil)
 	g.EXPECT().Clone(gomock.Any(), origin1, worker1, "--local", "-c", "gc.auto=0").Return(nil)
@@ -432,8 +461,9 @@ func TestLease_DifferentRepos_IndependentPools(t *testing.T) {
 	ws2, err := rm.Lease(ctx, entity.BuildDescription{Remote: remote2})
 	require.NoError(t, err)
 
-	assert.Contains(t, ws1.Path(), "repo1")
-	assert.Contains(t, ws2.Path(), "repo2")
+	assert.Equal(t, worker1, ws1.Path())
+	assert.Equal(t, worker2, ws2.Path())
+	assert.NotEqual(t, ws1.Path(), ws2.Path())
 
 	require.NoError(t, ws1.Release())
 	require.NoError(t, ws2.Release())
@@ -446,8 +476,8 @@ func TestLease_WorkerCloneFails_SlotReturnedToPool(t *testing.T) {
 
 	root := t.TempDir()
 	remote := "git@github.com:org/repo"
-	originDir := filepath.Join(root, "org/repo")
-	workerDir := filepath.Join(root, ".workers", "org/repo", "worker-1")
+	originDir := testOriginDir(root, remote)
+	workerDir := testWorkerDir(root, remote, 1)
 
 	g.EXPECT().Clone(gomock.Any(), remote, originDir, "-c", "gc.auto=0").Return(nil)
 	// First attempt fails, second succeeds

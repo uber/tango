@@ -38,7 +38,8 @@ func TestGetTreehashCachePath_headSHAAffectsKey(t *testing.T) {
 			{URL: "github://github.com/uber/tango/pull/1/" + otherSHA},
 		}
 
-		require.NotEqual(t, GetTreehashCachePath(build), GetTreehashCachePath(changed))
+		repositoryID := "test-repository"
+		require.NotEqual(t, GetTreehashCachePath(repositoryID, build), GetTreehashCachePath(repositoryID, changed))
 	})
 }
 
@@ -60,6 +61,7 @@ func TestGetTreehashCachePath_changeRequestOrderAffectsKey(t *testing.T) {
 			build.ChangeRequests[0],
 		}
 
-		require.NotEqual(t, GetTreehashCachePath(build), GetTreehashCachePath(swapped))
+		repositoryID := "test-repository"
+		require.NotEqual(t, GetTreehashCachePath(repositoryID, build), GetTreehashCachePath(repositoryID, swapped))
 	})
 }

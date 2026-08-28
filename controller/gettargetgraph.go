@@ -26,7 +26,6 @@ import (
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper"
-	"github.com/uber/tango/internal/url"
 	"github.com/uber/tango/observability/metrics"
 
 	"github.com/uber/tango/core/storage"
@@ -36,11 +35,15 @@ import (
 
 // GetTargetGraph returns the target graph for a given request.
 func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
-	repo := url.ToShortRemote(request.GetBuildDescription().GetRemote())
+	entityReq, mappingErr := mapper.ProtoToGetTargetGraphRequest(request)
+	if mappingErr != nil {
+		mappingErr = tangoerrors.NewUser(fmt.Errorf("convert get target graph request: %w", mappingErr))
+	}
+	repoCfg, repo, repositoryErr := c.resolveRequestRepository(entityReq.Build.Remote, mappingErr)
 	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
 	op := metrics.Begin(e, opGetTargetGraph, metrics.SlowDurationBuckets)
 	logger := c.logger.WithLazy(
-		zap.Any("build_description", request.GetBuildDescription()),
+		zap.String("repository", repo),
 	)
 	defer func() {
 		op.Complete(retErr)
@@ -52,11 +55,10 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	start := time.Now()
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
-	entityReq, err := mapper.ProtoToGetTargetGraphRequest(request)
-	if err != nil {
-		return tangoerrors.NewUser(fmt.Errorf("convert get target graph request: %w", err))
+	if repositoryErr != nil {
+		return repositoryErr
 	}
-	graphReader, err := c.getGraph(ctx, e, entityReq)
+	graphReader, err := c.getGraph(ctx, e, entityReq, repoCfg.RepositoryID)
 	if err != nil {
 		return fmt.Errorf("get graph: %w", err)
 	}
@@ -96,14 +98,15 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 // entries store the full payload and stripping happens at send time, so
 // letting an orchestrator see it could poison the shared cache with
 // stripped graphs.
-func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entity.GetTargetGraphRequest, repositoryID string) (storage.GraphReader, error) {
 	start := time.Now()
 	logger := c.logger.With(
-		zap.Any("build_description", req.Build),
+		zap.String("base_sha", req.Build.BaseSha),
+		zap.Stringer("strategy", req.Build.Strategy),
 	)
 	if !req.BypassCache {
 		// Look up the the git treehash based on cache path
-		treehashCachePath := cachekey.GetTreehashCachePath(req.Build)
+		treehashCachePath := cachekey.GetTreehashCachePath(repositoryID, req.Build)
 		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
 		metrics.RecordCacheLookup(e, opGetTargetGraph, metrics.TreehashCacheLookup, err)
 		if err != nil {
@@ -123,7 +126,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 			logger.Info("getGraph: treehash found")
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
-			graphReader, err := c.readCachedGraph(ctx, logger, req.Build.Remote, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
+			graphReader, err := c.readCachedGraph(ctx, logger, repositoryID, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
 			if ctx.Err() != nil {
 				err = context.Cause(ctx)
 			}
@@ -166,9 +169,9 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 // exists but fails validation is treated as a miss (the orchestrator will
 // recompute and overwrite it), not an infra failure. Returns a not-found
 // error when neither format is present.
-func (c *controller) readCachedGraph(ctx context.Context, logger *zap.Logger, remote, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) (storage.GraphReader, error) {
+func (c *controller) readCachedGraph(ctx context.Context, logger *zap.Logger, repositoryID, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) (storage.GraphReader, error) {
 	if c.graphFormat == config.GraphFormatTGB {
-		tgbPath := cachekey.GetTGBGraphByTreeHash(remote, treehash, strategy, excludeFilesRegex)
+		tgbPath := cachekey.GetTGBGraphByTreeHash(repositoryID, treehash, strategy, excludeFilesRegex)
 		graphReader, err := storage.NewTGBGraphReader(ctx, c.storage, tgbPath, c.maxMessageBytes)
 		if err == nil {
 			return graphReader, nil
@@ -179,6 +182,6 @@ func (c *controller) readCachedGraph(ctx context.Context, logger *zap.Logger, re
 			return nil, err
 		}
 	}
-	gobPath := cachekey.GetGraphByTreeHash(remote, treehash, strategy, excludeFilesRegex)
+	gobPath := cachekey.GetGraphByTreeHash(repositoryID, treehash, strategy, excludeFilesRegex)
 	return storage.NewGraphReader(ctx, c.storage, gobPath)
 }

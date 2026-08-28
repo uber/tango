@@ -126,16 +126,17 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 
 	store := storage.NewMemoryStorage()
 
+	cfg, err := config.Parse(configPath)
+	require.NoError(t, err, "failed to parse config")
+
 	rm, err := repomanager.NewRepoManager(appCtx, repomanager.Params{
 		Git:                  git.New(clonePath, zl),
 		Logger:               zl,
 		RepoManagerClonePath: clonePath,
 		PoolSize:             2,
+		RepoConfig:           cfg,
 	})
 	require.NoError(t, err, "failed to create repo manager")
-
-	cfg, err := config.Parse(configPath)
-	require.NoError(t, err, "failed to parse config")
 
 	orch, err := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
 		Storage:     store,
@@ -150,6 +151,7 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		Logger:       zl,
 		Storage:      store,
 		Orchestrator: orch,
+		RepoConfig:   cfg,
 	})
 
 	grpcTransport := yarpcgrpc.NewTransport()

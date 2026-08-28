@@ -21,7 +21,6 @@ go_library(
         "//core/workspace",
         "//entity",
         "//graphrunner",
-        "//internal/url",
         "//mapper",
         "//observability/metrics",
         "@com_github_uber_go_tally//:tally",

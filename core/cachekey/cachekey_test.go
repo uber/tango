@@ -25,26 +25,26 @@ import (
 
 func TestGetGraphByTreeHash(t *testing.T) {
 	t.Parallel()
-	remote := "git@github:uber/tango"
 	treehash := "abcd1234"
 	strategy := entity.ComputationStrategyNative
+	repositoryID := "test-repository"
 
 	// Nil/empty exclude list ⇒ no suffix.
-	got := GetGraphByTreeHash(remote, treehash, strategy, nil)
-	assert.Equal(t, filepath.Join("uber/tango", "graphs", treehash, strategy.String()), got)
-	assert.Equal(t, got, GetGraphByTreeHash(remote, treehash, strategy, []string{}))
+	got := GetGraphByTreeHash(repositoryID, treehash, strategy, nil)
+	assert.Equal(t, filepath.Join(repositoryID, "graphs", treehash, strategy.String()), got)
+	assert.Equal(t, got, GetGraphByTreeHash(repositoryID, treehash, strategy, []string{}))
 
 	// Different strategies ⇒ different keys.
-	assert.NotEqual(t, got, GetGraphByTreeHash(remote, treehash, entity.ComputationStrategyShell, nil))
+	assert.NotEqual(t, got, GetGraphByTreeHash(repositoryID, treehash, entity.ComputationStrategyShell, nil))
 
 	// Non-empty list ⇒ suffix appended; different lists ⇒ different keys.
-	withFoo := GetGraphByTreeHash(remote, treehash, strategy, []string{"foo.*"})
+	withFoo := GetGraphByTreeHash(repositoryID, treehash, strategy, []string{"foo.*"})
 	assert.NotEqual(t, got, withFoo)
-	assert.NotEqual(t, withFoo, GetGraphByTreeHash(remote, treehash, strategy, []string{"bar.*"}))
+	assert.NotEqual(t, withFoo, GetGraphByTreeHash(repositoryID, treehash, strategy, []string{"bar.*"}))
 	// Order-independence: sort before hashing.
 	assert.Equal(t,
-		GetGraphByTreeHash(remote, treehash, strategy, []string{"a", "b"}),
-		GetGraphByTreeHash(remote, treehash, strategy, []string{"b", "a"}),
+		GetGraphByTreeHash(repositoryID, treehash, strategy, []string{"a", "b"}),
+		GetGraphByTreeHash(repositoryID, treehash, strategy, []string{"b", "a"}),
 	)
 }
 
@@ -58,42 +58,44 @@ func TestGetTreehashCachePath(t *testing.T) {
 			{URL: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
 		},
 	}
-	got := GetTreehashCachePath(desc)
-	want := filepath.Join("uber/tango", "treehashes", "base-sha-deadbeef") + "_request-urls-" + url.GetReqURLsHash(desc.ChangeRequests)
+	repositoryID := "test-repository"
+	got := GetTreehashCachePath(repositoryID, desc)
+	want := filepath.Join(repositoryID, "treehashes", "base-sha-deadbeef") + "_request-urls-" + url.GetReqURLsHash(desc.ChangeRequests)
 	assert.Equal(t, want, got)
 }
 
 func TestGetComparedTargetsCachePath(t *testing.T) {
 	t.Parallel()
-	got := GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", nil)
-	assert.Equal(t, filepath.Join("uber/tango", "compared-targets", "abc_def"), got)
+	repositoryID := "test-repository"
+	got := GetComparedTargetsCachePath(repositoryID, "abc", "def", nil)
+	assert.Equal(t, filepath.Join(repositoryID, "compared-targets", "abc_def"), got)
 
 	// Nil/empty list ⇒ legacy path.
-	assert.Equal(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", []string{}))
+	assert.Equal(t, got, GetComparedTargetsCachePath(repositoryID, "abc", "def", []string{}))
 
 	// Different exclude lists ⇒ different keys.
-	assert.NotEqual(t, got, GetComparedTargetsCachePath("git@github:uber/tango", "abc", "def", []string{"foo.*"}))
+	assert.NotEqual(t, got, GetComparedTargetsCachePath(repositoryID, "abc", "def", []string{"foo.*"}))
 }
 
 func TestGetTGBGraphByTreeHash(t *testing.T) {
 	t.Parallel()
-	remote := "git@github:uber/tango"
 	treehash := "abcd1234"
 	strategy := entity.ComputationStrategyNative
+	repositoryID := "test-repository"
 
-	got := GetTGBGraphByTreeHash(remote, treehash, strategy, nil)
-	assert.Equal(t, filepath.Join("uber/tango", "graphs", treehash, strategy.String()+"-tgb"), got)
-	assert.Equal(t, got, GetTGBGraphByTreeHash(remote, treehash, strategy, []string{}))
+	got := GetTGBGraphByTreeHash(repositoryID, treehash, strategy, nil)
+	assert.Equal(t, filepath.Join(repositoryID, "graphs", treehash, strategy.String()+"-tgb"), got)
+	assert.Equal(t, got, GetTGBGraphByTreeHash(repositoryID, treehash, strategy, []string{}))
 
 	// Never collides with the gob key space, and stays a sibling (same
 	// directory) rather than a child of the gob key — on the disk backend a
 	// key is a file, so a child key could not coexist with the gob blob.
-	gob := GetGraphByTreeHash(remote, treehash, strategy, nil)
+	gob := GetGraphByTreeHash(repositoryID, treehash, strategy, nil)
 	assert.NotEqual(t, gob, got)
 	assert.Equal(t, filepath.Dir(gob), filepath.Dir(got))
 
 	// Exclude-files regex folds into the key the same way as the gob variant.
-	withRegex := GetTGBGraphByTreeHash(remote, treehash, strategy, []string{"^docs/"})
+	withRegex := GetTGBGraphByTreeHash(repositoryID, treehash, strategy, []string{"^docs/"})
 	assert.NotEqual(t, got, withRegex)
 	assert.Contains(t, withRegex, "_requests-options-")
 }

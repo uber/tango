@@ -17,9 +17,11 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/observability/metrics"
 	"github.com/uber/tango/orchestrator"
@@ -28,15 +30,19 @@ import (
 	"go.uber.org/zap"
 )
 
+const unknownRepositoryMetricLabel = "unknown"
+
 // Params are the parameters for the controller.
 type Params struct {
 	fx.In
 	Logger          *zap.Logger
 	Storage         storage.Storage
 	Orchestrator    orchestrator.Orchestrator
-	Scope           tally.Scope                     `optional:"true"`
-	MaxMessageBytes int                             `optional:"true"`
-	RepoConfig      config.RepositoryConfigProvider `optional:"true"`
+	Scope           tally.Scope `optional:"true"`
+	MaxMessageBytes int         `optional:"true"`
+	// RepoConfig is the authoritative repository allowlist. RPC remotes must
+	// match it exactly before the controller performs cache I/O.
+	RepoConfig config.RepositoryConfigProvider
 	// GraphFormat mirrors ServiceConfig.GraphFormat; empty defaults to gob.
 	// It must match the orchestrator's configured format — both are wired
 	// from the same ServiceConfig.
@@ -45,6 +51,23 @@ type Params struct {
 	// run the incumbent targetdiff comparison in the background on every
 	// GetChangedTargets and emit a mismatch metric on divergence.
 	ShadowCompare bool `optional:"true"`
+}
+
+// resolveRequestRepository returns the configured repository and metric label
+// for a validated request. Invalid requests retain the common unknown label and
+// their existing error; valid requests must exactly match the configured
+// repository allowlist before controller cache I/O.
+func (c *controller) resolveRequestRepository(remote string, requestErr error) (config.RepositoryConfig, string, error) {
+	if requestErr != nil {
+		return config.RepositoryConfig{}, unknownRepositoryMetricLabel, requestErr
+	}
+	repo, ok := c.repoConfig.GetRepositoryConfig(remote)
+	if !ok {
+		return config.RepositoryConfig{}, unknownRepositoryMetricLabel, tangoerrors.NewUser(
+			fmt.Errorf("repository remote %q is not configured", remote),
+		)
+	}
+	return repo, repo.RepositoryID, nil
 }
 
 type controller struct {
