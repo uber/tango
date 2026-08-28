@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/targethasher"
+	"pgregory.net/rapid"
 )
 
 // fakeSourceHasher is a test double for targethasher.SourceHasher.
@@ -231,4 +232,97 @@ func TestComputeHashes(t *testing.T) {
 		h.Write(depHash)
 		assert.Equal(t, h.Sum(nil), got)
 	})
+}
+
+func TestComputeInvalidatedHashesCycleOrderInvariance(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		newTargets func() map[string]*targethasher.Target
+		fullRoot   string
+	}{
+		{
+			name: "rooted cycle matches full recomputation",
+			newTargets: func() map[string]*targethasher.Target {
+				return map[string]*targethasher.Target{
+					"//pkg:a": {
+						Name:            "//pkg:a",
+						RuleType:        "go_library",
+						HashWithoutDeps: []byte("a"),
+						Deps:            []string{"//pkg:b"},
+					},
+					"//pkg:b": {
+						Name:            "//pkg:b",
+						RuleType:        "go_library",
+						HashWithoutDeps: []byte("b"),
+						Deps:            []string{"//pkg:a"},
+					},
+					"//pkg:root": {
+						Name:            "//pkg:root",
+						RuleType:        "go_library",
+						HashWithoutDeps: []byte("root"),
+						Deps:            []string{"//pkg:b"},
+					},
+				}
+			},
+			fullRoot: "//pkg:root",
+		},
+		{
+			name: "rootless cycle uses canonical member",
+			newTargets: func() map[string]*targethasher.Target {
+				return map[string]*targethasher.Target{
+					"//pkg:a": {
+						Name:            "//pkg:a",
+						RuleType:        "go_library",
+						HashWithoutDeps: []byte("a"),
+						Deps:            []string{"//pkg:b"},
+					},
+					"//pkg:b": {
+						Name:            "//pkg:b",
+						RuleType:        "go_library",
+						HashWithoutDeps: []byte("b"),
+						Deps:            []string{"//pkg:a"},
+					},
+				}
+			},
+			fullRoot: "//pkg:a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			expectedTargets := tt.newTargets()
+			_, err := targethasher.HashRecursively(t.Context(), targethasher.HashParam{
+				Targets:    expectedTargets,
+				TargetName: tt.fullRoot,
+			})
+			require.NoError(t, err)
+
+			names := make([]string, 0, len(expectedTargets))
+			expectedHashes := make(map[string][]byte, len(expectedTargets))
+			for name, target := range expectedTargets {
+				names = append(names, name)
+				expectedHashes[name] = target.Hash
+			}
+
+			ctx := t.Context()
+			rapid.Check(t, func(rt *rapid.T) {
+				graph := OptimizeGraph(tt.newTargets())
+				invalidated := NewIntSet()
+				for _, name := range rapid.Permutation(names).Draw(rt, "invalidation-order") {
+					invalidated.Insert(graph.TargetNameToID[name])
+				}
+
+				err := graph.computeInvalidatedHashes(ctx, invalidated)
+				require.NoError(rt, err)
+				for name, expected := range expectedHashes {
+					actual := graph.OptimizedTargets[graph.TargetNameToID[name]].Hash
+					assert.Equal(rt, expected, actual, "hash mismatch for %s", name)
+				}
+			})
+		})
+	}
 }
