@@ -412,10 +412,8 @@ func bzlmodRepoName(targetName string) string {
 // (e.g. "rules_python++pip+third_party_python_base_311_torch_...._a6ebbe51"),
 // so hashing the name itself produces a stable, content-aware representative
 // hash that changes when the repo content changes.
-func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) int {
-	// Build per-repo hashes lazily.
+func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) {
 	repoHashes := make(map[string][]byte)
-	collapsed := 0
 
 	for name, target := range targets {
 		repo := bzlmodRepoName(name)
@@ -428,7 +426,6 @@ func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set
 		if target.RuleType != SourceFileType && target.RuleType != GeneratedFileType {
 			continue
 		}
-		// Already hashed (shouldn't happen at this point, but be safe).
 		if target.Hash != nil {
 			continue
 		}
@@ -449,10 +446,7 @@ func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set
 
 		target.Hash = h
 		target.HashWithoutDeps = h
-		collapsed++
 	}
-
-	return collapsed
 }
 
 // GetTopologicalRootsAndIdentifyBuildableRoots returns a list of topological roots and marks buildable roots in the target graph
@@ -496,20 +490,19 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 		return EmptyResult(), err
 	}
 
-	// add external rule targets (//external:*) to the same map and hash them
-	// no need for bzlmod because there's no //external:* rules, we will hash external source as is
 	if !useBzlmod {
+		// Legacy WORKSPACE: add external rule targets (//external:*) to the
+		// map and hash them. No //external:* rules exist under bzlmod.
 		if err := HashExternalTargets(ctx, r, targets, hasher, workspaceroot, fullHashRepos, warns, useBzlmod); err != nil {
 			return EmptyResult(), err
 		}
-	}
-
-	// For bzlmod repos, collapse external source/generated file targets to a
-	// single per-repo hash derived from the canonical repo name (which encodes
-	// the version and content hash in bzlmod). This avoids visiting millions of
-	// individual pip-wheel files during the DFS — the same optimization that
-	// legacy WORKSPACE gets via //external:repo collapsing.
-	if useBzlmod {
+	} else {
+		// Bzlmod: collapse external source/generated file targets to a
+		// single per-repo hash derived from the canonical repo name (which
+		// encodes the version and content hash). This avoids visiting
+		// millions of individual pip-wheel files during the DFS — the same
+		// optimization that legacy WORKSPACE gets via //external:repo
+		// collapsing.
 		collapseBzlmodExternalTargets(targets, fullHashRepos, excludedRegex)
 	}
 
