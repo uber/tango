@@ -386,6 +386,69 @@ func HashExternalTargets(ctx context.Context, r *buildpb.QueryResult, targets ma
 	return nil
 }
 
+// bzlmodRepoName extracts the canonical bzlmod repo name from a target label.
+// For "@@rules_python++pip+foo//pkg:target" it returns "rules_python++pip+foo".
+// Returns "" for non-bzlmod targets.
+func bzlmodRepoName(targetName string) string {
+	if !strings.HasPrefix(targetName, "@@") {
+		return ""
+	}
+	// Strip leading "@@", then find "//" separator.
+	rest := targetName[2:]
+	idx := strings.Index(rest, "//")
+	if idx <= 0 {
+		return ""
+	}
+	return rest[:idx]
+}
+
+// collapseBzlmodExternalTargets pre-hashes all bzlmod external source file
+// and generated file targets using a single hash derived from the canonical
+// repo name. This mirrors the legacy WORKSPACE //external:repo collapsing
+// but for bzlmod's @@repo//... naming. Rule targets are left alone so their
+// real dependency edges are preserved.
+//
+// The canonical bzlmod repo name encodes the module version and content hash
+// (e.g. "rules_python++pip+third_party_python_base_311_torch_...._a6ebbe51"),
+// so hashing the name itself produces a stable, content-aware representative
+// hash that changes when the repo content changes.
+func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string]) int {
+	// Build per-repo hashes lazily.
+	repoHashes := make(map[string][]byte)
+	collapsed := 0
+
+	for name, target := range targets {
+		repo := bzlmodRepoName(name)
+		if repo == "" {
+			continue
+		}
+		if fullHashRepos.Contains(repo) {
+			continue
+		}
+		if target.RuleType != SourceFileType && target.RuleType != GeneratedFileType {
+			continue
+		}
+		// Already hashed (shouldn't happen at this point, but be safe).
+		if target.Hash != nil {
+			continue
+		}
+
+		h, ok := repoHashes[repo]
+		if !ok {
+			rh := newHash()
+			rh.Write([]byte(repo))
+			h = rh.Sum(nil)
+			repoHashes[repo] = h
+		}
+
+		target.Hash = h
+		target.HashWithoutDeps = h
+		collapsed++
+	}
+
+	return collapsed
+}
+
 // GetTopologicalRootsAndIdentifyBuildableRoots returns a list of topological roots and marks buildable roots in the target graph
 func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]*Target) []string {
 	// get targets that cannot be root, i.e. dependencies of some other targets
@@ -434,6 +497,16 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 			return EmptyResult(), err
 		}
 	}
+
+	// For bzlmod repos, collapse external source/generated file targets to a
+	// single per-repo hash derived from the canonical repo name (which encodes
+	// the version and content hash in bzlmod). This avoids visiting millions of
+	// individual pip-wheel files during the DFS — the same optimization that
+	// legacy WORKSPACE gets via //external:repo collapsing.
+	if useBzlmod {
+		collapseBzlmodExternalTargets(targets, fullHashRepos)
+	}
+
 	// get topological roots and update buildable roots info
 	roots := GetTopologicalRootsAndIdentifyBuildableRoots(targets)
 
