@@ -107,7 +107,10 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	// Read marker files for bzlmod repos so the collapse uses content-aware
 	// hashes instead of just the repo name string.
 	var repoMarkerHashes map[string][]byte
-	if bzlmodEnabled && g.outputBase != "" {
+	if bzlmodEnabled {
+		if g.outputBase == "" {
+			return targethasher.EmptyResult(), fmt.Errorf("output_base is required for bzlmod repos")
+		}
 		markerStart := time.Now()
 		repoMarkerHashes, err = readRepoMarkerHashes(g.outputBase)
 		g.emitter.DurationHistogram(_opCompute, "marker_read_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(markerStart))
