@@ -15,7 +15,8 @@
 package graphrunner
 
 import (
-	"crypto/sha1"
+	"bufio"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,16 +45,39 @@ func readRepoMarkerHashes(outputBase string) (map[string][]byte, error) {
 			continue
 		}
 
-		content, err := os.ReadFile(filepath.Join(markerDir, name))
+		h, err := readMarkerHash(filepath.Join(markerDir, name))
 		if err != nil {
 			return nil, fmt.Errorf("read marker for repo %s: %w", repo, err)
 		}
-		if len(content) == 0 {
+		if len(h) == 0 {
 			continue
 		}
-		h := sha1.Sum(content)
-		hashes[repo] = h[:]
+		hashes[repo] = h
 	}
 
 	return hashes, nil
+}
+
+// readMarkerHash reads the first line of a marker file and hex-decodes
+// it into raw bytes. The first line is a hash of the repository rule's
+// inputs and is stable across runs for the same dependency version.
+func readMarkerHash(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	line := strings.TrimSpace(scanner.Text())
+	if line == "" {
+		return nil, nil
+	}
+	return hex.DecodeString(line)
 }
