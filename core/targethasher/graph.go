@@ -412,7 +412,7 @@ func bzlmodRepoName(targetName string) string {
 // (e.g. "rules_python++pip+third_party_python_base_311_torch_...._a6ebbe51"),
 // so hashing the name itself produces a stable, content-aware representative
 // hash that changes when the repo content changes.
-func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string]) int {
+func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) int {
 	// Build per-repo hashes lazily.
 	repoHashes := make(map[string][]byte)
 	collapsed := 0
@@ -430,6 +430,12 @@ func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set
 		}
 		// Already hashed (shouldn't happen at this point, but be safe).
 		if target.Hash != nil {
+			continue
+		}
+		// Let excluded targets fall through to HashRecursively where they
+		// get the standard empty-hash treatment, keeping the same semantics
+		// as legacy WORKSPACE exclusion.
+		if isExcluded(name, excludedRegex) {
 			continue
 		}
 
@@ -504,7 +510,7 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 	// individual pip-wheel files during the DFS — the same optimization that
 	// legacy WORKSPACE gets via //external:repo collapsing.
 	if useBzlmod {
-		collapseBzlmodExternalTargets(targets, fullHashRepos)
+		collapseBzlmodExternalTargets(targets, fullHashRepos, excludedRegex)
 	}
 
 	// get topological roots and update buildable roots info
