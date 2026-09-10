@@ -419,8 +419,11 @@ func bzlmodRepoName(targetName string) string {
 // so hashing the name itself produces a stable, content-aware representative
 // hash that changes when the repo content changes.
 func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte) {
-	repoHashes := make(map[string][]byte)
+	if len(repoMarkerHashes) == 0 {
+		return
+	}
 
+	repoHashes := make(map[string][]byte)
 	for name, target := range targets {
 		repo := bzlmodRepoName(name)
 		if repo == "" {

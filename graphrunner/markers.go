@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,22 +34,21 @@ import (
 func readRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand string) (map[string][]byte, error) {
 	outputBase, err := bazelOutputBase(ctx, workspacePath, bazelCommand)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("bazel output base: %w", err)
 	}
 
 	markerDir := filepath.Join(outputBase, "external")
 	entries, err := os.ReadDir(markerDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read marker dir %s: %w", markerDir, err)
 	}
 
-	hashes := make(map[string][]byte, len(entries))
+	hashes := make(map[string][]byte)
 	for _, e := range entries {
 		name := e.Name()
 		if !strings.HasSuffix(name, ".marker") {
 			continue
 		}
-		// Marker files are named @repo_name.marker — strip prefix and suffix.
 		repo := strings.TrimPrefix(strings.TrimSuffix(name, ".marker"), "@")
 		if repo == "" {
 			continue
@@ -56,6 +56,9 @@ func readRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand strin
 
 		h, err := readMarkerFirstLine(filepath.Join(markerDir, name))
 		if err != nil {
+			return nil, fmt.Errorf("read marker for repo %s: %w", repo, err)
+		}
+		if len(h) == 0 {
 			continue
 		}
 		hashes[repo] = h
@@ -64,19 +67,21 @@ func readRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand strin
 	return hashes, nil
 }
 
-// readMarkerFirstLine reads the first line of a marker file and decodes
-// the hex hash. Returns the raw bytes, or an error if the file can't be
-// read or the first line isn't valid hex.
+// readMarkerFirstLine reads the first line of a marker file and hex-decodes
+// it into raw bytes. Returns (nil, nil) for empty files.
 func readMarkerFirstLine(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	if !scanner.Scan() {
-		return nil, scanner.Err()
+		if err := scanner.Err(); err != nil {
+			return nil, err
+		}
+		return nil, nil
 	}
 	line := strings.TrimSpace(scanner.Text())
 	if line == "" {
@@ -94,7 +99,7 @@ func bazelOutputBase(ctx context.Context, workspacePath, bazelCommand string) (s
 	cmd.Dir = workspacePath
 	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("run bazel info output_base: %w", err)
 	}
 	return string(bytes.TrimSpace(out)), nil
 }
