@@ -16,6 +16,7 @@ package graphrunner
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/uber-go/tally"
@@ -105,8 +106,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		repoMarkerHashes, err = readRepoMarkerHashes(ctx, ws.Path(), g.config.BazelCommandPath)
 		g.emitter.DurationHistogram(_opCompute, "marker_read_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(markerStart))
 		if err != nil {
-			// Non-fatal: fall back to repo-name hashing if markers can't be read.
-			repoMarkerHashes = nil
+			return targethasher.EmptyResult(), fmt.Errorf("read repo marker hashes: %w", err)
 		}
 	}
 
