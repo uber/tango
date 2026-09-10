@@ -78,6 +78,12 @@ type HashConfig struct {
 	// AllTargetsFiles lists repo-relative paths whose hashes should be
 	// extracted from KnownSourceHashes into Result.AllTargetsFileHashes.
 	AllTargetsFiles []string
+	// RepoMarkerHashes maps canonical bzlmod repo names to content hashes
+	// read from Bazel's marker files ($(output_base)/external/@repo.marker).
+	// When set, collapseBzlmodExternalTargets uses these instead of hashing
+	// the repo name string, so that repos without a content hash suffix in
+	// their name (e.g. "protobuf+") still get a hash that changes on upgrade.
+	RepoMarkerHashes map[string][]byte
 }
 
 // Target contains information about the hash for a single target
@@ -155,7 +161,7 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 	result, err := fromProto(ctx, r, &diskHashHelper{
 		workspaceroot:   workspaceroot,
 		knownFileHashes: hashConfig.KnownSourceHashes,
-	}, workspaceroot, fullHashRepos, set.NewSet(hashConfig.SequentialHashTargets...), excludedRegex, hashConfig.UseBzlmod)
+	}, workspaceroot, fullHashRepos, set.NewSet(hashConfig.SequentialHashTargets...), excludedRegex, hashConfig.UseBzlmod, hashConfig.RepoMarkerHashes)
 	if err != nil {
 		return result, err
 	}
@@ -176,7 +182,7 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 
 // FromProtoNoHash calculates a DAG graph based on a query result. It does not calculate hashes for targets.
 func FromProtoNoHash(ctx context.Context, r *buildpb.QueryResult) (Result, error) {
-	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false)
+	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false, nil)
 }
 
 // for external targets, url and urls attributes could cause non-deterministic hash values,
@@ -412,7 +418,7 @@ func bzlmodRepoName(targetName string) string {
 // (e.g. "rules_python++pip+third_party_python_base_311_torch_...._a6ebbe51"),
 // so hashing the name itself produces a stable, content-aware representative
 // hash that changes when the repo content changes.
-func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) {
+func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte) {
 	repoHashes := make(map[string][]byte)
 
 	for name, target := range targets {
@@ -429,18 +435,21 @@ func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set
 		if target.Hash != nil {
 			continue
 		}
-		// Let excluded targets fall through to HashRecursively where they
-		// get the standard empty-hash treatment, keeping the same semantics
-		// as legacy WORKSPACE exclusion.
 		if isExcluded(name, excludedRegex) {
 			continue
 		}
 
 		h, ok := repoHashes[repo]
 		if !ok {
-			rh := newHash()
-			rh.Write([]byte(repo))
-			h = rh.Sum(nil)
+			if markerHash, hasMarker := repoMarkerHashes[repo]; hasMarker && len(markerHash) > 0 {
+				rh := newHash()
+				rh.Write(markerHash)
+				h = rh.Sum(nil)
+			} else {
+				// No marker file for this repo — skip collapsing and
+				// let HashRecursively hash the actual file content.
+				continue
+			}
 			repoHashes[repo] = h
 		}
 
@@ -482,7 +491,7 @@ func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]*Target) []
 	return roots
 }
 
-func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], sequentialHashTargets set.Set[string], excludedRegex []*regexp.Regexp, useBzlmod bool) (Result, error) {
+func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], sequentialHashTargets set.Set[string], excludedRegex []*regexp.Regexp, useBzlmod bool, repoMarkerHashes map[string][]byte) (Result, error) {
 	warns := make(map[string]error)
 	// Build target graph with dependencies, but without hash and root information.
 	targets, err := GetInternalTargetsWithoutHashAndRootInfo(ctx, r)
@@ -503,7 +512,7 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 		// millions of individual pip-wheel files during the DFS — the same
 		// optimization that legacy WORKSPACE gets via //external:repo
 		// collapsing.
-		collapseBzlmodExternalTargets(targets, fullHashRepos, excludedRegex)
+		collapseBzlmodExternalTargets(targets, fullHashRepos, excludedRegex, repoMarkerHashes)
 	}
 
 	// get topological roots and update buildable roots info

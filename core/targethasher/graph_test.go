@@ -79,7 +79,7 @@ func TestContextCancellation(t *testing.T) {
 	qr := &buildpb.QueryResult{
 		Target: []*buildpb.Target{&buildpb.Target{}},
 	}
-	result, err := fromProto(ctx, qr, nil, "", set.NewSet[string](), set.NewSet[string](), nil, false)
+	result, err := fromProto(ctx, qr, nil, "", set.NewSet[string](), set.NewSet[string](), nil, false, nil)
 	assert.Equal(t, EmptyResult(), result)
 	assert.ErrorIs(t, err, context.Canceled)
 
@@ -107,7 +107,7 @@ func TestFromProtoSimpleRule(t *testing.T) {
 		},
 	}
 
-	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false)
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false, nil)
 	require.NoError(t, err)
 
 	assert.Len(t, result.Targets, 1)
@@ -138,7 +138,7 @@ func TestFromProtoWithDependencies(t *testing.T) {
 		},
 	}
 
-	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false)
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false, nil)
 	require.NoError(t, err)
 
 	assert.Len(t, result.Targets, 2)
@@ -176,7 +176,7 @@ func TestFromProtoWithExcludedRegex(t *testing.T) {
 	// Exclude targets matching "//vendor:.*"
 	excludedRegex := []*regexp.Regexp{regexp.MustCompile("//vendor:.*")}
 
-	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), excludedRegex, false)
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), excludedRegex, false, nil)
 	require.NoError(t, err)
 
 	assert.Len(t, result.Targets, 2)
@@ -291,7 +291,7 @@ func TestFromProtoWithGeneratedFile(t *testing.T) {
 		},
 	}
 
-	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false)
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false, nil)
 	require.NoError(t, err)
 
 	assert.Len(t, result.Targets, 2)
@@ -403,7 +403,15 @@ func TestBzlmodRepoName(t *testing.T) {
 }
 
 func TestCollapseBzlmodExternalTargets(t *testing.T) {
-	t.Run("collapses source and generated files", func(t *testing.T) {
+	markerA := []byte{0xaa, 0xbb, 0xcc}
+	markerB := []byte{0xdd, 0xee, 0xff}
+	markers := map[string][]byte{
+		"repo_a":                markerA,
+		"repo_b":                markerB,
+		"rules_python++pip+foo": []byte{0x11, 0x22},
+	}
+
+	t.Run("collapses with marker hash", func(t *testing.T) {
 		targets := map[string]*Target{
 			"@@repo_a//pkg:file1.py": {Name: "@@repo_a//pkg:file1.py", RuleType: SourceFileType, External: true},
 			"@@repo_a//pkg:file2.py": {Name: "@@repo_a//pkg:file2.py", RuleType: SourceFileType, External: true},
@@ -411,15 +419,30 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"//src:main":             {Name: "//src:main", RuleType: "go_binary"},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil)
+		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, markers)
 
-		// All three external files should share the same repo-derived hash.
 		assert.NotNil(t, targets["@@repo_a//pkg:file1.py"].Hash)
 		assert.Equal(t, targets["@@repo_a//pkg:file1.py"].Hash, targets["@@repo_a//pkg:file2.py"].Hash)
 		assert.Equal(t, targets["@@repo_a//pkg:file1.py"].Hash, targets["@@repo_a//pkg:gen.go"].Hash)
-
-		// Internal target should be untouched.
 		assert.Nil(t, targets["//src:main"].Hash)
+	})
+
+	t.Run("skips repos without marker (falls through to HashRecursively)", func(t *testing.T) {
+		targets := map[string]*Target{
+			"@@no_marker_repo//pkg:file.py": {Name: "@@no_marker_repo//pkg:file.py", RuleType: SourceFileType, External: true},
+		}
+
+		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, markers)
+		assert.Nil(t, targets["@@no_marker_repo//pkg:file.py"].Hash)
+	})
+
+	t.Run("skips repos when no markers provided at all", func(t *testing.T) {
+		targets := map[string]*Target{
+			"@@repo_a//pkg:file.py": {Name: "@@repo_a//pkg:file.py", RuleType: SourceFileType, External: true},
+		}
+
+		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, nil)
+		assert.Nil(t, targets["@@repo_a//pkg:file.py"].Hash)
 	})
 
 	t.Run("skips rule targets", func(t *testing.T) {
@@ -427,7 +450,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"@@repo_a//pkg:lib": {Name: "@@repo_a//pkg:lib", RuleType: "go_library", External: true},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil)
+		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, markers)
 		assert.Nil(t, targets["@@repo_a//pkg:lib"].Hash)
 	})
 
@@ -436,7 +459,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"@@repo_a//pkg:file.py": {Name: "@@repo_a//pkg:file.py", RuleType: SourceFileType, External: true},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet("", "repo_a"), nil)
+		collapseBzlmodExternalTargets(targets, set.NewSet("", "repo_a"), nil, markers)
 		assert.Nil(t, targets["@@repo_a//pkg:file.py"].Hash)
 	})
 
@@ -447,11 +470,9 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 		}
 		excluded := []*regexp.Regexp{regexp.MustCompile(`\.whl$`)}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), excluded)
+		collapseBzlmodExternalTargets(targets, set.NewSet(""), excluded, markers)
 
-		// .whl file should NOT be collapsed — left for HashRecursively to exclude.
 		assert.Nil(t, targets["@@rules_python++pip+foo//pkg:file.whl"].Hash)
-		// .py file should be collapsed normally.
 		assert.NotNil(t, targets["@@rules_python++pip+foo//pkg:module.py"].Hash)
 	})
 
@@ -461,7 +482,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"@@repo_b//pkg:file.py": {Name: "@@repo_b//pkg:file.py", RuleType: SourceFileType, External: true},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil)
+		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, markers)
 		assert.NotEqual(t, targets["@@repo_a//pkg:file.py"].Hash, targets["@@repo_b//pkg:file.py"].Hash)
 	})
 
@@ -471,7 +492,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"@@repo_a//pkg:file.py": {Name: "@@repo_a//pkg:file.py", RuleType: SourceFileType, External: true, Hash: existing},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil)
+		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, markers)
 		assert.Equal(t, existing, targets["@@repo_a//pkg:file.py"].Hash)
 	})
 }
@@ -501,7 +522,7 @@ func TestFromProtoExcludedBzlmodTargetGetsEmptyHash(t *testing.T) {
 	}
 
 	excluded := []*regexp.Regexp{regexp.MustCompile(`\.whl$`)}
-	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), excluded, true)
+	result, err := fromProto(context.Background(), qr, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), excluded, true, nil)
 	require.NoError(t, err)
 
 	// Excluded .whl target should have empty hash (not a repo-name hash).
@@ -528,7 +549,7 @@ func Test_fromProto(t *testing.T) {
 	q, err := bazel.FromFile("testdata/test.proto.bin")
 	require.NoError(t, err)
 
-	a, err := fromProto(ctx, q, mockHasher, "", set.NewSet[string](), set.NewSet[string](), nil, true)
+	a, err := fromProto(ctx, q, mockHasher, "", set.NewSet[string](), set.NewSet[string](), nil, true, nil)
 	require.NoError(t, err)
 
 	assert.Empty(t, a.Warnings)
