@@ -15,8 +15,7 @@
 package graphrunner
 
 import (
-	"bufio"
-	"encoding/hex"
+	"crypto/sha1"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,9 +23,9 @@ import (
 )
 
 // readRepoMarkerHashes reads Bazel's external repo marker files and returns
-// a map from canonical repo name to the marker's content hash. Each marker
-// file's first line is a hex-encoded hash of the repository rule's inputs
-// (URL, sha256, patches, etc.) that changes whenever the repo is upgraded.
+// a map from canonical repo name to a hash of the marker file's content.
+// Each marker file captures the repository rule's inputs (URL, sha256,
+// patches, etc.) and changes whenever the repo is upgraded.
 func readRepoMarkerHashes(outputBase string) (map[string][]byte, error) {
 	markerDir := filepath.Join(outputBase, "external")
 	entries, err := os.ReadDir(markerDir)
@@ -45,38 +44,16 @@ func readRepoMarkerHashes(outputBase string) (map[string][]byte, error) {
 			continue
 		}
 
-		h, err := readMarkerFirstLine(filepath.Join(markerDir, name))
+		content, err := os.ReadFile(filepath.Join(markerDir, name))
 		if err != nil {
 			return nil, fmt.Errorf("read marker for repo %s: %w", repo, err)
 		}
-		if len(h) == 0 {
+		if len(content) == 0 {
 			continue
 		}
-		hashes[repo] = h
+		h := sha1.Sum(content)
+		hashes[repo] = h[:]
 	}
 
 	return hashes, nil
-}
-
-// readMarkerFirstLine reads the first line of a marker file and hex-decodes
-// it into raw bytes. Returns (nil, nil) for empty files.
-func readMarkerFirstLine(path string) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	scanner := bufio.NewScanner(f)
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return nil, err
-		}
-		return nil, nil
-	}
-	line := strings.TrimSpace(scanner.Text())
-	if line == "" {
-		return nil, nil
-	}
-	return hex.DecodeString(line)
 }
