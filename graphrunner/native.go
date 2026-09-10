@@ -33,6 +33,7 @@ type nativeGraphRunner struct {
 	git                git.Interface
 	config             config.RepositoryConfig
 	extraExcludedFiles []string
+	outputBase         string
 	emitter            *metrics.Emitter
 }
 
@@ -41,7 +42,11 @@ type NativeGraphRunnerParams struct {
 	GitClient          git.Interface
 	Config             config.RepositoryConfig
 	ExtraExcludedFiles []string
-	Scope              tally.Scope
+	// OutputBase is the Bazel output base directory, used to read marker
+	// files for bzlmod external repo collapsing. When empty, marker-based
+	// collapsing is skipped.
+	OutputBase string
+	Scope      tally.Scope
 }
 
 // graph runner takes in a bazel query request and computes the graph
@@ -51,6 +56,7 @@ func NewNativeGraphRunner(p NativeGraphRunnerParams) GraphRunner {
 		git:                p.GitClient,
 		config:             p.Config,
 		extraExcludedFiles: p.ExtraExcludedFiles,
+		outputBase:         p.OutputBase,
 		emitter:            metrics.New(p.Scope).SubScope("graph_runner"),
 	}
 }
@@ -101,9 +107,9 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	// Read marker files for bzlmod repos so the collapse uses content-aware
 	// hashes instead of just the repo name string.
 	var repoMarkerHashes map[string][]byte
-	if bzlmodEnabled {
+	if bzlmodEnabled && g.outputBase != "" {
 		markerStart := time.Now()
-		repoMarkerHashes, err = readRepoMarkerHashes(ctx, ws.Path(), g.config.BazelCommandPath)
+		repoMarkerHashes, err = readRepoMarkerHashes(g.outputBase)
 		g.emitter.DurationHistogram(_opCompute, "marker_read_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(markerStart))
 		if err != nil {
 			return targethasher.EmptyResult(), fmt.Errorf("read repo marker hashes: %w", err)

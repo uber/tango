@@ -16,27 +16,18 @@ package graphrunner
 
 import (
 	"bufio"
-	"bytes"
-	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/uber/tango/core/execcmd"
 )
 
 // readRepoMarkerHashes reads Bazel's external repo marker files and returns
 // a map from canonical repo name to the marker's content hash. Each marker
 // file's first line is a hex-encoded hash of the repository rule's inputs
 // (URL, sha256, patches, etc.) that changes whenever the repo is upgraded.
-func readRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand string) (map[string][]byte, error) {
-	outputBase, err := bazelOutputBase(ctx, workspacePath, bazelCommand)
-	if err != nil {
-		return nil, fmt.Errorf("bazel output base: %w", err)
-	}
-
+func readRepoMarkerHashes(outputBase string) (map[string][]byte, error) {
 	markerDir := filepath.Join(outputBase, "external")
 	entries, err := os.ReadDir(markerDir)
 	if err != nil {
@@ -88,18 +79,4 @@ func readMarkerFirstLine(path string) ([]byte, error) {
 		return nil, nil
 	}
 	return hex.DecodeString(line)
-}
-
-// bazelOutputBase runs `bazel info output_base` and returns the path.
-func bazelOutputBase(ctx context.Context, workspacePath, bazelCommand string) (string, error) {
-	if bazelCommand == "" {
-		bazelCommand = "bazel"
-	}
-	cmd := execcmd.CommandContext(ctx, bazelCommand, "info", "output_base")
-	cmd.Dir = workspacePath
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("run bazel info output_base: %w", err)
-	}
-	return string(bytes.TrimSpace(out)), nil
 }
