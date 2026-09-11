@@ -24,9 +24,9 @@ import (
 )
 
 // readRepoMarkerHashes reads Bazel's external repo marker files and returns
-// a map from canonical repo name to a hash of the marker file's content.
-// Each marker file captures the repository rule's inputs (URL, sha256,
-// patches, etc.) and changes whenever the repo is upgraded.
+// a map from canonical repo name to the repo rule input hash (the first
+// line of each marker file). This hash changes whenever the repo is
+// upgraded (different URL, sha256, patches, etc.).
 func readRepoMarkerHashes(outputBase string) (map[string][]byte, error) {
 	markerDir := filepath.Join(outputBase, "external")
 	entries, err := os.ReadDir(markerDir)

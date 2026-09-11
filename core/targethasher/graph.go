@@ -78,11 +78,12 @@ type HashConfig struct {
 	// AllTargetsFiles lists repo-relative paths whose hashes should be
 	// extracted from KnownSourceHashes into Result.AllTargetsFileHashes.
 	AllTargetsFiles []string
-	// RepoMarkerHashes maps canonical bzlmod repo names to content hashes
-	// read from Bazel's marker files ($(output_base)/external/@repo.marker).
-	// When set, collapseBzlmodExternalTargets uses these instead of hashing
-	// the repo name string, so that repos without a content hash suffix in
-	// their name (e.g. "protobuf+") still get a hash that changes on upgrade.
+	// RepoMarkerHashes maps canonical bzlmod repo names to repo rule input
+	// hashes read from Bazel's marker files ($(output_base)/external/@repo.marker).
+	// Used by collapseBzlmodExternalTargets to pre-hash external source files
+	// without reading their content from disk. The marker hash changes on any
+	// dependency upgrade, so repos whose canonical name stays the same across
+	// versions (e.g. "protobuf+") are still correctly detected as changed.
 	RepoMarkerHashes map[string][]byte
 }
 
@@ -408,16 +409,10 @@ func bzlmodRepoName(targetName string) string {
 	return rest[:idx]
 }
 
-// collapseBzlmodExternalTargets pre-hashes all bzlmod external source file
-// and generated file targets using a single hash derived from the canonical
-// repo name. This mirrors the legacy WORKSPACE //external:repo collapsing
-// but for bzlmod's @@repo//... naming. Rule targets are left alone so their
-// real dependency edges are preserved.
-//
-// The canonical bzlmod repo name encodes the module version and content hash
-// (e.g. "rules_python++pip+third_party_python_base_311_torch_...._a6ebbe51"),
-// so hashing the name itself produces a stable, content-aware representative
-// hash that changes when the repo content changes.
+// shouldCollapse reports whether a bzlmod external target should be
+// pre-hashed using the repo's marker file hash instead of hashing its
+// file content during the DFS. Only source and generated files are
+// collapsed; rule targets are left alone so dependency edges are preserved.
 func shouldCollapse(target *Target, repo string, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) bool {
 	if repo == "" || fullHashRepos.Contains(repo) {
 		return false
@@ -425,9 +420,22 @@ func shouldCollapse(target *Target, repo string, fullHashRepos set.Set[string], 
 	if target.RuleType != SourceFileType && target.RuleType != GeneratedFileType {
 		return false
 	}
-	return target.Hash == nil && !isExcluded(target.Name, excludedRegex)
+	if target.Hash != nil {
+		return false
+	}
+	if isExcluded(target.Name, excludedRegex) {
+		return false
+	}
+	return true
 }
 
+// collapseBzlmodExternalTargets pre-hashes bzlmod external source and
+// generated file targets using hashes from Bazel's marker files. This is
+// the bzlmod equivalent of legacy WORKSPACE //external:repo collapsing.
+// Marker file hashes change on any dependency upgrade, so the collapsed
+// hash is content-aware even for repos whose canonical name stays the same
+// across versions (e.g. "protobuf+"). Repos without a marker are skipped
+// and fall through to HashRecursively for per-file content hashing.
 func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte) {
 	if len(repoMarkerHashes) == 0 {
 		return
@@ -505,12 +513,10 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 			return EmptyResult(), err
 		}
 	} else {
-		// Bzlmod: collapse external source/generated file targets to a
-		// single per-repo hash derived from the canonical repo name (which
-		// encodes the version and content hash). This avoids visiting
-		// millions of individual pip-wheel files during the DFS — the same
-		// optimization that legacy WORKSPACE gets via //external:repo
-		// collapsing.
+		// Bzlmod: collapse external source/generated file targets using
+		// Bazel marker file hashes. Avoids visiting millions of individual
+		// pip-wheel files during the DFS — the bzlmod equivalent of legacy
+		// WORKSPACE //external:repo collapsing.
 		collapseBzlmodExternalTargets(targets, fullHashRepos, excludedRegex, repoMarkerHashes)
 	}
 
