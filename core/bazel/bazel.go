@@ -110,7 +110,7 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 	}, nil
 }
 
-// detectBazelExecutable returns the path to a bazel binary.
+// detectBazelExecutable returns the path to a bazelisk binary.
 // If bazelCommand is explicitly provided, it is used as-is.
 // Otherwise, bazelisk is downloaded from GitHub into a local cache directory.
 func detectBazelExecutable(ctx context.Context, bazelCommand string) (string, error) {
