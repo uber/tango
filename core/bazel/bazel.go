@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
@@ -181,4 +182,24 @@ func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 		return "", fmt.Errorf("install bazelisk: %w", err)
 	}
 	return dest, nil
+}
+
+// OutputBase resolves the bazel executable and runs `bazel info output_base`,
+// returning the absolute path to the output base directory.
+func OutputBase(ctx context.Context, workspacePath, bazelCommand string) (string, error) {
+	resolved, err := DetectBazelExecutable(ctx, bazelCommand)
+	if err != nil {
+		return "", fmt.Errorf("detect bazel: %w", err)
+	}
+	cmd := execcmd.CommandContext(ctx, resolved, "info", "output_base")
+	cmd.Dir = workspacePath
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("bazel info output_base: %w", err)
+	}
+	result := strings.TrimSpace(string(out))
+	if result == "" {
+		return "", fmt.Errorf("bazel info output_base returned empty path")
+	}
+	return result, nil
 }

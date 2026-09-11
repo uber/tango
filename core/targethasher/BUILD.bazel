@@ -4,11 +4,13 @@ go_library(
     name = "targethasher",
     srcs = [
         "graph.go",
+        "markers.go",
         "sourcehasher.go",
     ],
     importpath = "github.com/uber/tango/core/targethasher",
     visibility = ["//visibility:public"],
     deps = [
+        "//core/bazel",
         "@com_github_bazelbuild_buildtools//build_proto",
         "@com_github_bazelbuild_buildtools//labels",
         "@com_github_deckarep_golang_set_v2//:golang-set",

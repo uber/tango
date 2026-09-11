@@ -21,12 +21,15 @@ import (
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/bazel"
 	"github.com/uber/tango/core/bazel/bazelmock"
 	gitmock "github.com/uber/tango/core/git/gitmock"
 	"github.com/uber/tango/core/workspace"
 	"go.uber.org/mock/gomock"
 )
+
+func boolPtr(b bool) *bool { return &b }
 
 func TestCompute_CallsBazelAndReturnsResult(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -47,6 +50,7 @@ func TestCompute_CallsBazelAndReturnsResult(t *testing.T) {
 	gr := NewNativeGraphRunner(NativeGraphRunnerParams{
 		BazelClient: bazelMock,
 		GitClient:   gitMock,
+		Config:      config.RepositoryConfig{BzlmodEnabled: boolPtr(false)},
 	})
 	ws := workspace.NewWorkspace(workspace.WorkspaceParams{
 		Path: "/tmp/ws",
