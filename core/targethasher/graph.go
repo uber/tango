@@ -80,7 +80,7 @@ type HashConfig struct {
 	AllTargetsFiles []string
 	// RepoMarkerHashes maps canonical bzlmod repo names to repo rule input
 	// hashes read from Bazel's marker files ($(output_base)/external/@repo.marker).
-	// Used by collapseBzlmodExternalTargets to pre-hash external source files
+	// Used by HashExternalTargetsBzlmod to pre-hash external source files
 	// without reading their content from disk. The marker hash changes on any
 	// dependency upgrade, so repos whose canonical name stays the same across
 	// versions (e.g. "protobuf+") are still correctly detected as changed.
@@ -409,11 +409,11 @@ func bzlmodRepoName(targetName string) string {
 	return rest[:idx]
 }
 
-// shouldCollapse reports whether a bzlmod external target should be
-// pre-hashed using the repo's marker file hash instead of hashing its
-// file content during the DFS. Only source and generated files are
-// collapsed; rule targets are left alone so dependency edges are preserved.
-func shouldCollapse(target *Target, repo string, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) bool {
+// shouldCollapseToBzlmodRepo reports whether a bzlmod external target should
+// be pre-hashed using the repo's marker file hash instead of hashing its
+// file content during the DFS. Only source and generated files are collapsed;
+// rule targets are left alone so dependency edges are preserved.
+func shouldCollapseToBzlmodRepo(target *Target, repo string, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) bool {
 	if target == nil {
 		return false
 	}
@@ -432,14 +432,19 @@ func shouldCollapse(target *Target, repo string, fullHashRepos set.Set[string], 
 	return true
 }
 
-// collapseBzlmodExternalTargets pre-hashes bzlmod external source and
-// generated file targets using hashes from Bazel's marker files. This is
-// the bzlmod equivalent of legacy WORKSPACE //external:repo collapsing.
-// Marker file hashes change on any dependency upgrade, so the collapsed
-// hash is content-aware even for repos whose canonical name stays the same
-// across versions (e.g. "protobuf+"). Repos without a marker are skipped
-// and fall through to HashRecursively for per-file content hashing.
-func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte) {
+// HashExternalTargetsBzlmod pre-hashes bzlmod external source and
+// generated file targets using hashes derived from Bazel's marker files.
+// This is the bzlmod equivalent of legacy WORKSPACE HashExternalTargets.
+//
+// Marker files track both the repo rule's declarative inputs (version,
+// URL, integrity) and per-file SHA-256 content hashes for local patches
+// applied via single_version_override. readMarkerHash hashes all stable
+// lines (skipping ENV) so the collapsed hash changes on dependency
+// upgrades AND patch content modifications.
+//
+// Repos without a marker are skipped and fall through to HashRecursively
+// for per-file content hashing.
+func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte) {
 	if len(repoMarkerHashes) == 0 {
 		return
 	}
@@ -447,7 +452,7 @@ func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set
 	repoHashes := make(map[string][]byte)
 	for _, target := range targets {
 		repo := bzlmodRepoName(target.Name)
-		if !shouldCollapse(target, repo, fullHashRepos, excludedRegex) {
+		if !shouldCollapseToBzlmodRepo(target, repo, fullHashRepos, excludedRegex) {
 			continue
 		}
 
@@ -520,7 +525,7 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 		// Bazel marker file hashes. Avoids visiting millions of individual
 		// pip-wheel files during the DFS — the bzlmod equivalent of legacy
 		// WORKSPACE //external:repo collapsing.
-		collapseBzlmodExternalTargets(targets, fullHashRepos, excludedRegex, repoMarkerHashes)
+		HashExternalTargetsBzlmod(targets, fullHashRepos, excludedRegex, repoMarkerHashes)
 	}
 
 	// get topological roots and update buildable roots info

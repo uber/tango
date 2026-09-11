@@ -402,7 +402,7 @@ func TestBzlmodRepoName(t *testing.T) {
 	}
 }
 
-func TestCollapseBzlmodExternalTargets(t *testing.T) {
+func TestHashExternalTargetsBzlmod(t *testing.T) {
 	markerA := []byte{0xaa, 0xbb, 0xcc}
 	markerB := []byte{0xdd, 0xee, 0xff}
 	markers := map[string][]byte{
@@ -419,7 +419,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"//src:main":             {Name: "//src:main", RuleType: "go_binary"},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, markers)
+		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
 
 		assert.NotNil(t, targets["@@repo_a//pkg:file1.py"].Hash)
 		assert.Equal(t, targets["@@repo_a//pkg:file1.py"].Hash, targets["@@repo_a//pkg:file2.py"].Hash)
@@ -432,7 +432,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"@@no_marker_repo//pkg:file.py": {Name: "@@no_marker_repo//pkg:file.py", RuleType: SourceFileType, External: true},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, markers)
+		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
 		assert.Nil(t, targets["@@no_marker_repo//pkg:file.py"].Hash)
 	})
 
@@ -441,7 +441,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"@@repo_a//pkg:file.py": {Name: "@@repo_a//pkg:file.py", RuleType: SourceFileType, External: true},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, nil)
+		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, nil)
 		assert.Nil(t, targets["@@repo_a//pkg:file.py"].Hash)
 	})
 
@@ -450,7 +450,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"@@repo_a//pkg:lib": {Name: "@@repo_a//pkg:lib", RuleType: "go_library", External: true},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, markers)
+		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
 		assert.Nil(t, targets["@@repo_a//pkg:lib"].Hash)
 	})
 
@@ -459,7 +459,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"@@repo_a//pkg:file.py": {Name: "@@repo_a//pkg:file.py", RuleType: SourceFileType, External: true},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet("", "repo_a"), nil, markers)
+		HashExternalTargetsBzlmod(targets, set.NewSet("", "repo_a"), nil, markers)
 		assert.Nil(t, targets["@@repo_a//pkg:file.py"].Hash)
 	})
 
@@ -470,7 +470,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 		}
 		excluded := []*regexp.Regexp{regexp.MustCompile(`\.whl$`)}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), excluded, markers)
+		HashExternalTargetsBzlmod(targets, set.NewSet(""), excluded, markers)
 
 		assert.Nil(t, targets["@@rules_python++pip+foo//pkg:file.whl"].Hash)
 		assert.NotNil(t, targets["@@rules_python++pip+foo//pkg:module.py"].Hash)
@@ -482,7 +482,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"@@repo_b//pkg:file.py": {Name: "@@repo_b//pkg:file.py", RuleType: SourceFileType, External: true},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, markers)
+		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
 		assert.NotEqual(t, targets["@@repo_a//pkg:file.py"].Hash, targets["@@repo_b//pkg:file.py"].Hash)
 	})
 
@@ -492,7 +492,7 @@ func TestCollapseBzlmodExternalTargets(t *testing.T) {
 			"@@repo_a//pkg:file.py": {Name: "@@repo_a//pkg:file.py", RuleType: SourceFileType, External: true, Hash: existing},
 		}
 
-		collapseBzlmodExternalTargets(targets, set.NewSet(""), nil, markers)
+		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
 		assert.Equal(t, existing, targets["@@repo_a//pkg:file.py"].Hash)
 	})
 }

@@ -108,6 +108,9 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		if err != nil {
 			return targethasher.EmptyResult(), fmt.Errorf("read repo marker hashes: %w", err)
 		}
+		if len(repoMarkerHashes) == 0 {
+			return targethasher.EmptyResult(), fmt.Errorf("bzlmod enabled but no repo marker hashes found")
+		}
 	}
 
 	hashConfig := targethasher.HashConfig{
