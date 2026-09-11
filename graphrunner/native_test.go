@@ -16,6 +16,9 @@ package graphrunner
 
 import (
 	"context"
+	"encoding/hex"
+	"os"
+	"path/filepath"
 	"testing"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
@@ -63,6 +66,77 @@ func TestCompute_CallsBazelAndReturnsResult(t *testing.T) {
 	assert.Equal(t, 1, len(res.Targets))
 	assert.Equal(t, ruleName, res.Targets[ruleName].Name)
 	assert.Equal(t, ruleClass, res.Targets[ruleName].Rule.GetRuleClass())
+}
+
+func TestCompute_BzlmodCollapsesExternalTargets(t *testing.T) {
+	// Set up a fake output base with marker files so the bzlmod
+	// collapse path can read them without a real bazel installation.
+	outputBase := t.TempDir()
+	markerDir := filepath.Join(outputBase, "external")
+	require.NoError(t, os.MkdirAll(markerDir, 0o755))
+
+	markerHash := hex.EncodeToString([]byte("fake-hash-for-test"))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(markerDir, "@myrepo.marker"),
+		[]byte(markerHash+"\n"),
+		0o644,
+	))
+
+	// Create a fake bazel script that prints the output base.
+	fakeBazel := filepath.Join(t.TempDir(), "fake-bazel")
+	require.NoError(t, os.WriteFile(fakeBazel, []byte("#!/bin/sh\necho "+outputBase+"\n"), 0o755))
+
+	ctrl := gomock.NewController(t)
+	bazelMock := bazelmock.NewMockBazel(ctrl)
+	gitMock := gitmock.NewMockInterface(ctrl)
+	gitMock.EXPECT().FileHashes(gomock.Any(), gomock.Any()).Return(map[string][]byte{}, nil)
+
+	srcName := "@@myrepo//pkg:file.go"
+	srcType := "source file"
+	ruleName := "//:a"
+	ruleClass := "go_library"
+	bazelMock.EXPECT().ExecuteQuery(gomock.Any(), gomock.Any()).Return(&bazel.QueryResponse{Result: &buildpb.QueryResult{Target: []*buildpb.Target{
+		{
+			Type: buildpb.Target_SOURCE_FILE.Enum(),
+			SourceFile: &buildpb.SourceFile{
+				Name: &srcName,
+			},
+		},
+		{
+			Type: buildpb.Target_RULE.Enum(),
+			Rule: &buildpb.Rule{
+				Name:      &ruleName,
+				RuleClass: &ruleClass,
+			},
+		},
+	}}}, nil)
+
+	gr := NewNativeGraphRunner(NativeGraphRunnerParams{
+		BazelClient: bazelMock,
+		GitClient:   gitMock,
+		Config: config.RepositoryConfig{
+			BzlmodEnabled:    boolPtr(true),
+			BazelCommandPath: fakeBazel,
+		},
+	})
+	ws := workspace.NewWorkspace(workspace.WorkspaceParams{
+		Path: t.TempDir(),
+	})
+
+	res, err := gr.Compute(context.Background(), ws)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	// The external source file should have been collapsed with a hash
+	// derived from the marker file, not left nil.
+	extTarget, ok := res.Targets[srcName]
+	require.True(t, ok, "external target %q should be in results", srcName)
+	assert.NotNil(t, extTarget.Hash, "collapsed external target should have a hash")
+	assert.Equal(t, srcType, extTarget.RuleType)
+
+	// The internal rule target should also be present.
+	_, ok = res.Targets[ruleName]
+	assert.True(t, ok, "internal target %q should be in results", ruleName)
 }
 
 func TestCompute_PropagatesError(t *testing.T) {
