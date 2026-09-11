@@ -44,7 +44,6 @@ func TestCompute_CallsBazelAndReturnsResult(t *testing.T) {
 			},
 		},
 	}}}, nil)
-	bazelMock.EXPECT().OutputBase(gomock.Any()).Return(t.TempDir(), nil)
 	gr := NewNativeGraphRunner(NativeGraphRunnerParams{
 		BazelClient: bazelMock,
 		GitClient:   gitMock,

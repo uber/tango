@@ -12,25 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package graphrunner
+package targethasher
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/uber/tango/core/bazel"
+	"github.com/uber/tango/core/execcmd"
 )
 
-// readRepoMarkerHashes reads Bazel's external repo marker files and returns
-// a map from canonical repo name to the repo rule input hash (the first
-// line of each marker file). This hash changes whenever the repo is
-// upgraded (different URL, sha256, patches, etc.).
-func readRepoMarkerHashes(outputBase string) (map[string][]byte, error) {
-	if outputBase == "" {
-		return nil, fmt.Errorf("output_base is empty")
+// ReadRepoMarkerHashes resolves the Bazel output base, then reads the
+// external repo marker files and returns a map from canonical repo name
+// to the repo rule input hash (the first line of each marker file).
+// This hash changes whenever the repo is upgraded (different URL,
+// sha256, patches, etc.).
+func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand string) (map[string][]byte, error) {
+	resolvedCommand, err := bazel.DetectBazelExecutable(ctx, bazelCommand)
+	if err != nil {
+		return nil, fmt.Errorf("detect bazel: %w", err)
 	}
+
+	outputBase, err := bazelOutputBase(ctx, workspacePath, resolvedCommand)
+	if err != nil {
+		return nil, fmt.Errorf("bazel output base: %w", err)
+	}
+
 	markerDir := filepath.Join(outputBase, "external")
 	entries, err := os.ReadDir(markerDir)
 	if err != nil {
@@ -83,4 +95,19 @@ func readMarkerHash(path string) ([]byte, error) {
 		return nil, nil
 	}
 	return hex.DecodeString(line)
+}
+
+// bazelOutputBase runs `bazel info output_base` and returns the path.
+func bazelOutputBase(ctx context.Context, workspacePath, bazelCommand string) (string, error) {
+	cmd := execcmd.CommandContext(ctx, bazelCommand, "info", "output_base")
+	cmd.Dir = workspacePath
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("bazel info output_base: %w", err)
+	}
+	result := strings.TrimSpace(string(out))
+	if result == "" {
+		return "", fmt.Errorf("bazel info output_base returned empty path")
+	}
+	return result, nil
 }

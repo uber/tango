@@ -24,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
@@ -54,8 +53,6 @@ type QueryResponse struct {
 
 type Bazel interface {
 	ExecuteQuery(ctx context.Context, req *QueryRequest) (*QueryResponse, error)
-	// OutputBase returns the Bazel output base directory for this workspace.
-	OutputBase(ctx context.Context) (string, error)
 }
 
 // BazelClient is a client for interacting with Bazel.
@@ -96,7 +93,7 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 	if timeout == 0 {
 		timeout = _queryTimeout
 	}
-	bazelCommand, err := detectBazelExecutable(ctx, p.BazelCommand)
+	bazelCommand, err := DetectBazelExecutable(ctx, p.BazelCommand)
 	if err != nil {
 		return nil, fmt.Errorf("detect bazel executable: %w", err)
 	}
@@ -112,34 +109,10 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 	}, nil
 }
 
-// OutputBase runs `bazel info output_base` and returns the path.
-func (b *BazelClient) OutputBase(ctx context.Context) (string, error) {
-	cmd := b.execCommandContext(ctx, b.bazelCommand, "info", "output_base")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", fmt.Errorf("stdout pipe: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("start bazel info: %w", err)
-	}
-	out, err := io.ReadAll(stdout)
-	if err != nil {
-		return "", fmt.Errorf("read output: %w", err)
-	}
-	if err := cmd.Wait(); err != nil {
-		return "", fmt.Errorf("bazel info output_base: %w", err)
-	}
-	result := strings.TrimSpace(string(out))
-	if result == "" {
-		return "", fmt.Errorf("bazel info output_base returned empty path")
-	}
-	return result, nil
-}
-
-// detectBazelExecutable returns the path to a bazelisk binary.
+// DetectBazelExecutable returns the path to a bazel binary.
 // If bazelCommand is explicitly provided, it is used as-is.
 // Otherwise, bazelisk is downloaded from GitHub into a local cache directory.
-func detectBazelExecutable(ctx context.Context, bazelCommand string) (string, error) {
+func DetectBazelExecutable(ctx context.Context, bazelCommand string) (string, error) {
 	if bazelCommand != "" {
 		return bazelCommand, nil
 	}

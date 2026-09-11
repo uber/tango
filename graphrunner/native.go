@@ -102,12 +102,8 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	// hashes instead of just the repo name string.
 	var repoMarkerHashes map[string][]byte
 	if bzlmodEnabled {
-		outputBase, outputBaseErr := g.bazel.OutputBase(ctx)
-		if outputBaseErr != nil {
-			return targethasher.EmptyResult(), fmt.Errorf("bazel output base: %w", outputBaseErr)
-		}
 		markerStart := time.Now()
-		repoMarkerHashes, err = readRepoMarkerHashes(outputBase)
+		repoMarkerHashes, err = targethasher.ReadRepoMarkerHashes(ctx, ws.Path(), g.config.BazelCommandPath)
 		g.emitter.DurationHistogram(_opCompute, "marker_read_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(markerStart))
 		if err != nil {
 			return targethasher.EmptyResult(), fmt.Errorf("read repo marker hashes: %w", err)
