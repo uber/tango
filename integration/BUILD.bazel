@@ -5,6 +5,7 @@ go_test(
     size = "large",
     timeout = "long",
     srcs = [
+        "atf_test.go",
         "benchmark_test.go",
         "integration_test.go",
     ],
