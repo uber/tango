@@ -94,7 +94,7 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 	if timeout == 0 {
 		timeout = _queryTimeout
 	}
-	bazelCommand, err := DetectBazelExecutable(ctx, p.BazelCommand)
+	bazelCommand, err := detectBazelExecutable(ctx, p.BazelCommand)
 	if err != nil {
 		return nil, fmt.Errorf("detect bazel executable: %w", err)
 	}
@@ -110,10 +110,10 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 	}, nil
 }
 
-// DetectBazelExecutable returns the path to a bazel binary.
+// detectBazelExecutable returns the path to a bazel binary.
 // If bazelCommand is explicitly provided, it is used as-is.
 // Otherwise, bazelisk is downloaded from GitHub into a local cache directory.
-func DetectBazelExecutable(ctx context.Context, bazelCommand string) (string, error) {
+func detectBazelExecutable(ctx context.Context, bazelCommand string) (string, error) {
 	if bazelCommand != "" {
 		return bazelCommand, nil
 	}
@@ -187,7 +187,7 @@ func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 // OutputBase resolves the bazel executable and runs `bazel info output_base`,
 // returning the absolute path to the output base directory.
 func OutputBase(ctx context.Context, workspacePath, bazelCommand string) (string, error) {
-	resolved, err := DetectBazelExecutable(ctx, bazelCommand)
+	resolved, err := detectBazelExecutable(ctx, bazelCommand)
 	if err != nil {
 		return "", fmt.Errorf("detect bazel: %w", err)
 	}
