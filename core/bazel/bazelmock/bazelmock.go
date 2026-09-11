@@ -55,4 +55,3 @@ func (mr *MockBazelMockRecorder) ExecuteQuery(ctx, req any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteQuery", reflect.TypeOf((*MockBazel)(nil).ExecuteQuery), ctx, req)
 }
-

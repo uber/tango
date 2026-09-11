@@ -90,4 +90,3 @@ func readMarkerHash(path string) ([]byte, error) {
 	}
 	return hex.DecodeString(line)
 }
-
