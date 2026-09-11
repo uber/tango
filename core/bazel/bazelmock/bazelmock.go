@@ -55,3 +55,18 @@ func (mr *MockBazelMockRecorder) ExecuteQuery(ctx, req any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteQuery", reflect.TypeOf((*MockBazel)(nil).ExecuteQuery), ctx, req)
 }
+
+// OutputBase mocks base method.
+func (m *MockBazel) OutputBase(ctx context.Context) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "OutputBase", ctx)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// OutputBase indicates an expected call of OutputBase.
+func (mr *MockBazelMockRecorder) OutputBase(ctx any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OutputBase", reflect.TypeOf((*MockBazel)(nil).OutputBase), ctx)
+}

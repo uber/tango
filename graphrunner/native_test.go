@@ -44,10 +44,10 @@ func TestCompute_CallsBazelAndReturnsResult(t *testing.T) {
 			},
 		},
 	}}}, nil)
+	bazelMock.EXPECT().OutputBase(gomock.Any()).Return(t.TempDir(), nil)
 	gr := NewNativeGraphRunner(NativeGraphRunnerParams{
 		BazelClient: bazelMock,
 		GitClient:   gitMock,
-		// leave HashConfig zero; not asserted here
 	})
 	ws := workspace.NewWorkspace(workspace.WorkspaceParams{
 		Path: "/tmp/ws",

@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
@@ -53,6 +54,8 @@ type QueryResponse struct {
 
 type Bazel interface {
 	ExecuteQuery(ctx context.Context, req *QueryRequest) (*QueryResponse, error)
+	// OutputBase returns the Bazel output base directory for this workspace.
+	OutputBase(ctx context.Context) (string, error)
 }
 
 // BazelClient is a client for interacting with Bazel.
@@ -107,6 +110,26 @@ func NewBazelClient(ctx context.Context, p Params) (*BazelClient, error) {
 		queryTimeout:       timeout,
 		streamLogs:         p.StreamLogs,
 	}, nil
+}
+
+// OutputBase runs `bazel info output_base` and returns the path.
+func (b *BazelClient) OutputBase(ctx context.Context) (string, error) {
+	cmd := b.execCommandContext(ctx, b.bazelCommand, "info", "output_base")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start bazel info: %w", err)
+	}
+	out, err := io.ReadAll(stdout)
+	if err != nil {
+		return "", fmt.Errorf("read output: %w", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		return "", fmt.Errorf("bazel info output_base: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // detectBazelExecutable returns the path to a bazelisk binary.
