@@ -17,7 +17,6 @@ package targethasher
 import (
 	"bufio"
 	"context"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,9 +27,9 @@ import (
 
 // ReadRepoMarkerHashes resolves the Bazel output base, then reads the
 // external repo marker files and returns a map from canonical repo name
-// to the repo rule input hash (the first line of each marker file).
-// This hash changes whenever the repo is upgraded (different URL,
-// sha256, patches, etc.).
+// to a hash derived from the stable lines of each marker file.
+// This hash changes whenever the repo's version, URL, or patch file
+// contents change. ENV lines are excluded for cross-environment stability.
 func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand string) (map[string][]byte, error) {
 	outputBase, err := bazel.OutputBase(ctx, workspacePath, bazelCommand)
 	if err != nil {
@@ -67,9 +66,12 @@ func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand strin
 	return hashes, nil
 }
 
-// readMarkerHash reads the first line of a marker file and hex-decodes
-// it into raw bytes. The first line is a hash of the repository rule's
-// inputs and is stable across runs for the same dependency version.
+// readMarkerHash computes a hash from the stable lines of a marker file.
+// The first line is a hash of the repo rule's declarative inputs (URL,
+// version, patch paths) but does NOT include the content hashes of patch
+// files. Those appear on FILE: lines alongside their SHA-256 content
+// hashes. ENV: lines are skipped because environment variables can differ
+// between CI environments and would cause unnecessary hash instability.
 func readMarkerHash(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -77,16 +79,25 @@ func readMarkerHash(path string) ([]byte, error) {
 	}
 	defer func() { _ = f.Close() }()
 
+	h := newHash()
+	hasContent := false
 	scanner := bufio.NewScanner(f)
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return nil, err
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
 		}
+		if strings.HasPrefix(line, "ENV:") {
+			continue
+		}
+		h.Write([]byte(line))
+		hasContent = true
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if !hasContent {
 		return nil, nil
 	}
-	line := strings.TrimSpace(scanner.Text())
-	if line == "" {
-		return nil, nil
-	}
-	return hex.DecodeString(line)
+	return h.Sum(nil), nil
 }
