@@ -418,41 +418,37 @@ func bzlmodRepoName(targetName string) string {
 // (e.g. "rules_python++pip+third_party_python_base_311_torch_...._a6ebbe51"),
 // so hashing the name itself produces a stable, content-aware representative
 // hash that changes when the repo content changes.
+func shouldCollapse(target *Target, repo string, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) bool {
+	if repo == "" || fullHashRepos.Contains(repo) {
+		return false
+	}
+	if target.RuleType != SourceFileType && target.RuleType != GeneratedFileType {
+		return false
+	}
+	return target.Hash == nil && !isExcluded(target.Name, excludedRegex)
+}
+
 func collapseBzlmodExternalTargets(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte) {
 	if len(repoMarkerHashes) == 0 {
 		return
 	}
 
 	repoHashes := make(map[string][]byte)
-	for name, target := range targets {
-		repo := bzlmodRepoName(name)
-		if repo == "" {
-			continue
-		}
-		if fullHashRepos.Contains(repo) {
-			continue
-		}
-		if target.RuleType != SourceFileType && target.RuleType != GeneratedFileType {
-			continue
-		}
-		if target.Hash != nil {
-			continue
-		}
-		if isExcluded(name, excludedRegex) {
+	for _, target := range targets {
+		repo := bzlmodRepoName(target.Name)
+		if !shouldCollapse(target, repo, fullHashRepos, excludedRegex) {
 			continue
 		}
 
 		h, ok := repoHashes[repo]
 		if !ok {
-			if markerHash, hasMarker := repoMarkerHashes[repo]; hasMarker && len(markerHash) > 0 {
-				rh := newHash()
-				rh.Write(markerHash)
-				h = rh.Sum(nil)
-			} else {
-				// No marker file for this repo — skip collapsing and
-				// let HashRecursively hash the actual file content.
+			markerHash, hasMarker := repoMarkerHashes[repo]
+			if !hasMarker || len(markerHash) == 0 {
 				continue
 			}
+			rh := newHash()
+			rh.Write(markerHash)
+			h = rh.Sum(nil)
 			repoHashes[repo] = h
 		}
 
