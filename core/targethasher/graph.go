@@ -414,6 +414,9 @@ func bzlmodRepoName(targetName string) string {
 // file content during the DFS. Only source and generated files are
 // collapsed; rule targets are left alone so dependency edges are preserved.
 func shouldCollapse(target *Target, repo string, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) bool {
+	if target == nil {
+		return false
+	}
 	if repo == "" || fullHashRepos.Contains(repo) {
 		return false
 	}

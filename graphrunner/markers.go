@@ -28,6 +28,9 @@ import (
 // line of each marker file). This hash changes whenever the repo is
 // upgraded (different URL, sha256, patches, etc.).
 func readRepoMarkerHashes(outputBase string) (map[string][]byte, error) {
+	if outputBase == "" {
+		return nil, fmt.Errorf("output_base is empty")
+	}
 	markerDir := filepath.Join(outputBase, "external")
 	entries, err := os.ReadDir(markerDir)
 	if err != nil {

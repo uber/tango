@@ -129,7 +129,11 @@ func (b *BazelClient) OutputBase(ctx context.Context) (string, error) {
 	if err := cmd.Wait(); err != nil {
 		return "", fmt.Errorf("bazel info output_base: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	result := strings.TrimSpace(string(out))
+	if result == "" {
+		return "", fmt.Errorf("bazel info output_base returned empty path")
+	}
+	return result, nil
 }
 
 // detectBazelExecutable returns the path to a bazelisk binary.
