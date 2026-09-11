@@ -442,11 +442,12 @@ func shouldCollapseToBzlmodRepo(target *Target, repo string, fullHashRepos set.S
 // lines (skipping ENV) so the collapsed hash changes on dependency
 // upgrades AND patch content modifications.
 //
-// Repos without a marker are skipped and fall through to HashRecursively
-// for per-file content hashing.
-func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte) {
+// Every external repo referenced in the query result should have a
+// marker file after bazel query completes. Returns an error if a
+// collapsible repo is missing its marker.
+func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte) error {
 	if len(repoMarkerHashes) == 0 {
-		return
+		return nil
 	}
 
 	repoHashes := make(map[string][]byte)
@@ -460,7 +461,7 @@ func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set
 		if !ok {
 			markerHash, hasMarker := repoMarkerHashes[repo]
 			if !hasMarker || len(markerHash) == 0 {
-				continue
+				return fmt.Errorf("bzlmod repo %q has targets in query but no marker file", repo)
 			}
 			rh := newHash()
 			rh.Write(markerHash)
@@ -471,6 +472,7 @@ func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set
 		target.Hash = h
 		target.HashWithoutDeps = h
 	}
+	return nil
 }
 
 // GetTopologicalRootsAndIdentifyBuildableRoots returns a list of topological roots and marks buildable roots in the target graph
@@ -525,7 +527,9 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 		// Bazel marker file hashes. Avoids visiting millions of individual
 		// pip-wheel files during the DFS — the bzlmod equivalent of legacy
 		// WORKSPACE //external:repo collapsing.
-		HashExternalTargetsBzlmod(targets, fullHashRepos, excludedRegex, repoMarkerHashes)
+		if err := HashExternalTargetsBzlmod(targets, fullHashRepos, excludedRegex, repoMarkerHashes); err != nil {
+			return EmptyResult(), err
+		}
 	}
 
 	// get topological roots and update buildable roots info

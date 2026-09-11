@@ -419,7 +419,7 @@ func TestHashExternalTargetsBzlmod(t *testing.T) {
 			"//src:main":             {Name: "//src:main", RuleType: "go_binary"},
 		}
 
-		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
+		require.NoError(t, HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers))
 
 		assert.NotNil(t, targets["@@repo_a//pkg:file1.py"].Hash)
 		assert.Equal(t, targets["@@repo_a//pkg:file1.py"].Hash, targets["@@repo_a//pkg:file2.py"].Hash)
@@ -427,21 +427,22 @@ func TestHashExternalTargetsBzlmod(t *testing.T) {
 		assert.Nil(t, targets["//src:main"].Hash)
 	})
 
-	t.Run("skips repos without marker (falls through to HashRecursively)", func(t *testing.T) {
+	t.Run("errors on repos without marker", func(t *testing.T) {
 		targets := map[string]*Target{
 			"@@no_marker_repo//pkg:file.py": {Name: "@@no_marker_repo//pkg:file.py", RuleType: SourceFileType, External: true},
 		}
 
-		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
-		assert.Nil(t, targets["@@no_marker_repo//pkg:file.py"].Hash)
+		err := HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no_marker_repo")
 	})
 
-	t.Run("skips repos when no markers provided at all", func(t *testing.T) {
+	t.Run("no-op when no markers provided at all", func(t *testing.T) {
 		targets := map[string]*Target{
 			"@@repo_a//pkg:file.py": {Name: "@@repo_a//pkg:file.py", RuleType: SourceFileType, External: true},
 		}
 
-		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, nil)
+		require.NoError(t, HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, nil))
 		assert.Nil(t, targets["@@repo_a//pkg:file.py"].Hash)
 	})
 
@@ -450,7 +451,7 @@ func TestHashExternalTargetsBzlmod(t *testing.T) {
 			"@@repo_a//pkg:lib": {Name: "@@repo_a//pkg:lib", RuleType: "go_library", External: true},
 		}
 
-		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
+		require.NoError(t, HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers))
 		assert.Nil(t, targets["@@repo_a//pkg:lib"].Hash)
 	})
 
@@ -459,7 +460,7 @@ func TestHashExternalTargetsBzlmod(t *testing.T) {
 			"@@repo_a//pkg:file.py": {Name: "@@repo_a//pkg:file.py", RuleType: SourceFileType, External: true},
 		}
 
-		HashExternalTargetsBzlmod(targets, set.NewSet("", "repo_a"), nil, markers)
+		require.NoError(t, HashExternalTargetsBzlmod(targets, set.NewSet("", "repo_a"), nil, markers))
 		assert.Nil(t, targets["@@repo_a//pkg:file.py"].Hash)
 	})
 
@@ -470,7 +471,7 @@ func TestHashExternalTargetsBzlmod(t *testing.T) {
 		}
 		excluded := []*regexp.Regexp{regexp.MustCompile(`\.whl$`)}
 
-		HashExternalTargetsBzlmod(targets, set.NewSet(""), excluded, markers)
+		require.NoError(t, HashExternalTargetsBzlmod(targets, set.NewSet(""), excluded, markers))
 
 		assert.Nil(t, targets["@@rules_python++pip+foo//pkg:file.whl"].Hash)
 		assert.NotNil(t, targets["@@rules_python++pip+foo//pkg:module.py"].Hash)
@@ -482,7 +483,7 @@ func TestHashExternalTargetsBzlmod(t *testing.T) {
 			"@@repo_b//pkg:file.py": {Name: "@@repo_b//pkg:file.py", RuleType: SourceFileType, External: true},
 		}
 
-		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
+		require.NoError(t, HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers))
 		assert.NotEqual(t, targets["@@repo_a//pkg:file.py"].Hash, targets["@@repo_b//pkg:file.py"].Hash)
 	})
 
@@ -492,7 +493,7 @@ func TestHashExternalTargetsBzlmod(t *testing.T) {
 			"@@repo_a//pkg:file.py": {Name: "@@repo_a//pkg:file.py", RuleType: SourceFileType, External: true, Hash: existing},
 		}
 
-		HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers)
+		require.NoError(t, HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers))
 		assert.Equal(t, existing, targets["@@repo_a//pkg:file.py"].Hash)
 	})
 }
