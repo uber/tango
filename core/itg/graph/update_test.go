@@ -17,6 +17,7 @@ package graph
 import (
 	"context"
 	"crypto/sha1"
+	"regexp"
 	"testing"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
@@ -57,7 +58,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			},
 		}
 
-		require.NoError(t, computeAvailableHashes(ctx, hasher, targets))
+		require.NoError(t, computeAvailableHashes(ctx, hasher, targets, nil))
 		assert.Equal(t, expected, targets[name].Hash)
 		assert.Equal(t, ctx, hasher.ctx)
 	})
@@ -69,7 +70,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			name: {Name: name, RuleType: targethasher.PackageGroup},
 		}
 
-		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, nil))
 
 		h := sha1.New()
 		h.Write([]byte(name))
@@ -83,7 +84,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			name: {Name: name, RuleType: targethasher.ExternalRuleType},
 		}
 
-		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, nil))
 		assert.Nil(t, targets[name].Hash, "external rule targets should not get a hash here")
 	})
 
@@ -94,7 +95,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			name: {Name: name, RuleType: targethasher.GeneratedFileType},
 		}
 
-		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, nil))
 		assert.Nil(t, targets[name].Hash, "generated file hash is resolved later")
 	})
 
@@ -111,7 +112,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			},
 		}
 
-		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, nil))
 		assert.NotNil(t, targets[name].HashWithoutDeps, "rule should have HashWithoutDeps after hashing")
 		assert.Nil(t, targets[name].Hash, "full hash is not computed here — deps are needed")
 	})
@@ -123,8 +124,84 @@ func TestComputeAvailableHashes(t *testing.T) {
 			"//pkg:f": {Name: "//pkg:f", RuleType: targethasher.SourceFileType, SourceFile: &buildpb.SourceFile{}},
 		}
 
-		err := computeAvailableHashes(context.Background(), hasher, targets)
+		err := computeAvailableHashes(context.Background(), hasher, targets, nil)
 		assert.Error(t, err)
+	})
+
+	t.Run("excluded source file target is skipped without calling hasher", func(t *testing.T) {
+		t.Parallel()
+		name := "//pkg:secret.go"
+		hasher := &fakeSourceHasher{err: assert.AnError} // would fail the test if called
+		targets := map[string]*targethasher.Target{
+			name: {Name: name, RuleType: targethasher.SourceFileType, SourceFile: &buildpb.SourceFile{}},
+		}
+
+		err := computeAvailableHashes(context.Background(), hasher, targets, []*regexp.Regexp{regexp.MustCompile("secret")})
+		require.NoError(t, err)
+		assert.Equal(t, []byte{}, targets[name].Hash)
+		assert.Equal(t, []byte{}, targets[name].HashWithoutDeps)
+		assert.Nil(t, hasher.ctx, "hasher should never be invoked for an excluded target")
+	})
+
+	t.Run("excluded rule target gets empty hash instead of HashWithoutDeps", func(t *testing.T) {
+		t.Parallel()
+		name := "//pkg:lib"
+		ruleName := name
+		ruleClass := "go_library"
+		targets := map[string]*targethasher.Target{
+			name: {
+				Name:     name,
+				RuleType: "go_library",
+				Rule:     &buildpb.Rule{Name: &ruleName, RuleClass: &ruleClass},
+			},
+		}
+
+		err := computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, []*regexp.Regexp{regexp.MustCompile("//pkg:lib")})
+		require.NoError(t, err)
+		assert.Equal(t, []byte{}, targets[name].Hash)
+		assert.Equal(t, []byte{}, targets[name].HashWithoutDeps)
+	})
+
+	t.Run("non-matching excludedRegex leaves hashing unaffected", func(t *testing.T) {
+		t.Parallel()
+		name := "//pkg:__pkg__"
+		targets := map[string]*targethasher.Target{
+			name: {Name: name, RuleType: targethasher.PackageGroup},
+		}
+
+		err := computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, []*regexp.Regexp{regexp.MustCompile("no-match")})
+		require.NoError(t, err)
+
+		h := sha1.New()
+		h.Write([]byte(name))
+		assert.Equal(t, h.Sum(nil), targets[name].Hash)
+	})
+}
+
+func TestIsExcludedTarget(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty regex list never excludes", func(t *testing.T) {
+		t.Parallel()
+		assert.False(t, isExcludedTarget("//pkg:anything", nil))
+	})
+
+	t.Run("matches when any regex in the list matches", func(t *testing.T) {
+		t.Parallel()
+		regexes := []*regexp.Regexp{
+			regexp.MustCompile("^//other:"),
+			regexp.MustCompile("^//pkg:target$"),
+		}
+		assert.True(t, isExcludedTarget("//pkg:target", regexes))
+	})
+
+	t.Run("returns false when no regex matches", func(t *testing.T) {
+		t.Parallel()
+		regexes := []*regexp.Regexp{
+			regexp.MustCompile("^//other:"),
+			regexp.MustCompile("^//another:"),
+		}
+		assert.False(t, isExcludedTarget("//pkg:target", regexes))
 	})
 }
 
@@ -143,7 +220,7 @@ func TestComputeHashes(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		_, err := g.computeHashes(ctx, aID)
+		_, err := g.computeHashes(ctx, aID, nil)
 		assert.ErrorIs(t, err, context.Canceled)
 	})
 
@@ -155,7 +232,7 @@ func TestComputeHashes(t *testing.T) {
 		})
 		aID := g.TargetNameToID["//pkg:a"]
 
-		got, err := g.computeHashes(context.Background(), aID)
+		got, err := g.computeHashes(context.Background(), aID, nil)
 		require.NoError(t, err)
 		assert.Equal(t, hash, got)
 	})
@@ -164,7 +241,7 @@ func TestComputeHashes(t *testing.T) {
 		t.Parallel()
 		g := OptimizeGraph(nil)
 
-		_, err := g.computeHashes(context.Background(), 9999)
+		_, err := g.computeHashes(context.Background(), 9999, nil)
 		assert.Error(t, err)
 	})
 
@@ -176,7 +253,7 @@ func TestComputeHashes(t *testing.T) {
 		})
 		id := g.TargetNameToID["//external:repo"]
 
-		got, err := g.computeHashes(context.Background(), id)
+		got, err := g.computeHashes(context.Background(), id, nil)
 		require.NoError(t, err)
 		assert.Equal(t, hash, got)
 	})
@@ -188,7 +265,7 @@ func TestComputeHashes(t *testing.T) {
 		})
 		id := g.TargetNameToID["//pkg:f.go"]
 
-		_, err := g.computeHashes(context.Background(), id)
+		_, err := g.computeHashes(context.Background(), id, nil)
 		assert.Error(t, err, "source file should already have its hash set")
 	})
 
@@ -206,7 +283,7 @@ func TestComputeHashes(t *testing.T) {
 		g.OptimizedTargets[ruleID].Hash = depHash
 		g.OptimizedTargets[genID].Hash = nil // force recompute
 
-		got, err := g.computeHashes(context.Background(), genID)
+		got, err := g.computeHashes(context.Background(), genID, nil)
 		require.NoError(t, err)
 		assert.Equal(t, depHash, got, "generated file should inherit its dep's hash")
 	})
@@ -223,7 +300,7 @@ func TestComputeHashes(t *testing.T) {
 		// lib has no final hash yet (only HashWithoutDeps)
 		g.OptimizedTargets[libID].Hash = nil
 
-		got, err := g.computeHashes(context.Background(), libID)
+		got, err := g.computeHashes(context.Background(), libID, nil)
 		require.NoError(t, err)
 
 		// Expected: sha1(hwod || depHash)  (single dep, already sorted)
@@ -231,6 +308,38 @@ func TestComputeHashes(t *testing.T) {
 		h.Write(hwod)
 		h.Write(depHash)
 		assert.Equal(t, h.Sum(nil), got)
+	})
+
+	t.Run("excluded target short-circuits before dep traversal", func(t *testing.T) {
+		t.Parallel()
+		g := OptimizeGraph(map[string]*targethasher.Target{
+			"//pkg:lib": {
+				Name:            "//pkg:lib",
+				RuleType:        "go_library",
+				HashWithoutDeps: []byte{0x01},
+				Deps:            []string{"//pkg:missing"}, // dangling: never added to the graph
+			},
+		})
+		libID := g.TargetNameToID["//pkg:lib"]
+		g.OptimizedTargets[libID].Hash = nil // force recompute path
+
+		got, err := g.computeHashes(context.Background(), libID, []*regexp.Regexp{regexp.MustCompile("//pkg:lib")})
+		require.NoError(t, err, "excluded targets should short-circuit before resolving deps")
+		assert.Equal(t, []byte{}, got)
+
+		// Sanity check: without the exclusion, the same dangling dep does error.
+		g2 := OptimizeGraph(map[string]*targethasher.Target{
+			"//pkg:lib": {
+				Name:            "//pkg:lib",
+				RuleType:        "go_library",
+				HashWithoutDeps: []byte{0x01},
+				Deps:            []string{"//pkg:missing"},
+			},
+		})
+		libID2 := g2.TargetNameToID["//pkg:lib"]
+		g2.OptimizedTargets[libID2].Hash = nil
+		_, err = g2.computeHashes(context.Background(), libID2, nil)
+		assert.Error(t, err, "unexcluded target with a dangling dep should still error")
 	})
 }
 
@@ -316,7 +425,7 @@ func TestComputeInvalidatedHashesCycleOrderInvariance(t *testing.T) {
 					invalidated.Insert(graph.TargetNameToID[name])
 				}
 
-				err := graph.computeInvalidatedHashes(ctx, invalidated)
+				err := graph.computeInvalidatedHashes(ctx, invalidated, nil)
 				require.NoError(rt, err)
 				for name, expected := range expectedHashes {
 					actual := graph.OptimizedTargets[graph.TargetNameToID[name]].Hash
