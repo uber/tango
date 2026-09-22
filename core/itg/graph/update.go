@@ -75,9 +75,14 @@ func (g *OptimizedGraph) UpdateGraph(
 	for id, target := range g.ExternalRuleTargets {
 		name := g.TargetIDToString[id]
 		if _, exists := targets[name]; !exists {
+			deps := make([]string, 0, len(target.Deps))
+			for depID := range target.Deps {
+				deps = append(deps, g.TargetIDToString[depID])
+			}
 			targets[name] = &targethasher.Target{
 				Name:            name,
 				RuleType:        targethasher.ExternalRuleType,
+				Deps:            deps,
 				Hash:            target.Hash,
 				HashWithoutDeps: target.HashWithoutDeps,
 				External:        target.External,

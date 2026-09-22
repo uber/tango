@@ -234,6 +234,61 @@ func TestComputeHashes(t *testing.T) {
 	})
 }
 
+// --- UpdateGraph: external rule target dep preservation ---
+
+func TestUpdateGraphPreservesExternalRuleTargetDeps(t *testing.T) {
+	t.Parallel()
+
+	t.Run("carried-over external rule target keeps its dependency edges", func(t *testing.T) {
+		t.Parallel()
+		g := OptimizeGraph(map[string]*targethasher.Target{
+			"//pkg:dep": {Name: "//pkg:dep", RuleType: "go_library", HashWithoutDeps: []byte{0x01}, Hash: []byte{0x01}},
+			"//external:repo": {
+				Name:            "//external:repo",
+				RuleType:        targethasher.ExternalRuleType,
+				Deps:            []string{"//pkg:dep"},
+				Hash:            []byte{0xCA, 0xFE},
+				HashWithoutDeps: []byte{0xCA, 0xFE},
+			},
+		})
+		depID := g.TargetNameToID["//pkg:dep"]
+		externalID := g.TargetNameToID["//external:repo"]
+		require.True(t, g.OptimizedTargets[externalID].Deps.Contains(depID),
+			"test setup: external target should start with the dep edge")
+
+		// A query result with no targets at all: //external:repo is not
+		// rediscovered fresh, so UpdateGraph must reconstruct it from
+		// g.ExternalRuleTargets rather than dropping it.
+		err := g.UpdateGraph(context.Background(), &fakeSourceHasher{}, UpdateGraphInput{
+			QueryResult: &buildpb.QueryResult{},
+		})
+		require.NoError(t, err)
+
+		assert.True(t, g.OptimizedTargets[externalID].Deps.Contains(depID),
+			"external rule target should keep its dependency edge after being carried over unchanged")
+	})
+
+	t.Run("carried-over external rule target with no deps stays empty without error", func(t *testing.T) {
+		t.Parallel()
+		g := OptimizeGraph(map[string]*targethasher.Target{
+			"//external:repo": {
+				Name:            "//external:repo",
+				RuleType:        targethasher.ExternalRuleType,
+				Hash:            []byte{0xCA, 0xFE},
+				HashWithoutDeps: []byte{0xCA, 0xFE},
+			},
+		})
+		externalID := g.TargetNameToID["//external:repo"]
+
+		err := g.UpdateGraph(context.Background(), &fakeSourceHasher{}, UpdateGraphInput{
+			QueryResult: &buildpb.QueryResult{},
+		})
+		require.NoError(t, err)
+
+		assert.Empty(t, g.OptimizedTargets[externalID].Deps)
+	})
+}
+
 func TestComputeInvalidatedHashesCycleOrderInvariance(t *testing.T) {
 	t.Parallel()
 
