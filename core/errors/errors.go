@@ -67,6 +67,11 @@ func NewInfraRetryable(err error) error {
 	return newError(err, ErrorInfraRetryable)
 }
 
+// NewCancelled wraps err as a TangoError classified ErrorCancelled.
+func NewCancelled(err error) error {
+	return newError(err, ErrorCancelled)
+}
+
 func newError(err error, code ErrorCode) error {
 	if err == nil {
 		return nil
