@@ -153,13 +153,9 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 	// always calculate hash for individual files in the main repo.
 	fullHashRepos := set.NewSet(append([]string{""}, hashConfig.FullHashRepos...)...)
 
-	excludedRegex := make([]*regexp.Regexp, 0, len(hashConfig.ExcludedRegex))
-	for _, pattern := range hashConfig.ExcludedRegex {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return EmptyResult(), fmt.Errorf("failed to compile excluded regex pattern %q: %w", pattern, err)
-		}
-		excludedRegex = append(excludedRegex, re)
+	excludedRegex, err := CompileExcludedRegex(hashConfig.ExcludedRegex)
+	if err != nil {
+		return EmptyResult(), err
 	}
 
 	result, err := fromProto(ctx, r, &diskHashHelper{
@@ -491,6 +487,7 @@ func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set
 			markerHash, hasMarker := repoMarkerHashes[repo]
 			if !hasMarker || len(markerHash) == 0 {
 				if mappedFrom != "" {
+					// Built-in repos such as @bazel_tools have no marker.
 					continue
 				}
 				return fmt.Errorf("bzlmod repo %q has targets in query but no marker file", repo)
@@ -904,6 +901,20 @@ func CanBeRoot(ruleType string) bool {
 
 func isExternalTarget(targetName string) bool {
 	return strings.HasPrefix(targetName, externalWorkspaceFilePrefix)
+}
+
+// CompileExcludedRegex compiles the configured excluded-file regex patterns
+// for use with isExcluded / shouldCollapseToBzlmodRepo.
+func CompileExcludedRegex(patterns []string) ([]*regexp.Regexp, error) {
+	excludedRegex := make([]*regexp.Regexp, 0, len(patterns))
+	for _, pattern := range patterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compile excluded regex pattern %q: %w", pattern, err)
+		}
+		excludedRegex = append(excludedRegex, re)
+	}
+	return excludedRegex, nil
 }
 
 func isExcluded(targetName string, excludedRegex []*regexp.Regexp) bool {
