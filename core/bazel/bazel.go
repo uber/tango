@@ -16,6 +16,7 @@ package bazel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -202,4 +203,25 @@ func OutputBase(ctx context.Context, workspacePath, bazelCommand string) (string
 		return "", fmt.Errorf("bazel info output_base returned empty path")
 	}
 	return result, nil
+}
+
+// RepoMapping returns the main repository's mapping from apparent repo names (`@name//...`) to
+// canonical repo names (`@@canonical//...`), using `bazel mod dump_repo_mapping`.
+func RepoMapping(ctx context.Context, workspacePath, bazelCommand string) (map[string]string, error) {
+	resolved, err := detectBazelExecutable(ctx, bazelCommand)
+	if err != nil {
+		return nil, fmt.Errorf("detect bazel: %w", err)
+	}
+	// The empty repo name selects the main repository.
+	cmd := execcmd.CommandContext(ctx, resolved, "mod", "dump_repo_mapping", "")
+	cmd.Dir = workspacePath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("bazel mod dump_repo_mapping: %w", err)
+	}
+	var mapping map[string]string
+	if err := json.Unmarshal(out, &mapping); err != nil {
+		return nil, fmt.Errorf("parse bazel mod dump_repo_mapping output: %w", err)
+	}
+	return mapping, nil
 }
