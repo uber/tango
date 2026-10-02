@@ -116,6 +116,19 @@ func TestComputeAvailableHashes(t *testing.T) {
 		assert.Nil(t, targets[name].Hash, "full hash is not computed here — deps are needed")
 	})
 
+	t.Run("source file already hashed is not re-hashed", func(t *testing.T) {
+		t.Parallel()
+		existing := []byte{0xaa, 0xbb}
+		hasher := &fakeSourceHasher{err: assert.AnError}
+		name := "@@repo_a//pkg:file.py"
+		targets := map[string]*targethasher.Target{
+			name: {Name: name, RuleType: targethasher.SourceFileType, Hash: existing},
+		}
+
+		require.NoError(t, computeAvailableHashes(context.Background(), hasher, targets))
+		assert.Equal(t, existing, targets[name].Hash, "a pre-set hash (e.g. from the bzlmod collapse) must not be overwritten by the disk hasher")
+	})
+
 	t.Run("source hasher error is propagated", func(t *testing.T) {
 		t.Parallel()
 		hasher := &fakeSourceHasher{err: assert.AnError}
@@ -232,6 +245,60 @@ func TestComputeHashes(t *testing.T) {
 		h.Write(depHash)
 		assert.Equal(t, h.Sum(nil), got)
 	})
+}
+
+// --- UpdateGraph ---
+
+func strPtr(s string) *string { return &s }
+
+func TestUpdateGraph_BzlmodCollapsesExternalFiles(t *testing.T) {
+	t.Parallel()
+
+	marker := []byte{0xaa, 0xbb, 0xcc}
+	qr := &buildpb.QueryResult{
+		Target: []*buildpb.Target{
+			{
+				Type: buildpb.Target_RULE.Enum(),
+				Rule: &buildpb.Rule{
+					Name:      strPtr("//pkg:app"),
+					RuleClass: strPtr("go_binary"),
+					RuleInput: []string{"@@repo_a//pkg:file.py"},
+				},
+			},
+			{
+				Type:       buildpb.Target_SOURCE_FILE.Enum(),
+				SourceFile: &buildpb.SourceFile{Name: strPtr("@@repo_a//pkg:file.py")},
+			},
+		},
+	}
+
+	// Fails the test loudly if the itg update path falls back to real content
+	// hashing for the bzlmod external file instead of the marker-based collapse.
+	hasher := &fakeSourceHasher{err: assert.AnError}
+
+	g := OptimizeGraph(nil)
+	err := g.UpdateGraph(context.Background(), hasher, UpdateGraphInput{
+		QueryResult:      qr,
+		UseBzlmod:        true,
+		FullHashRepos:    NewStringSet(),
+		ChangedPkgs:      NewStringSet(),
+		DeletedPkgs:      NewStringSet(),
+		DeletedSrcFiles:  NewStringSet(),
+		RepoMarkerHashes: map[string][]byte{"repo_a": marker},
+	})
+	require.NoError(t, err)
+
+	fileID, ok := g.TargetNameToID["@@repo_a//pkg:file.py"]
+	require.True(t, ok)
+
+	h := sha1.New()
+	h.Write(marker)
+	expected := h.Sum(nil)
+
+	assert.Equal(t, expected, g.OptimizedTargets[fileID].Hash, "external file hash should come from the repo marker collapse")
+
+	appID := g.TargetNameToID["//pkg:app"]
+	assert.NotNil(t, g.OptimizedTargets[appID].Hash, "root target hash should still be computable from the collapsed dep hash")
 }
 
 func TestComputeInvalidatedHashesCycleOrderInvariance(t *testing.T) {

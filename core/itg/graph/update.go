@@ -38,6 +38,12 @@ type UpdateGraphInput struct {
 	WorkspaceRoot   string
 	FullHashRepos   StringSet
 	UseBzlmod       bool
+	ExcludedRegex   []string
+	// RepoMarkerHashes maps canonical bzlmod repo names to repo rule input hashes. Required
+	// when UseBzlmod is set; see targethasher.HashConfig.RepoMarkerHashes.
+	RepoMarkerHashes map[string][]byte
+	// RepoMapping maps apparent repo names to canonical names; see targethasher.HashConfig.RepoMapping.
+	RepoMapping map[string]string
 }
 
 // UpdateGraph updates the dependency relationships and hashes of targets in the graph.
@@ -57,9 +63,21 @@ func (g *OptimizedGraph) UpdateGraph(
 
 	fullHashReposSet := set.NewSet(input.FullHashRepos.UnsortedList()...)
 
-	// HashExternalTargets adds external rule targets and hashes them
-	if err := targethasher.HashExternalTargets(ctx, rawQueryResults, targets, sourceHasher, input.WorkspaceRoot, fullHashReposSet, warns, input.UseBzlmod); err != nil {
-		return err
+	if !input.UseBzlmod {
+		// Legacy WORKSPACE: add external rule targets (//external:*) to the map and hash them.
+		if err := targethasher.HashExternalTargets(ctx, rawQueryResults, targets, sourceHasher, input.WorkspaceRoot, fullHashReposSet, warns, input.UseBzlmod); err != nil {
+			return err
+		}
+	} else {
+		// Bzlmod: collapse external source/generated file targets using Bazel marker file
+		// hashes instead of letting computeAvailableHashes read each file's content from disk.
+		excludedRegex, err := targethasher.CompileExcludedRegex(input.ExcludedRegex)
+		if err != nil {
+			return err
+		}
+		if err := targethasher.HashExternalTargetsBzlmod(targets, fullHashReposSet, excludedRegex, input.RepoMarkerHashes, input.RepoMapping); err != nil {
+			return err
+		}
 	}
 
 	allInvalidated := NewIntSet()
@@ -187,6 +205,10 @@ func computeAvailableHashes(
 			h.Write([]byte(name))
 			hash = h.Sum(nil)
 		case targethasher.SourceFileType:
+			if target.Hash != nil {
+				// already hashed, e.g. by the bzlmod external-repo collapse
+				continue
+			}
 			h, err := hasher.HashSourceFile(ctx, target.SourceFile)
 			if err != nil {
 				return err
