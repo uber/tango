@@ -8,6 +8,7 @@ go_library(
     deps = [
         "//config",
         "//core/bazel",
+        "//core/git",
         "//core/targethasher",
         "//internal/mapper",
         "//mapper",
