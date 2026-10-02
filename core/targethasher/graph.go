@@ -85,6 +85,9 @@ type HashConfig struct {
 	// dependency upgrade, so repos whose canonical name stays the same across
 	// versions (e.g. "protobuf+") are still correctly detected as changed.
 	RepoMarkerHashes map[string][]byte
+	// RepoMapping maps apparent repo names (`@name//...` labels, as printed by bazel query) to the canonical
+	// names that key RepoMarkerHashes. Without it only `@@canonical//...` labels are collapsed.
+	RepoMapping map[string]string
 }
 
 // Target contains information about the hash for a single target
@@ -162,7 +165,7 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 	result, err := fromProto(ctx, r, &diskHashHelper{
 		workspaceroot:   workspaceroot,
 		knownFileHashes: hashConfig.KnownSourceHashes,
-	}, workspaceroot, fullHashRepos, set.NewSet(hashConfig.SequentialHashTargets...), excludedRegex, hashConfig.UseBzlmod, hashConfig.RepoMarkerHashes)
+	}, workspaceroot, fullHashRepos, set.NewSet(hashConfig.SequentialHashTargets...), excludedRegex, hashConfig.UseBzlmod, hashConfig.RepoMarkerHashes, hashConfig.RepoMapping)
 	if err != nil {
 		return result, err
 	}
@@ -183,7 +186,7 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 
 // FromProtoNoHash calculates a DAG graph based on a query result. It does not calculate hashes for targets.
 func FromProtoNoHash(ctx context.Context, r *buildpb.QueryResult) (Result, error) {
-	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false, nil)
+	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false, nil, nil)
 }
 
 // for external targets, url and urls attributes could cause non-deterministic hash values,
@@ -409,6 +412,27 @@ func bzlmodRepoName(targetName string) string {
 	return rest[:idx]
 }
 
+// resolveBzlmodRepo returns the canonical repo name for an external target label, resolving apparent
+// names (`@name//...`) through repoMapping. apparent is the apparent name used, if any. Both are empty
+// when the label does not name a known external repo.
+func resolveBzlmodRepo(targetName string, repoMapping map[string]string) (canonical, apparent string) {
+	if repo := bzlmodRepoName(targetName); repo != "" {
+		return repo, ""
+	}
+	if !strings.HasPrefix(targetName, "@") || strings.HasPrefix(targetName, "@@") {
+		return "", ""
+	}
+	name, _, ok := strings.Cut(targetName[1:], "//")
+	if !ok {
+		return "", ""
+	}
+	repo := repoMapping[name]
+	if repo == "" {
+		return "", ""
+	}
+	return repo, name
+}
+
 // shouldCollapseToBzlmodRepo reports whether a bzlmod external target should
 // be pre-hashed using the repo's marker file hash instead of hashing its
 // file content during the DFS. Only source and generated files are collapsed;
@@ -442,18 +466,23 @@ func shouldCollapseToBzlmodRepo(target *Target, repo string, fullHashRepos set.S
 // lines (skipping ENV) so the collapsed hash changes on dependency
 // upgrades AND patch content modifications.
 //
-// Every external repo referenced in the query result should have a
-// marker file after bazel query completes. Returns an error if a
-// collapsible repo is missing its marker.
-func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte) error {
+// Every external repo referenced by canonical name (`@@repo//...`) in the
+// query result should have a marker file after bazel query completes.
+// Returns an error if a collapsible repo is missing its marker. Repos
+// referenced by apparent name are resolved through repoMapping and are
+// skipped, not errored, when they have no marker.
+func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte, repoMapping map[string]string) error {
 	if len(repoMarkerHashes) == 0 {
 		return nil
 	}
 
 	repoHashes := make(map[string][]byte)
 	for _, target := range targets {
-		repo := bzlmodRepoName(target.Name)
+		repo, apparent := resolveBzlmodRepo(target.Name, repoMapping)
 		if !shouldCollapseToBzlmodRepo(target, repo, fullHashRepos, excludedRegex) {
+			continue
+		}
+		if apparent != "" && fullHashRepos.Contains(apparent) {
 			continue
 		}
 
@@ -461,6 +490,10 @@ func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set
 		if !ok {
 			markerHash, hasMarker := repoMarkerHashes[repo]
 			if !hasMarker || len(markerHash) == 0 {
+				if apparent != "" {
+					// Built-in repos such as @bazel_tools have no marker.
+					continue
+				}
 				return fmt.Errorf("bzlmod repo %q has targets in query but no marker file", repo)
 			}
 			rh := newHash()
@@ -508,7 +541,7 @@ func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]*Target) []
 	return roots
 }
 
-func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], sequentialHashTargets set.Set[string], excludedRegex []*regexp.Regexp, useBzlmod bool, repoMarkerHashes map[string][]byte) (Result, error) {
+func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], sequentialHashTargets set.Set[string], excludedRegex []*regexp.Regexp, useBzlmod bool, repoMarkerHashes map[string][]byte, repoMapping map[string]string) (Result, error) {
 	warns := make(map[string]error)
 	// Build target graph with dependencies, but without hash and root information.
 	targets, err := GetInternalTargetsWithoutHashAndRootInfo(ctx, r)
@@ -527,7 +560,7 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 		// Bazel marker file hashes. Avoids visiting millions of individual
 		// pip-wheel files during the DFS — the bzlmod equivalent of legacy
 		// WORKSPACE //external:repo collapsing.
-		if err := HashExternalTargetsBzlmod(targets, fullHashRepos, excludedRegex, repoMarkerHashes); err != nil {
+		if err := HashExternalTargetsBzlmod(targets, fullHashRepos, excludedRegex, repoMarkerHashes, repoMapping); err != nil {
 			return EmptyResult(), err
 		}
 	}
