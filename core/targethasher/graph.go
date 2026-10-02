@@ -413,9 +413,9 @@ func bzlmodRepoName(targetName string) string {
 }
 
 // resolveBzlmodRepo returns the canonical repo name for an external target label, resolving apparent
-// names (`@name//...`) through repoMapping. apparent is the apparent name used, if any. Both are empty
-// when the label does not name a known external repo.
-func resolveBzlmodRepo(targetName string, repoMapping map[string]string) (canonical, apparent string) {
+// names (`@name//...`) through repoMapping. mappedFrom is the apparent name the label used, and is empty
+// for canonical labels. Both are empty when the label does not name a known external repo.
+func resolveBzlmodRepo(targetName string, repoMapping map[string]string) (canonical, mappedFrom string) {
 	if repo := bzlmodRepoName(targetName); repo != "" {
 		return repo, ""
 	}
@@ -478,11 +478,11 @@ func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set
 
 	repoHashes := make(map[string][]byte)
 	for _, target := range targets {
-		repo, apparent := resolveBzlmodRepo(target.Name, repoMapping)
+		repo, mappedFrom := resolveBzlmodRepo(target.Name, repoMapping)
 		if !shouldCollapseToBzlmodRepo(target, repo, fullHashRepos, excludedRegex) {
 			continue
 		}
-		if apparent != "" && fullHashRepos.Contains(apparent) {
+		if mappedFrom != "" && fullHashRepos.Contains(mappedFrom) {
 			continue
 		}
 
@@ -490,8 +490,7 @@ func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set
 		if !ok {
 			markerHash, hasMarker := repoMarkerHashes[repo]
 			if !hasMarker || len(markerHash) == 0 {
-				if apparent != "" {
-					// Built-in repos such as @bazel_tools have no marker.
+				if mappedFrom != "" {
 					continue
 				}
 				return fmt.Errorf("bzlmod repo %q has targets in query but no marker file", repo)

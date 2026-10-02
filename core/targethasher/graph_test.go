@@ -409,10 +409,10 @@ func TestResolveBzlmodRepo(t *testing.T) {
 		"empty":       "",
 	}
 	tests := []struct {
-		name         string
-		give         string
-		wantCanon    string
-		wantApparent string
+		name           string
+		give           string
+		wantCanon      string
+		wantMappedFrom string
 	}{
 		{"canonical label", "@@rules_python++pip+foo//pkg:file.py", "rules_python++pip+foo", ""},
 		{"apparent label is mapped", "@apparent//pkg:file.jar", "+ext+canonical", "apparent"},
@@ -425,9 +425,9 @@ func TestResolveBzlmodRepo(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			canonical, apparent := resolveBzlmodRepo(tt.give, mapping)
+			canonical, mappedFrom := resolveBzlmodRepo(tt.give, mapping)
 			assert.Equal(t, tt.wantCanon, canonical)
-			assert.Equal(t, tt.wantApparent, apparent)
+			assert.Equal(t, tt.wantMappedFrom, mappedFrom)
 		})
 	}
 }
@@ -435,8 +435,8 @@ func TestResolveBzlmodRepo(t *testing.T) {
 func TestHashExternalTargetsBzlmodApparentNames(t *testing.T) {
 	markers := map[string][]byte{"+ext+canonical": {0xaa, 0xbb}}
 	mapping := map[string]string{
-		"apparent":    "+ext+canonical",
-		"bazel_tools": "bazel_tools", // built-in repo: no marker file
+		"apparent": "+ext+canonical",
+		"unmarked": "unmarked", // maps to a repo with no marker file
 	}
 	newTargets := func(names ...string) map[string]*Target {
 		targets := make(map[string]*Target, len(names))
@@ -473,11 +473,11 @@ func TestHashExternalTargetsBzlmodApparentNames(t *testing.T) {
 	})
 
 	t.Run("mapped repo without a marker is skipped, not an error", func(t *testing.T) {
-		targets := newTargets("@bazel_tools//tools:f", "@apparent//pkg:a.jar")
+		targets := newTargets("@unmarked//tools:f", "@apparent//pkg:a.jar")
 
 		require.NoError(t, HashExternalTargetsBzlmod(targets, set.NewSet(""), nil, markers, mapping))
 
-		assert.Nil(t, targets["@bazel_tools//tools:f"].Hash)
+		assert.Nil(t, targets["@unmarked//tools:f"].Hash)
 		assert.NotNil(t, targets["@apparent//pkg:a.jar"].Hash)
 	})
 
