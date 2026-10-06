@@ -44,6 +44,8 @@ go_test(
         "handler_test.go",
         "metrics_test.go",
         "output_filter_test.go",
+        "pollchangedtargetsjob_test.go",
+        "polltargetgraphjob_test.go",
         "testhelper_test.go",
         "wireerror_test.go",
     ],
