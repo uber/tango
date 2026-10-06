@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
@@ -37,6 +38,12 @@ type Params struct {
 	Scope           tally.Scope                `optional:"true"`
 	MaxMessageBytes int                        `optional:"true"`
 	GraphConfig     config.GraphConfigProvider `optional:"true"`
+	// JobStorage holds job status. Defaults to Storage.
+	JobStorage storage.Storage `name:"jobStorage" optional:"true"`
+	// JobHeartbeatInterval is the time between two writes of a running job, and
+	// between two reads of a job that another job waits on. Defaults to
+	// config.DefaultJobHeartbeatInterval.
+	JobHeartbeatInterval time.Duration `name:"jobHeartbeatInterval" optional:"true"`
 }
 
 type controller struct {
@@ -51,6 +58,9 @@ type controller struct {
 	// Used by linkRequestCtx and any fire-and-forget goroutines so they
 	// abort instead of leaking past server teardown.
 	appCtx context.Context
+
+	jobStorage           storage.Storage
+	jobHeartbeatInterval time.Duration
 }
 
 // Controller is the business-logic surface the handler depends on. repo is the
@@ -58,6 +68,10 @@ type controller struct {
 type Controller interface {
 	GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest, repo config.RepositoryConfig) (storage.GraphReader, error)
 	GetChangedTargets(ctx context.Context, req entity.GetChangedTargetsRequest, repo config.RepositoryConfig) ([]entity.GetChangedTargetsResponse, error)
+	SubmitTargetGraphJob(ctx context.Context, req entity.GetTargetGraphRequest, repo config.RepositoryConfig) (string, entity.JobStatus, error)
+	PollTargetGraphJob(ctx context.Context, token string) (entity.JobStatus, storage.GraphReader, error)
+	SubmitChangedTargetsJob(ctx context.Context, req entity.GetChangedTargetsRequest, repo config.RepositoryConfig) (string, entity.JobStatus, error)
+	PollChangedTargetsJob(ctx context.Context, token string) (entity.JobStatus, []entity.GetChangedTargetsResponse, error)
 }
 
 // NewController creates a new controller. appCtx is cancelled on process
@@ -68,14 +82,24 @@ func NewController(appCtx context.Context, p Params) Controller {
 	if maxMessageBytes <= 0 {
 		maxMessageBytes = config.DefaultMaxMessageBytes
 	}
+	jobHeartbeatInterval := p.JobHeartbeatInterval
+	if jobHeartbeatInterval <= 0 {
+		jobHeartbeatInterval = config.DefaultJobHeartbeatInterval
+	}
+	jobStorage := p.JobStorage
+	if jobStorage == nil {
+		jobStorage = p.Storage
+	}
 	return &controller{
-		logger:          p.Logger,
-		storage:         p.Storage,
-		orchestrator:    p.Orchestrator,
-		emitter:         emitter,
-		maxMessageBytes: maxMessageBytes,
-		graphConfig:     p.GraphConfig,
-		appCtx:          appCtx,
+		logger:               p.Logger,
+		storage:              p.Storage,
+		orchestrator:         p.Orchestrator,
+		emitter:              emitter,
+		maxMessageBytes:      maxMessageBytes,
+		graphConfig:          p.GraphConfig,
+		appCtx:               appCtx,
+		jobStorage:           jobStorage,
+		jobHeartbeatInterval: jobHeartbeatInterval,
 	}
 }
 

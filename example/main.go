@@ -101,11 +101,12 @@ func run() error {
 	// Controller (business logic). appCtx is forwarded so the controller's
 	// background goroutines are tied to process lifetime.
 	ctrl := controller.NewController(appCtx, controller.Params{
-		Logger:          logger,
-		Storage:         store,
-		Orchestrator:    orch,
-		MaxMessageBytes: cfg.Service.MaxMessageBytes,
-		GraphConfig:     cfg,
+		Logger:               logger,
+		Storage:              store,
+		Orchestrator:         orch,
+		MaxMessageBytes:      cfg.Service.MaxMessageBytes,
+		GraphConfig:          cfg,
+		JobHeartbeatInterval: cfg.Service.JobHeartbeatInterval,
 	})
 
 	h := handler.New(handler.Params{Logger: logger, Controller: ctrl, RepoConfig: cfg})
