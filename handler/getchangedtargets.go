@@ -77,43 +77,44 @@ func (h *handler) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream
 	return nil
 }
 
-// sendTrimmedChangedTargets streams responses to the client, filtering changed targets to those
-// within maxDist from any distance-0 seed when maxDist >= 0, stripping per-target
-// hash/tags/attributes per outputConfig's include_* flags, and pruning metadata mappings
-// whose IDs are no longer referenced. Each entity response is converted to proto at the
-// stream.Send boundary.
+// sendTrimmedChangedTargets streams each response to the client after trimChangedTargetsResponse.
 func sendTrimmedChangedTargets(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []entity.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) error {
-	stripFields := optimizedTargetNeedsStripping(outputConfig)
-	pruneMeta := metadataNeedsPruning(outputConfig)
 	for i := range responses {
-		protoResp := mapper.ChangedTargetsResponseToProto(&responses[i])
-		toSend := protoResp
-		switch item := protoResp.GetItem().(type) {
-		case *pb.GetChangedTargetsResponse_ChangedTargets:
-			if maxDist >= 0 || stripFields {
-				kept := item.ChangedTargets.GetChangedTargets()
-				if maxDist >= 0 {
-					kept = filterChangedTargetsByDistance(kept, maxDist)
-				}
-				kept = applyChangedTargetsOutputConfig(kept, outputConfig)
-				toSend = &pb.GetChangedTargetsResponse{
-					Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-						ChangedTargets: &pb.ChangedTargets{ChangedTargets: kept},
-					},
-				}
-			}
-		case *pb.GetChangedTargetsResponse_Metadata:
-			if pruneMeta {
-				toSend = &pb.GetChangedTargetsResponse{
-					Item: &pb.GetChangedTargetsResponse_Metadata{
-						Metadata: applyMetadataOutputConfig(item.Metadata, outputConfig),
-					},
-				}
-			}
-		}
-		if err := stream.Send(toSend); err != nil {
+		if err := stream.Send(trimChangedTargetsResponse(&responses[i], maxDist, outputConfig)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// trimChangedTargetsResponse converts resp to proto, filtering changed targets to those
+// within maxDist from any distance-0 seed when maxDist >= 0, stripping per-target
+// hash/tags/attributes per outputConfig's include_* flags, and pruning metadata mappings
+// whose IDs are no longer referenced.
+func trimChangedTargetsResponse(resp *entity.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) *pb.GetChangedTargetsResponse {
+	protoResp := mapper.ChangedTargetsResponseToProto(resp)
+	switch item := protoResp.GetItem().(type) {
+	case *pb.GetChangedTargetsResponse_ChangedTargets:
+		if maxDist >= 0 || optimizedTargetNeedsStripping(outputConfig) {
+			kept := item.ChangedTargets.GetChangedTargets()
+			if maxDist >= 0 {
+				kept = filterChangedTargetsByDistance(kept, maxDist)
+			}
+			kept = applyChangedTargetsOutputConfig(kept, outputConfig)
+			return &pb.GetChangedTargetsResponse{
+				Item: &pb.GetChangedTargetsResponse_ChangedTargets{
+					ChangedTargets: &pb.ChangedTargets{ChangedTargets: kept},
+				},
+			}
+		}
+	case *pb.GetChangedTargetsResponse_Metadata:
+		if metadataNeedsPruning(outputConfig) {
+			return &pb.GetChangedTargetsResponse{
+				Item: &pb.GetChangedTargetsResponse_Metadata{
+					Metadata: applyMetadataOutputConfig(item.Metadata, outputConfig),
+				},
+			}
+		}
+	}
+	return protoResp
 }

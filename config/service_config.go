@@ -14,6 +14,8 @@
 
 package config
 
+import "time"
+
 // ServiceConfig holds operational configuration for the Tango service.
 type ServiceConfig struct {
 	// MaxWorkerPoolSize is the max number of concurrent requests per repository.
@@ -26,7 +28,14 @@ type ServiceConfig struct {
 	// for worker checkouts.
 	WorkspacesRootPath string `yaml:"workspaces_root_path"`
 	MaxMessageBytes    int    `yaml:"max_message_bytes"` // max serialized bytes per streamed gRPC message; 0 → DefaultMaxMessageBytes
+	// JobHeartbeatInterval is the time between two writes of a running async job,
+	// and between two reads of a job that another job waits on. A running job with
+	// no write for 3 intervals has no live worker. 0 → DefaultJobHeartbeatInterval.
+	JobHeartbeatInterval time.Duration `yaml:"job_heartbeat_interval"`
 }
+
+// DefaultJobHeartbeatInterval is the fallback heartbeat interval of async jobs.
+const DefaultJobHeartbeatInterval = 5 * time.Second
 
 // DefaultMaxMessageBytes is the fallback max serialized size per streamed
 // message (~4.25 MB), well under the 64 MB default gRPC limit.

@@ -110,6 +110,12 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 	if config.Service.MaxMessageBytes <= 0 {
 		config.Service.MaxMessageBytes = DefaultMaxMessageBytes
 	}
+	if config.Service.JobHeartbeatInterval < 0 {
+		return nil, fmt.Errorf("service.job_heartbeat_interval must be >= 0, got %s", config.Service.JobHeartbeatInterval)
+	}
+	if config.Service.JobHeartbeatInterval == 0 {
+		config.Service.JobHeartbeatInterval = DefaultJobHeartbeatInterval
+	}
 
 	// --- graph config validation and defaults ---
 	if len(config.Graph) == 0 {

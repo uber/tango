@@ -89,14 +89,18 @@ func hashExcludeFilesRegex(excludeFilesRegex []string) string {
 	if len(excludeFilesRegex) == 0 {
 		return ""
 	}
+	h := md5.New()
+	writeExcludeFilesRegex(h, excludeFilesRegex)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func writeExcludeFilesRegex(h hash.Hash, excludeFilesRegex []string) {
 	sorted := make([]string, len(excludeFilesRegex))
 	copy(sorted, excludeFilesRegex)
 	sort.Strings(sorted)
-	h := md5.New()
 	for _, r := range sorted {
 		writeFramedString(h, r)
 	}
-	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func writeFramedString(h hash.Hash, value string) {

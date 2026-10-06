@@ -15,7 +15,7 @@ The handler is Tango's YARPC transport layer. It implements the generated `pb.Ta
 
 ## Collaborators
 
-- **`controller.Controller`** is the only business dependency. The handler calls `GetTargetGraph` and `GetChangedTargets` with entity requests and the resolved repository configuration, and sends each returned chunk back.
+- **`controller.Controller`** is the only business dependency. The handler calls `GetTargetGraph` and `GetChangedTargets` with entity requests and the resolved repository configuration, and sends each returned chunk back. For the job RPCs, it calls `SubmitTargetGraphJob` and `SubmitChangedTargetsJob` with the same inputs, and calls `PollTargetGraphJob` and `PollChangedTargetsJob` with the token. It filters each returned chunk and merges the chunks into one poll response.
 - **`config.RepositoryConfigProvider`** resolves the repository of each request. The handler rejects an unconfigured remote as a user error before it calls the controller, tags its metrics with the repository ID, and passes the resolved repository configuration to the controller.
 - **Protobuf types.** The handler is the only layer that speaks the generated service and message types.
 

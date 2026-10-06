@@ -83,8 +83,14 @@ type Op struct {
 // Complete records the finish histogram. e carries the repo tag (and any
 // other stable tags) baked in by the caller.
 func Begin(e *Emitter, op string, buckets tally.DurationBuckets) *Op {
+	return BeginAt(e, op, buckets, time.Now())
+}
+
+// BeginAt is Begin for an operation that started at start. It serves a caller
+// that learns the tags of e only after the work.
+func BeginAt(e *Emitter, op string, buckets tally.DurationBuckets, start time.Time) *Op {
 	e.Counter(op, "start").Inc(1)
-	return &Op{emitter: e, op: op, buckets: buckets, start: time.Now()}
+	return &Op{emitter: e, op: op, buckets: buckets, start: start}
 }
 
 // Complete records the finish duration histogram tagged with the outcome.

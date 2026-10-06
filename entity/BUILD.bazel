@@ -7,12 +7,16 @@ go_library(
         "change_type.go",
         "changed_targets.go",
         "computation_strategy.go",
+        "job_status.go",
         "optimized_target.go",
         "target_graph.go",
     ],
     importpath = "github.com/uber/tango/entity",
     visibility = ["//visibility:public"],
-    deps = ["//internal/streaming/wire"],
+    deps = [
+        "//core/errors",
+        "//internal/streaming/wire",
+    ],
 )
 
 go_test(
