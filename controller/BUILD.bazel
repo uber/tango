@@ -38,6 +38,7 @@ go_library(
 
 go_test(
     name = "controller_test",
+    size = "large",
     srcs = [
         "controller_test.go",
         "distance_filter_test.go",
