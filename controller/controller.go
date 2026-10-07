@@ -17,9 +17,11 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/observability/metrics"
 	"github.com/uber/tango/orchestrator"
@@ -28,23 +30,35 @@ import (
 	"go.uber.org/zap"
 )
 
+const unknownRepositoryMetricLabel = "unknown"
+
 // Params are the parameters for the controller.
 type Params struct {
 	fx.In
 	Logger          *zap.Logger
 	Storage         storage.Storage
 	Orchestrator    orchestrator.Orchestrator
-	Scope           tally.Scope                     `optional:"true"`
-	MaxMessageBytes int                             `optional:"true"`
-	RepoConfig      config.RepositoryConfigProvider `optional:"true"`
-	// GraphFormat mirrors ServiceConfig.GraphFormat; empty defaults to gob.
-	// It must match the orchestrator's configured format — both are wired
-	// from the same ServiceConfig.
-	GraphFormat string `optional:"true"`
-	// ShadowCompare mirrors ServiceConfig.ShadowCompare: with the TGB format,
-	// run the incumbent targetdiff comparison in the background on every
-	// GetChangedTargets and emit a mismatch metric on divergence.
-	ShadowCompare bool `optional:"true"`
+	Scope           tally.Scope `optional:"true"`
+	MaxMessageBytes int         `optional:"true"`
+	RepoConfig      config.RepositoryConfigProvider
+	GraphConfig     config.GraphConfigProvider `optional:"true"`
+}
+
+// resolveRequestRepository returns the configured repository and metric label
+// for a validated request. Invalid requests retain the common unknown label and
+// their existing error; valid requests must exactly match the configured
+// repository allowlist before controller cache I/O.
+func (c *controller) resolveRequestRepository(remote string, requestErr error) (config.RepositoryConfig, string, error) {
+	if requestErr != nil {
+		return config.RepositoryConfig{}, unknownRepositoryMetricLabel, requestErr
+	}
+	repo, ok := c.repoConfig.GetRepositoryConfig(remote)
+	if !ok {
+		return config.RepositoryConfig{}, unknownRepositoryMetricLabel, tangoerrors.NewUser(
+			fmt.Errorf("repository remote %q is not configured", remote),
+		)
+	}
+	return repo, repo.RepositoryID, nil
 }
 
 type controller struct {
@@ -54,8 +68,7 @@ type controller struct {
 	emitter         *metrics.Emitter
 	maxMessageBytes int
 	repoConfig      config.RepositoryConfigProvider
-	graphFormat     string
-	shadowCompare   bool
+	graphConfig     config.GraphConfigProvider
 
 	// appCtx is the application lifetime; cancel it on process shutdown.
 	// Used by linkRequestCtx and any fire-and-forget goroutines so they
@@ -71,10 +84,6 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 	if maxMessageBytes <= 0 {
 		maxMessageBytes = config.DefaultMaxMessageBytes
 	}
-	graphFormat := p.GraphFormat
-	if graphFormat == "" {
-		graphFormat = config.GraphFormatGob
-	}
 	return &controller{
 		logger:          p.Logger,
 		storage:         p.Storage,
@@ -82,8 +91,7 @@ func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
 		emitter:         emitter,
 		maxMessageBytes: maxMessageBytes,
 		repoConfig:      p.RepoConfig,
-		graphFormat:     graphFormat,
-		shadowCompare:   p.ShadowCompare,
+		graphConfig:     p.GraphConfig,
 		appCtx:          appCtx,
 	}
 }
@@ -108,4 +116,31 @@ func (c *controller) linkRequestCtx(reqCtx context.Context) (context.Context, co
 		stop()
 		cancel(nil)
 	}
+}
+
+// graphFormatFor returns the configured graph format for the given remote,
+// defaulting to gob when no GraphConfigProvider is set.
+func (c *controller) graphFormatFor(remote string) (string, error) {
+	if c.graphConfig == nil {
+		return config.GraphFormatGob, nil
+	}
+	gc, err := c.graphConfig.GetGraphConfig(remote)
+	if err != nil {
+		return "", err
+	}
+	return gc.Format, nil
+}
+
+// shadowCompareFor returns whether shadow comparison is enabled for the given
+// remote. Returns false when no GraphConfigProvider is set or the remote has
+// no config entry.
+func (c *controller) shadowCompareFor(remote string) bool {
+	if c.graphConfig == nil {
+		return false
+	}
+	gc, err := c.graphConfig.GetGraphConfig(remote)
+	if err != nil {
+		return false
+	}
+	return gc.ShadowCompare
 }

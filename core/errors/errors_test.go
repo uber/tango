@@ -34,6 +34,11 @@ func TestNewError_Constructors(t *testing.T) {
 			newErr:   NewInfraRetryable,
 			wantCode: ErrorInfraRetryable,
 		},
+		{
+			name:     "cancelled",
+			newErr:   NewCancelled,
+			wantCode: ErrorCancelled,
+		},
 	}
 
 	for _, tt := range tests {

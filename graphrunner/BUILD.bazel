@@ -26,6 +26,7 @@ go_test(
     srcs = ["native_test.go"],
     embed = [":graphrunner"],
     deps = [
+        "//config",
         "//core/bazel",
         "//core/bazel/bazelmock",
         "//core/git/gitmock",

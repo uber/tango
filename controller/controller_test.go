@@ -19,11 +19,37 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	tangoerrors "github.com/uber/tango/core/errors"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
+
+type rejectAllRepositoryConfigProvider struct{}
+
+func (rejectAllRepositoryConfigProvider) GetRepositoryConfig(string) (config.RepositoryConfig, bool) {
+	return config.RepositoryConfig{}, false
+}
+
+func TestResolveRequestRepository(t *testing.T) {
+	c := &controller{repoConfig: rejectAllRepositoryConfigProvider{}}
+
+	t.Run("request error uses unknown repository", func(t *testing.T) {
+		repo, label, err := c.resolveRequestRepository("ignored", assert.AnError)
+		assert.Empty(t, repo)
+		assert.Equal(t, unknownRepositoryMetricLabel, label)
+		assert.ErrorIs(t, err, assert.AnError)
+	})
+
+	t.Run("plain remote", func(t *testing.T) {
+		_, label, err := c.resolveRequestRepository("git@github.com:other/repo.git", nil)
+		require.Error(t, err)
+		assert.Equal(t, unknownRepositoryMetricLabel, label)
+		assert.Equal(t, tangoerrors.ErrorUser, tangoerrors.GetErrorCode(err))
+	})
+}
 
 // TestNewController_StoresAppContext verifies the caller-supplied context is
 // retained and is the one observed by background goroutines.
@@ -33,6 +59,7 @@ func TestNewController_StoresAppContext(t *testing.T) {
 	defer cancel()
 
 	c := NewController(appCtx, Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zap.NewNop(),
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 	}).(*controller)

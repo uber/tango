@@ -78,6 +78,13 @@ type HashConfig struct {
 	// AllTargetsFiles lists repo-relative paths whose hashes should be
 	// extracted from KnownSourceHashes into Result.AllTargetsFileHashes.
 	AllTargetsFiles []string
+	// RepoMarkerHashes maps canonical bzlmod repo names to repo rule input
+	// hashes read from Bazel's marker files ($(output_base)/external/@repo.marker).
+	// Used by HashExternalTargetsBzlmod to pre-hash external source files
+	// without reading their content from disk. The marker hash changes on any
+	// dependency upgrade, so repos whose canonical name stays the same across
+	// versions (e.g. "protobuf+") are still correctly detected as changed.
+	RepoMarkerHashes map[string][]byte
 }
 
 // Target contains information about the hash for a single target
@@ -155,7 +162,7 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 	result, err := fromProto(ctx, r, &diskHashHelper{
 		workspaceroot:   workspaceroot,
 		knownFileHashes: hashConfig.KnownSourceHashes,
-	}, workspaceroot, fullHashRepos, set.NewSet(hashConfig.SequentialHashTargets...), excludedRegex, hashConfig.UseBzlmod)
+	}, workspaceroot, fullHashRepos, set.NewSet(hashConfig.SequentialHashTargets...), excludedRegex, hashConfig.UseBzlmod, hashConfig.RepoMarkerHashes)
 	if err != nil {
 		return result, err
 	}
@@ -176,7 +183,7 @@ func FromProto(ctx context.Context, r *buildpb.QueryResult, workspaceroot string
 
 // FromProtoNoHash calculates a DAG graph based on a query result. It does not calculate hashes for targets.
 func FromProtoNoHash(ctx context.Context, r *buildpb.QueryResult) (Result, error) {
-	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false)
+	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false, nil)
 }
 
 // for external targets, url and urls attributes could cause non-deterministic hash values,
@@ -386,6 +393,88 @@ func HashExternalTargets(ctx context.Context, r *buildpb.QueryResult, targets ma
 	return nil
 }
 
+// bzlmodRepoName extracts the canonical bzlmod repo name from a target label.
+// For "@@rules_python++pip+foo//pkg:target" it returns "rules_python++pip+foo".
+// Returns "" for non-bzlmod targets.
+func bzlmodRepoName(targetName string) string {
+	if !strings.HasPrefix(targetName, "@@") {
+		return ""
+	}
+	// Strip leading "@@", then find "//" separator.
+	rest := targetName[2:]
+	idx := strings.Index(rest, "//")
+	if idx <= 0 {
+		return ""
+	}
+	return rest[:idx]
+}
+
+// shouldCollapseToBzlmodRepo reports whether a bzlmod external target should
+// be pre-hashed using the repo's marker file hash instead of hashing its
+// file content during the DFS. Only source and generated files are collapsed;
+// rule targets are left alone so dependency edges are preserved.
+func shouldCollapseToBzlmodRepo(target *Target, repo string, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp) bool {
+	if target == nil {
+		return false
+	}
+	if repo == "" || fullHashRepos.Contains(repo) {
+		return false
+	}
+	if target.RuleType != SourceFileType && target.RuleType != GeneratedFileType {
+		return false
+	}
+	if target.Hash != nil {
+		return false
+	}
+	if isExcluded(target.Name, excludedRegex) {
+		return false
+	}
+	return true
+}
+
+// HashExternalTargetsBzlmod pre-hashes bzlmod external source and
+// generated file targets using hashes derived from Bazel's marker files.
+// This is the bzlmod equivalent of legacy WORKSPACE HashExternalTargets.
+//
+// Marker files track both the repo rule's declarative inputs (version,
+// URL, integrity) and per-file SHA-256 content hashes for local patches
+// applied via single_version_override. readMarkerHash hashes all stable
+// lines (skipping ENV) so the collapsed hash changes on dependency
+// upgrades AND patch content modifications.
+//
+// Every external repo referenced in the query result should have a
+// marker file after bazel query completes. Returns an error if a
+// collapsible repo is missing its marker.
+func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set[string], excludedRegex []*regexp.Regexp, repoMarkerHashes map[string][]byte) error {
+	if len(repoMarkerHashes) == 0 {
+		return nil
+	}
+
+	repoHashes := make(map[string][]byte)
+	for _, target := range targets {
+		repo := bzlmodRepoName(target.Name)
+		if !shouldCollapseToBzlmodRepo(target, repo, fullHashRepos, excludedRegex) {
+			continue
+		}
+
+		h, ok := repoHashes[repo]
+		if !ok {
+			markerHash, hasMarker := repoMarkerHashes[repo]
+			if !hasMarker || len(markerHash) == 0 {
+				return fmt.Errorf("bzlmod repo %q has targets in query but no marker file", repo)
+			}
+			rh := newHash()
+			rh.Write(markerHash)
+			h = rh.Sum(nil)
+			repoHashes[repo] = h
+		}
+
+		target.Hash = h
+		target.HashWithoutDeps = h
+	}
+	return nil
+}
+
 // GetTopologicalRootsAndIdentifyBuildableRoots returns a list of topological roots and marks buildable roots in the target graph
 func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]*Target) []string {
 	// get targets that cannot be root, i.e. dependencies of some other targets
@@ -419,7 +508,7 @@ func GetTopologicalRootsAndIdentifyBuildableRoots(targets map[string]*Target) []
 	return roots
 }
 
-func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], sequentialHashTargets set.Set[string], excludedRegex []*regexp.Regexp, useBzlmod bool) (Result, error) {
+func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher, workspaceroot string, fullHashRepos set.Set[string], sequentialHashTargets set.Set[string], excludedRegex []*regexp.Regexp, useBzlmod bool, repoMarkerHashes map[string][]byte) (Result, error) {
 	warns := make(map[string]error)
 	// Build target graph with dependencies, but without hash and root information.
 	targets, err := GetInternalTargetsWithoutHashAndRootInfo(ctx, r)
@@ -427,13 +516,22 @@ func fromProto(ctx context.Context, r *buildpb.QueryResult, hasher SourceHasher,
 		return EmptyResult(), err
 	}
 
-	// add external rule targets (//external:*) to the same map and hash them
-	// no need for bzlmod because there's no //external:* rules, we will hash external source as is
 	if !useBzlmod {
+		// Legacy WORKSPACE: add external rule targets (//external:*) to the
+		// map and hash them. No //external:* rules exist under bzlmod.
 		if err := HashExternalTargets(ctx, r, targets, hasher, workspaceroot, fullHashRepos, warns, useBzlmod); err != nil {
 			return EmptyResult(), err
 		}
+	} else {
+		// Bzlmod: collapse external source/generated file targets using
+		// Bazel marker file hashes. Avoids visiting millions of individual
+		// pip-wheel files during the DFS — the bzlmod equivalent of legacy
+		// WORKSPACE //external:repo collapsing.
+		if err := HashExternalTargetsBzlmod(targets, fullHashRepos, excludedRegex, repoMarkerHashes); err != nil {
+			return EmptyResult(), err
+		}
 	}
+
 	// get topological roots and update buildable roots info
 	roots := GetTopologicalRootsAndIdentifyBuildableRoots(targets)
 

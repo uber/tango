@@ -16,6 +16,7 @@ package graphrunner
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/uber-go/tally"
@@ -96,12 +97,29 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	// mutate the shared configuration's backing array.
 	excludedRegex := append([]string(nil), g.config.ExcludedFiles...)
 	excludedRegex = append(excludedRegex, g.extraExcludedFiles...)
+
+	// Read marker files for bzlmod repos so the collapse uses content-aware
+	// hashes instead of just the repo name string.
+	var repoMarkerHashes map[string][]byte
+	if bzlmodEnabled {
+		markerStart := time.Now()
+		repoMarkerHashes, err = targethasher.ReadRepoMarkerHashes(ctx, ws.Path(), g.config.BazelCommandPath)
+		g.emitter.DurationHistogram(_opCompute, "marker_read_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(markerStart))
+		if err != nil {
+			return targethasher.EmptyResult(), fmt.Errorf("read repo marker hashes: %w", err)
+		}
+		if len(repoMarkerHashes) == 0 {
+			return targethasher.EmptyResult(), fmt.Errorf("bzlmod enabled but no repo marker hashes found")
+		}
+	}
+
 	hashConfig := targethasher.HashConfig{
 		KnownSourceHashes: knownSourceHashes,
 		FullHashRepos:     g.config.FullHashRepos,
 		ExcludedRegex:     excludedRegex,
 		UseBzlmod:         bzlmodEnabled,
 		AllTargetsFiles:   g.config.AllTargetsFiles,
+		RepoMarkerHashes:  repoMarkerHashes,
 	}
 
 	hashStart := time.Now()

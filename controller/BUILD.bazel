@@ -26,7 +26,6 @@ go_library(
         "//internal/targetdiff",
         "//internal/tgb",
         "//internal/tgbdiff",
-        "//internal/url",
         "//observability/metrics",
         "//orchestrator",
         "//tangopb",

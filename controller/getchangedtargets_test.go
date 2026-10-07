@@ -226,10 +226,11 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 	firstGraph := []entity.GetTargetGraphResponse{
 		{Targets: []entity.OptimizedTarget{
 			{ID: 1, Hash: "h1", RuleType: 100},
-			{ID: 2, Hash: "h2", RuleType: 100},
+			{ID: 2, Hash: "h2-old", RuleType: 100},
+			{ID: 5, Hash: "h5", RuleType: 100},
 		}},
 		{Metadata: &entity.Metadata{
-			TargetIDMapping:      map[int32]string{1: "//app:a", 2: "//app:b"},
+			TargetIDMapping:      map[int32]string{1: "//app:a", 2: "//app:b", 5: "//legacy:deleted"},
 			RuleTypeMapping:      map[int32]string{100: "go_library"},
 			AllTargetsFileHashes: map[string]string{".bazelrc": "old-hash"},
 		}},
@@ -237,7 +238,7 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 	secondGraph := []entity.GetTargetGraphResponse{
 		{Targets: []entity.OptimizedTarget{
 			{ID: 1, Hash: "h1", RuleType: 100},
-			{ID: 2, Hash: "h2", RuleType: 100},
+			{ID: 2, Hash: "h2-new", RuleType: 100},
 			{ID: 3, Hash: "h3", RuleType: 100},
 			{ID: 4, Hash: "h4", RuleType: 100, DirectDependencies: []int32{3}},
 		}},
@@ -251,18 +252,54 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 	responses, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), firstGraph, secondGraph, nil)
 	require.NoError(t, err)
 
-	var totalChanged int
+	var metadata *entity.Metadata
 	for _, resp := range responses {
-		totalChanged += len(resp.ChangedTargets)
-	}
-	assert.Equal(t, 4, totalChanged, "all targets from second graph should be reported as changed")
-	for _, resp := range responses {
-		for _, ct := range resp.ChangedTargets {
-			assert.Equal(t, entity.ChangeTypeChanged, ct.ChangeType)
-			assert.Equal(t, int32(0), ct.Distance)
-			assert.NotNil(t, ct.NewTarget)
+		if resp.Metadata != nil {
+			metadata = resp.Metadata
 		}
 	}
+	require.NotNil(t, metadata)
+
+	byName := make(map[string]*entity.ChangedTarget)
+	for responseIndex := range responses {
+		for targetIndex := range responses[responseIndex].ChangedTargets {
+			changed := &responses[responseIndex].ChangedTargets[targetIndex]
+			target := changed.NewTarget
+			if target == nil {
+				target = changed.OldTarget
+			}
+			require.NotNil(t, target)
+			name := metadata.TargetIDMapping[target.ID]
+			require.NotEmpty(t, name)
+			byName[name] = changed
+		}
+	}
+	require.Len(t, byName, 5)
+
+	assertChange := func(name string, wantType entity.ChangeType, wantOld, wantNew bool) {
+		t.Helper()
+		changed := byName[name]
+		require.NotNil(t, changed, name)
+		assert.Equal(t, wantType, changed.ChangeType, name)
+		assert.Equal(t, int32(0), changed.Distance, name)
+		if wantOld {
+			require.NotNil(t, changed.OldTarget, name)
+			assert.Equal(t, name, metadata.TargetIDMapping[changed.OldTarget.ID])
+		} else {
+			assert.Nil(t, changed.OldTarget, name)
+		}
+		if wantNew {
+			require.NotNil(t, changed.NewTarget, name)
+			assert.Equal(t, name, metadata.TargetIDMapping[changed.NewTarget.ID])
+		} else {
+			assert.Nil(t, changed.NewTarget, name)
+		}
+	}
+	assertChange("//app:a", entity.ChangeTypeChanged, true, true)
+	assertChange("//app:b", entity.ChangeTypeChanged, true, true)
+	assertChange("//app:c", entity.ChangeTypeNew, false, true)
+	assertChange("//lib:util", entity.ChangeTypeNew, false, true)
+	assertChange("//legacy:deleted", entity.ChangeTypeDeleted, true, false)
 }
 
 func TestCompareTargetGraphs_AllTargetsFileNoTrigger(t *testing.T) {
@@ -303,7 +340,7 @@ func TestGetChangedTargets_ValidationError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-	c := NewController(context.Background(), Params{Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
+	c := NewController(context.Background(), Params{RepoConfig: allowAnyRepositoryConfigProvider{}, Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
 
 	err := c.GetChangedTargets(nil, stream)
 	require.Error(t, err)
@@ -336,6 +373,7 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -367,6 +405,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 		Return(storage.DownloadResponse{}, injected).Times(2)
 
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zap.NewNop(),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -392,7 +431,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
 
-		val, err := readTreehash(t.Context(), st, bd, metrics.Nop(), opGetChangedTargets)
+		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.GetRemote()), metrics.Nop(), opGetChangedTargets)
 		require.NoError(t, err)
 		assert.Empty(t, val)
 	})
@@ -404,7 +443,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{}, injected)
 
-		val, err := readTreehash(t.Context(), st, bd, metrics.Nop(), opGetChangedTargets)
+		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.GetRemote()), metrics.Nop(), opGetChangedTargets)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
 		assert.Empty(t, val)
@@ -416,7 +455,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("deadbeef"))}, nil)
 
-		val, err := readTreehash(t.Context(), st, bd, metrics.Nop(), opGetChangedTargets)
+		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.GetRemote()), metrics.Nop(), opGetChangedTargets)
 		require.NoError(t, err)
 		assert.Equal(t, "deadbeef", val)
 	})
@@ -453,6 +492,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	})
 
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -548,6 +588,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	})
 
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -642,6 +683,7 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
 	c := NewController(appCtx, Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -1135,6 +1177,7 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	}).Times(2)
 
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -1408,7 +1451,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		c.storage = st
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, testRepositoryID("repo:go-code"), -1, time.Now())
 		require.NoError(t, err)
 		assert.False(t, served, "a cache miss must not be served")
 	})
@@ -1447,7 +1490,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		// No Send expectation: a corrupt blob must not send anything to the client.
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, testRepositoryID("repo:go-code"), -1, time.Now())
 		require.NoError(t, err)
 		assert.False(t, served, "a corrupt blob must trigger recompute, not a partial send")
 	})
@@ -1481,7 +1524,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, testRepositoryID("repo:go-code"), -1, time.Now())
 		require.NoError(t, err)
 		assert.True(t, served, "a clean cache hit must be served")
 	})
@@ -1508,7 +1551,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest())
+		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
 		require.NoError(t, err)
 		require.Len(t, first.chunks, 1)
 		require.Len(t, second.chunks, 1)
@@ -1532,7 +1575,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest())
+		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
 		assert.Zero(t, first)
@@ -1553,7 +1596,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest())
+		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
 		require.Error(t, err)
 	})
 
@@ -1568,7 +1611,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest())
+		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
 		require.Error(t, err)
 	})
 }
@@ -1651,37 +1694,29 @@ type fakeRepoConfigProvider map[string]config.RepositoryConfig
 
 func (f fakeRepoConfigProvider) GetRepositoryConfig(remote string) (config.RepositoryConfig, bool) {
 	cfg, ok := f[remote]
+	if ok && cfg.RepositoryID == "" {
+		cfg.RepositoryID = "test-repository"
+	}
 	return cfg, ok
 }
 
 func TestSeedAttributesFor(t *testing.T) {
 	t.Run("no repo config provider means no filtering", func(t *testing.T) {
-		c := newTestController(zaptest.NewLogger(t))
-		assert.Nil(t, c.seedAttributesFor("some-remote"))
+		assert.Nil(t, seedAttributesFor(config.RepositoryConfig{}))
 	})
 
 	t.Run("remote not found means no filtering", func(t *testing.T) {
-		c := newTestController(zaptest.NewLogger(t))
-		c.repoConfig = fakeRepoConfigProvider{}
-		assert.Nil(t, c.seedAttributesFor("some-remote"))
+		assert.Nil(t, seedAttributesFor(config.RepositoryConfig{}))
 	})
 
 	t.Run("configured remote with no seed_attributes means no filtering", func(t *testing.T) {
-		c := newTestController(zaptest.NewLogger(t))
-		c.repoConfig = fakeRepoConfigProvider{
-			"some-remote": config.RepositoryConfig{Remote: "some-remote"},
-		}
-		assert.Nil(t, c.seedAttributesFor("some-remote"))
+		assert.Nil(t, seedAttributesFor(config.RepositoryConfig{Remote: "some-remote"}))
 	})
 
 	t.Run("configured remote with seed_attributes returns allowlist", func(t *testing.T) {
-		c := newTestController(zaptest.NewLogger(t))
-		c.repoConfig = fakeRepoConfigProvider{
-			"some-remote": config.RepositoryConfig{
-				Remote:         "some-remote",
-				SeedAttributes: []string{"size", "timeout"},
-			},
-		}
-		assert.Equal(t, map[string]bool{"size": true, "timeout": true}, c.seedAttributesFor("some-remote"))
+		assert.Equal(t, map[string]bool{"size": true, "timeout": true}, seedAttributesFor(config.RepositoryConfig{
+			Remote:         "some-remote",
+			SeedAttributes: []string{"size", "timeout"},
+		}))
 	})
 }

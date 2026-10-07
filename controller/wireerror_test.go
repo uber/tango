@@ -89,7 +89,8 @@ func TestGetTargetGraph_ValidationError_WiresTangoError(t *testing.T) {
 	stream.EXPECT().Context().Return(context.Background())
 
 	c := NewController(context.Background(), Params{
-		Logger: zaptest.NewLogger(t),
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
 	})
 
 	// Missing BaseSha triggers a validation error classified as ERROR_USER.
@@ -117,7 +118,8 @@ func TestGetChangedTargets_ValidationError_WiresTangoError(t *testing.T) {
 	stream.EXPECT().Context().Return(context.Background()).AnyTimes()
 
 	c := NewController(context.Background(), Params{
-		Logger: zaptest.NewLogger(t),
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
 	})
 
 	// Missing first revision triggers validation error classified as ERROR_USER.
@@ -145,8 +147,9 @@ func TestGetTargetGraph_InfraError_WiresTangoError(t *testing.T) {
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, errors.New("disk on fire"))
 
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    store,
 	})
 
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{

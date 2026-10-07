@@ -20,6 +20,7 @@ The server reads [`tango-config.yaml`](tango-config.yaml). Unknown fields are re
 | Field | Required/default | Description |
 |---|---|---|
 | `repository[].remote` | Required | URL Tango clones and uses to look up this entry. |
+| `repository[].repository_id` | Required | Operator-provided safe name used for metrics, workspace directories, and cache-key namespaces. It must uniquely identify the repository and be unique across Tango installations. |
 | `repository[].full_hash_repos` | Optional; defaults to `[]` | External repositories whose individual files should be hashed instead of sharing the repository-rule hash. The main repository is always fully hashed. |
 | `repository[].excluded_files` | Optional; defaults to `[]` | Regular expressions for target labels to exclude from the hashed graph. |
 | `repository[].bzlmod_enabled` | Optional; defaults to `true` | Whether the repository uses Bzlmod. Set to `false` for legacy WORKSPACE dependency resolution. |

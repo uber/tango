@@ -24,10 +24,10 @@ import (
 	"time"
 
 	"github.com/uber-go/tally"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
-	"github.com/uber/tango/internal/url"
 	"github.com/uber/tango/observability/metrics"
 	"go.uber.org/zap"
 )
@@ -49,6 +49,7 @@ type repoManager struct {
 	repoManagerClonePath string
 	logger               *zap.Logger
 	emitter              *metrics.Emitter
+	repoConfig           config.RepositoryConfigProvider
 	poolSize             int
 	restoreWorker        func(context.Context, string) error
 
@@ -90,6 +91,9 @@ type Params struct {
 	Logger               *zap.Logger
 	RepoManagerClonePath string
 	PoolSize             int
+	// RepoConfig is the authoritative repository allowlist and supplies the
+	// configured safe repository ID.
+	RepoConfig config.RepositoryConfigProvider
 	// Scope is the tally scope for metrics. A nil scope disables metrics
 	// (defaults to a no-op). Metrics nest under <scope>.repo_manager.*.
 	Scope tally.Scope
@@ -104,11 +108,16 @@ func NewRepoManager(appCtx context.Context, p Params) (RepoManager, error) {
 	if p.PoolSize <= 0 {
 		return nil, fmt.Errorf("pool size must be > 0, got %d", p.PoolSize)
 	}
+	clonePath, err := filepath.Abs(p.RepoManagerClonePath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve repo manager clone path: %w", err)
+	}
 	return &repoManager{
 		git:                  p.Git,
-		repoManagerClonePath: p.RepoManagerClonePath,
+		repoManagerClonePath: clonePath,
 		logger:               p.Logger,
 		emitter:              metrics.New(p.Scope).SubScope("repo_manager"),
+		repoConfig:           p.RepoConfig,
 		poolSize:             p.PoolSize,
 		restoreWorker:        git.RestoreWorktree,
 		pools:                make(map[string]*workerPool),
@@ -148,8 +157,12 @@ func (r *repoManager) poolFor(repo string) *workerPool {
 // Lease borrows a worker workspace from the pool.
 // If all workers are leased, it blocks until one is returned or ctx is cancelled.
 func (r *repoManager) Lease(ctx context.Context, desc entity.BuildDescription) (_ workspace.Workspace, retErr error) {
-	repo := url.ToShortRemote(desc.Remote)
-	e := r.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
+	repoCfg, ok := r.repoConfig.GetRepositoryConfig(desc.Remote)
+	if !ok {
+		return nil, fmt.Errorf("repository remote %q is not configured", desc.Remote)
+	}
+	repo := repoCfg.RepositoryID
+	e := r.emitter.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID})
 	op := metrics.Begin(e, _opLease, metrics.SlowDurationBuckets)
 	defer func() { op.Complete(retErr) }()
 

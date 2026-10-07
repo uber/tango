@@ -81,6 +81,7 @@ func run() error {
 		Logger:               logger,
 		RepoManagerClonePath: repoManagerClonePath,
 		PoolSize:             cfg.Service.MaxWorkerPoolSize,
+		RepoConfig:           cfg,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create repo manager: %w", err)
@@ -104,8 +105,7 @@ func run() error {
 		Orchestrator:    orch,
 		MaxMessageBytes: cfg.Service.MaxMessageBytes,
 		RepoConfig:      cfg,
-		GraphFormat:     cfg.Service.GraphFormat,
-		ShadowCompare:   cfg.Service.ShadowCompare,
+		GraphConfig:     cfg,
 	})
 
 	// YARPC transports and dispatcher

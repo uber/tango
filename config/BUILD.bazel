@@ -4,6 +4,7 @@ go_library(
     name = "config",
     srcs = [
         "config.go",
+        "graph_config.go",
         "repository_config.go",
         "service_config.go",
         "storage_config.go",

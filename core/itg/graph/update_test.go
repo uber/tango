@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/targethasher"
+	"pgregory.net/rapid"
 )
 
 // fakeSourceHasher is a test double for targethasher.SourceHasher.
@@ -113,6 +114,47 @@ func TestComputeAvailableHashes(t *testing.T) {
 		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
 		assert.NotNil(t, targets[name].HashWithoutDeps, "rule should have HashWithoutDeps after hashing")
 		assert.Nil(t, targets[name].Hash, "full hash is not computed here — deps are needed")
+	})
+
+	t.Run("tags order does not affect rule HashWithoutDeps", func(t *testing.T) {
+		t.Parallel()
+		name := "//pkg:lib"
+		ruleName := name
+		ruleClass := "go_library"
+		tagsAttr := func(tags []string) *buildpb.Attribute {
+			typ := buildpb.Attribute_STRING_LIST
+			n := "tags"
+			return &buildpb.Attribute{Name: &n, Type: &typ, StringListValue: tags}
+		}
+
+		forward := map[string]*targethasher.Target{
+			name: {
+				Name:     name,
+				RuleType: "go_library",
+				Rule: &buildpb.Rule{
+					Name:      &ruleName,
+					RuleClass: &ruleClass,
+					Attribute: []*buildpb.Attribute{tagsAttr([]string{"a", "b"})},
+				},
+			},
+		}
+		reversed := map[string]*targethasher.Target{
+			name: {
+				Name:     name,
+				RuleType: "go_library",
+				Rule: &buildpb.Rule{
+					Name:      &ruleName,
+					RuleClass: &ruleClass,
+					Attribute: []*buildpb.Attribute{tagsAttr([]string{"b", "a"})},
+				},
+			},
+		}
+
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, forward))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, reversed))
+
+		assert.Equal(t, forward[name].HashWithoutDeps, reversed[name].HashWithoutDeps,
+			"tags=[a,b] and tags=[b,a] should hash identically")
 	})
 
 	t.Run("source hasher error is propagated", func(t *testing.T) {
@@ -231,4 +273,152 @@ func TestComputeHashes(t *testing.T) {
 		h.Write(depHash)
 		assert.Equal(t, h.Sum(nil), got)
 	})
+}
+
+// --- UpdateGraph: external rule target dep preservation ---
+
+func TestUpdateGraphPreservesExternalRuleTargetDeps(t *testing.T) {
+	t.Parallel()
+
+	t.Run("carried-over external rule target keeps its dependency edges", func(t *testing.T) {
+		t.Parallel()
+		g := OptimizeGraph(map[string]*targethasher.Target{
+			"//pkg:dep": {Name: "//pkg:dep", RuleType: "go_library", HashWithoutDeps: []byte{0x01}, Hash: []byte{0x01}},
+			"//external:repo": {
+				Name:            "//external:repo",
+				RuleType:        targethasher.ExternalRuleType,
+				Deps:            []string{"//pkg:dep"},
+				Hash:            []byte{0xCA, 0xFE},
+				HashWithoutDeps: []byte{0xCA, 0xFE},
+			},
+		})
+		depID := g.TargetNameToID["//pkg:dep"]
+		externalID := g.TargetNameToID["//external:repo"]
+		require.True(t, g.OptimizedTargets[externalID].Deps.Contains(depID),
+			"test setup: external target should start with the dep edge")
+
+		// A query result with no targets at all: //external:repo is not
+		// rediscovered fresh, so UpdateGraph must reconstruct it from
+		// g.ExternalRuleTargets rather than dropping it.
+		err := g.UpdateGraph(context.Background(), &fakeSourceHasher{}, UpdateGraphInput{
+			QueryResult: &buildpb.QueryResult{},
+		})
+		require.NoError(t, err)
+
+		assert.True(t, g.OptimizedTargets[externalID].Deps.Contains(depID),
+			"external rule target should keep its dependency edge after being carried over unchanged")
+	})
+
+	t.Run("carried-over external rule target with no deps stays empty without error", func(t *testing.T) {
+		t.Parallel()
+		g := OptimizeGraph(map[string]*targethasher.Target{
+			"//external:repo": {
+				Name:            "//external:repo",
+				RuleType:        targethasher.ExternalRuleType,
+				Hash:            []byte{0xCA, 0xFE},
+				HashWithoutDeps: []byte{0xCA, 0xFE},
+			},
+		})
+		externalID := g.TargetNameToID["//external:repo"]
+
+		err := g.UpdateGraph(context.Background(), &fakeSourceHasher{}, UpdateGraphInput{
+			QueryResult: &buildpb.QueryResult{},
+		})
+		require.NoError(t, err)
+
+		assert.Empty(t, g.OptimizedTargets[externalID].Deps)
+	})
+}
+
+func TestComputeInvalidatedHashesCycleOrderInvariance(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		newTargets func() map[string]*targethasher.Target
+		fullRoot   string
+	}{
+		{
+			name: "rooted cycle matches full recomputation",
+			newTargets: func() map[string]*targethasher.Target {
+				return map[string]*targethasher.Target{
+					"//pkg:a": {
+						Name:            "//pkg:a",
+						RuleType:        "go_library",
+						HashWithoutDeps: []byte("a"),
+						Deps:            []string{"//pkg:b"},
+					},
+					"//pkg:b": {
+						Name:            "//pkg:b",
+						RuleType:        "go_library",
+						HashWithoutDeps: []byte("b"),
+						Deps:            []string{"//pkg:a"},
+					},
+					"//pkg:root": {
+						Name:            "//pkg:root",
+						RuleType:        "go_library",
+						HashWithoutDeps: []byte("root"),
+						Deps:            []string{"//pkg:b"},
+					},
+				}
+			},
+			fullRoot: "//pkg:root",
+		},
+		{
+			name: "rootless cycle uses canonical member",
+			newTargets: func() map[string]*targethasher.Target {
+				return map[string]*targethasher.Target{
+					"//pkg:a": {
+						Name:            "//pkg:a",
+						RuleType:        "go_library",
+						HashWithoutDeps: []byte("a"),
+						Deps:            []string{"//pkg:b"},
+					},
+					"//pkg:b": {
+						Name:            "//pkg:b",
+						RuleType:        "go_library",
+						HashWithoutDeps: []byte("b"),
+						Deps:            []string{"//pkg:a"},
+					},
+				}
+			},
+			fullRoot: "//pkg:a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			expectedTargets := tt.newTargets()
+			_, err := targethasher.HashRecursively(t.Context(), targethasher.HashParam{
+				Targets:    expectedTargets,
+				TargetName: tt.fullRoot,
+			})
+			require.NoError(t, err)
+
+			names := make([]string, 0, len(expectedTargets))
+			expectedHashes := make(map[string][]byte, len(expectedTargets))
+			for name, target := range expectedTargets {
+				names = append(names, name)
+				expectedHashes[name] = target.Hash
+			}
+
+			ctx := t.Context()
+			rapid.Check(t, func(rt *rapid.T) {
+				graph := OptimizeGraph(tt.newTargets())
+				invalidated := NewIntSet()
+				for _, name := range rapid.Permutation(names).Draw(rt, "invalidation-order") {
+					invalidated.Insert(graph.TargetNameToID[name])
+				}
+
+				err := graph.computeInvalidatedHashes(ctx, invalidated)
+				require.NoError(rt, err)
+				for name, expected := range expectedHashes {
+					actual := graph.OptimizedTargets[graph.TargetNameToID[name]].Hash
+					assert.Equal(rt, expected, actual, "hash mismatch for %s", name)
+				}
+			})
+		})
+	}
 }
