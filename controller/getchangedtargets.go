@@ -33,6 +33,7 @@ import (
 	"github.com/uber/tango/internal/targetdiff"
 	"github.com/uber/tango/internal/tgb"
 	"github.com/uber/tango/internal/tgbdiff"
+	"github.com/uber/tango/mapper/proto"
 	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
@@ -82,7 +83,7 @@ type job struct {
 // client disconnects, the stream's context is cancelled and the function
 // returns with context.Canceled.
 func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
-	entityReq, mappingErr := mapper.ProtoToGetChangedTargetsRequest(request)
+	entityReq, mappingErr := proto.ProtoToGetChangedTargetsRequest(request)
 	if mappingErr != nil {
 		mappingErr = tangoerrors.NewUser(fmt.Errorf("convert get changed targets request: %w", mappingErr))
 	}
