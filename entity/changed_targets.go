@@ -52,3 +52,16 @@ type GetChangedTargetsResponse struct {
 	ChangedTargets []ChangedTarget `json:"changed_targets"`
 	Metadata       *Metadata       `json:"metadata,omitempty"`
 }
+
+// ChangedTargetsResult is the full, unchunked result of comparing two
+// revisions: every changed target in a canonical ID space, plus the
+// metadata needed to resolve those IDs into names. Controller.GetChangedTargets
+// returns this. Splitting it into size-bounded GetChangedTargetsResponse
+// chunks happens in two places for two different reasons: the handler
+// chunks it for the wire, and the controller separately chunks it when
+// writing the compared-targets cache entry, so the stored blob's format
+// does not depend on which binary produced it.
+type ChangedTargetsResult struct {
+	ChangedTargets []ChangedTarget
+	Metadata       *Metadata
+}
