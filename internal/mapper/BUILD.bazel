@@ -23,6 +23,7 @@ go_test(
     name = "mapper_test",
     srcs = [
         "build_description_test.go",
+        "changed_targets_test.go",
         "errors_test.go",
         "target_graph_test.go",
     ],
