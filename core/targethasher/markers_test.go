@@ -83,6 +83,32 @@ func TestReadMarkerHash_ChangesOnPatchContent(t *testing.T) {
 	assert.NotEqual(t, base, added, "adding a patch must affect the hash")
 }
 
+func TestReadMarkerHash_LocalDirectoryInputs(t *testing.T) {
+	base := markerHash(t, testDigest, testPatchLine)
+
+	for _, kind := range []string{"DIRTREE", "DIRENTS"} {
+		local := kind + ":@@//patches/protobuf 1111111111111111111111111111111111111111111111111111111111111111"
+		withDir := markerHash(t, testDigest, testPatchLine, local)
+		assert.NotEqual(t, base, withDir, "main-repo %s: lines must affect the hash", kind)
+
+		changed := markerHash(t, testDigest, testPatchLine, strings.Replace(local, "11111111", "22222222", 1))
+		assert.NotEqual(t, withDir, changed, "main-repo %s: content must affect the hash", kind)
+
+		other := kind + ":@@gazelle+//cmd 1111111111111111111111111111111111111111111111111111111111111111"
+		assert.Equal(t, base, markerHash(t, testDigest, testPatchLine, other),
+			"%s: lines for other repos must not affect the hash", kind)
+	}
+}
+
+func TestReadMarkerHash_IgnoresAbsolutePathInputs(t *testing.T) {
+	base := markerHash(t, testDigest, testPatchLine)
+	// Inputs outside any repo are recorded as absolute paths, which are tied to
+	// the machine and not to the workspace's checked-in sources.
+	withAbsolute := markerHash(t, testDigest, testPatchLine,
+		"FILE:/usr/bin/env 1111111111111111111111111111111111111111111111111111111111111111")
+	assert.Equal(t, base, withAbsolute)
+}
+
 func TestReadMarkerHash_Empty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty.marker")
 	require.NoError(t, os.WriteFile(path, []byte("\n  \n"), 0o644))

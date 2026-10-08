@@ -67,11 +67,27 @@ func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand strin
 	return hashes, nil
 }
 
-// localFilePrefix marks a FILE: marker line whose label is in the main repo
-// ("@@//pkg:file"; the main repo's canonical name is empty). These are
-// checked-in files such as patches, so their content hash is the same in any
-// checkout.
-const localFilePrefix = "FILE:@@//"
+// localInputPrefixes mark the marker lines for inputs that live in the main
+// repo. Bazel records a repo rule's file-system inputs as KIND:@@<repo>//<path>
+// (the main repo's canonical name is empty), where KIND is FILE for a file,
+// DIRTREE for a directory tree and DIRENTS for a directory listing. Main-repo
+// inputs are checked-in sources such as patches, so their hashes are the same
+// in any checkout. Inputs in other repos can be generated during the fetch,
+// and inputs outside any repo are recorded as absolute paths.
+var localInputPrefixes = []string{
+	"FILE:@@//",
+	"DIRTREE:@@//",
+	"DIRENTS:@@//",
+}
+
+func isLocalInput(line string) bool {
+	for _, p := range localInputPrefixes {
+		if strings.HasPrefix(line, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // readMarkerHash computes a hash from the stable lines of a marker file.
 // The first line is a hash of the repo rule's declarative inputs (URL,
@@ -79,8 +95,9 @@ const localFilePrefix = "FILE:@@//"
 // files. Those appear on FILE: lines alongside their SHA-256 content
 // hashes.
 //
-// Only the first line and FILE: lines for main-repo files (@@// labels) are
-// hashed. Every other line is skipped:
+// Only the first line and the inputs local to the main repo (FILE:, DIRTREE:
+// and DIRENTS: lines with an @@// path, see localInputPrefixes) are hashed.
+// Every other line is skipped:
 //   - ENV: lines, because environment variables can differ between CI hosts.
 //   - FILE: lines for files in other repos, because those can be generated
 //     during the fetch and embed the Bazel output_base path (for example
@@ -106,7 +123,7 @@ func readMarkerHash(path string) ([]byte, error) {
 		}
 		isFirstLine := !seenFirstLine
 		seenFirstLine = true
-		if !isFirstLine && !strings.HasPrefix(line, localFilePrefix) {
+		if !isFirstLine && !isLocalInput(line) {
 			continue
 		}
 		h.Write([]byte(line))
