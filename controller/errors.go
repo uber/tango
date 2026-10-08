@@ -15,7 +15,7 @@
 package controller
 
 import (
-	"github.com/uber/tango/internal/mapper"
+	"github.com/uber/tango/mapper/proto"
 )
 
 // toWireError converts err into a YARPC error carrying a TangoError detail so
@@ -24,5 +24,5 @@ import (
 // existing named-return defer) to satisfy the proto contract described in
 // docs/errors/errors.md. Nil errors pass through unchanged.
 func toWireError(err error) error {
-	return mapper.ToProtoError(err)
+	return proto.ToProtoError(err)
 }
