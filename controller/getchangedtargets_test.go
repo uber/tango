@@ -155,30 +155,23 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 		}},
 	}
 
-	responses, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), firstGraph, secondGraph, nil)
+	result, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), firstGraph, secondGraph, nil)
 	require.NoError(t, err)
 
-	var metadata *entity.Metadata
-	for _, resp := range responses {
-		if resp.Metadata != nil {
-			metadata = resp.Metadata
-		}
-	}
+	metadata := result.Metadata
 	require.NotNil(t, metadata)
 
 	byName := make(map[string]*entity.ChangedTarget)
-	for responseIndex := range responses {
-		for targetIndex := range responses[responseIndex].ChangedTargets {
-			changed := &responses[responseIndex].ChangedTargets[targetIndex]
-			target := changed.NewTarget
-			if target == nil {
-				target = changed.OldTarget
-			}
-			require.NotNil(t, target)
-			name := metadata.TargetIDMapping[target.ID]
-			require.NotEmpty(t, name)
-			byName[name] = changed
+	for targetIndex := range result.ChangedTargets {
+		changed := &result.ChangedTargets[targetIndex]
+		target := changed.NewTarget
+		if target == nil {
+			target = changed.OldTarget
 		}
+		require.NotNil(t, target)
+		name := metadata.TargetIDMapping[target.ID]
+		require.NotEmpty(t, name)
+		byName[name] = changed
 	}
 	require.Len(t, byName, 5)
 
@@ -232,14 +225,10 @@ func TestCompareTargetGraphs_AllTargetsFileNoTrigger(t *testing.T) {
 		}},
 	}
 
-	responses, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), firstGraph, secondGraph, nil)
+	result, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), firstGraph, secondGraph, nil)
 	require.NoError(t, err)
 
-	var totalChanged int
-	for _, resp := range responses {
-		totalChanged += len(resp.ChangedTargets)
-	}
-	assert.Equal(t, 0, totalChanged, "no targets should be changed when AllTargetsFiles hashes match")
+	assert.Equal(t, 0, len(result.ChangedTargets), "no targets should be changed when AllTargetsFiles hashes match")
 }
 
 func TestGetChangedTargets_ValidationError(t *testing.T) {
@@ -673,14 +662,13 @@ func TestCompareTargetGraphs_NewTarget_CanonicalIDs(t *testing.T) {
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
-	require.Len(t, res, 2)
-	cs := res[0].ChangedTargets
+	cs := res.ChangedTargets
 	require.NotNil(t, cs)
 	require.Len(t, cs, 1)
 	ct := cs[0]
 	require.Equal(t, entity.ChangeTypeNew, ct.ChangeType)
 	// ID used in target should match canonical metadata mapping
-	meta := res[1].Metadata
+	meta := res.Metadata
 	require.NotNil(t, meta)
 	newID := ct.NewTarget.ID
 	require.Equal(t, "//app:new", meta.TargetIDMapping[newID])
@@ -733,7 +721,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
-	cs := res[0].ChangedTargets
+	cs := res.ChangedTargets
 	require.NotNil(t, cs)
 	// Expect 2 changed: A (source-file seed, distance 0) and L (rule whose own src changed, distance 0)
 	require.Len(t, cs, 2)
@@ -742,7 +730,7 @@ func TestCompareTargetGraphs_SourceFileDirectAndPropagation(t *testing.T) {
 		if cs[i].NewTarget == nil {
 			continue
 		}
-		name := res[1].Metadata.TargetIDMapping[cs[i].NewTarget.ID]
+		name := res.Metadata.TargetIDMapping[cs[i].NewTarget.ID]
 		if name == "//app:A" {
 			aCT = &cs[i]
 		}
@@ -797,7 +785,7 @@ func TestCompareTargetGraphs_ChangedRuleUnreachableFromAnySeed(t *testing.T) {
 	// no upstream explanation becomes a distance-0 seed itself.
 	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
-	cs := res[0].ChangedTargets
+	cs := res.ChangedTargets
 	require.NotNil(t, cs)
 	require.Len(t, cs, 1)
 	got := cs[0]
@@ -852,7 +840,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
-	cs := res[0].ChangedTargets
+	cs := res.ChangedTargets
 	require.NotNil(t, cs)
 
 	// Find target T in the changed targets
@@ -861,7 +849,7 @@ func TestCompareTargetGraphs_ChangedWhenDependenciesChanged(t *testing.T) {
 		if cs[i].NewTarget == nil {
 			continue
 		}
-		name := res[1].Metadata.TargetIDMapping[cs[i].NewTarget.ID]
+		name := res.Metadata.TargetIDMapping[cs[i].NewTarget.ID]
 		if name == "//app:T" {
 			targetT = &cs[i]
 			break
@@ -925,7 +913,7 @@ func TestCompareTargetGraphs_ChangedWhenAttributesChanged(t *testing.T) {
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
-	cs := res[0].ChangedTargets
+	cs := res.ChangedTargets
 	require.NotNil(t, cs)
 	require.Len(t, cs, 1)
 	got := cs[0]
@@ -995,7 +983,7 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
-	cs := res[0].ChangedTargets
+	cs := res.ChangedTargets
 	require.NotNil(t, cs)
 	require.Len(t, cs, 1)
 	got := cs[0]
@@ -1170,7 +1158,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
-	cs := res[0].ChangedTargets
+	cs := res.ChangedTargets
 	require.NotNil(t, cs)
 
 	// Find target T
@@ -1179,7 +1167,7 @@ func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 		if cs[i].NewTarget == nil {
 			continue
 		}
-		name := res[1].Metadata.TargetIDMapping[cs[i].NewTarget.ID]
+		name := res.Metadata.TargetIDMapping[cs[i].NewTarget.ID]
 		if name == "//app:T" {
 			targetT = &cs[i]
 			break
@@ -1243,7 +1231,7 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
-	cs := res[0].ChangedTargets
+	cs := res.ChangedTargets
 	require.NotNil(t, cs)
 	require.Len(t, cs, 3)
 
@@ -1252,7 +1240,7 @@ func TestCompareTargetGraphs_SiblingRuleNotPromotedToSeed(t *testing.T) {
 		if cs[i].NewTarget == nil {
 			continue
 		}
-		name := res[1].Metadata.TargetIDMapping[cs[i].NewTarget.ID]
+		name := res.Metadata.TargetIDMapping[cs[i].NewTarget.ID]
 		byName[name] = &cs[i]
 	}
 	assert.Equal(t, int32(0), byName["//pkg:A"].Distance, "source file A is a seed")
@@ -1290,7 +1278,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 	}
 	res, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), first, second, nil)
 	require.NoError(t, err)
-	cs := res[0].ChangedTargets
+	cs := res.ChangedTargets
 	require.NotNil(t, cs)
 	require.Len(t, cs, 1)
 	got := cs[0]
@@ -1299,7 +1287,7 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 	assert.Nil(t, got.NewTarget, "DELETED entry must not carry NewTarget")
 	assert.Equal(t, int32(0), got.Distance, "DELETED targets are seeds (distance 0)")
 	// Old id is remapped into the canonical id space; metadata must resolve back to the deleted name.
-	assert.Equal(t, "//app:T", res[1].Metadata.TargetIDMapping[got.OldTarget.ID])
+	assert.Equal(t, "//app:T", res.Metadata.TargetIDMapping[got.OldTarget.ID])
 }
 
 func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) {
@@ -1352,8 +1340,8 @@ func changedTargetsEntityRequest() entity.GetChangedTargetsRequest {
 	}
 }
 
-func TestServeChangedTargetsFromCache(t *testing.T) {
-	t.Run("cache miss returns not-served, no error", func(t *testing.T) {
+func TestComparedTargetsFromCache(t *testing.T) {
+	t.Run("cache miss returns not-found, no error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		st := storagemock.NewMockStorage(ctrl)
 		// Both treehash reads miss, so the cache path is skipped entirely.
@@ -1362,84 +1350,80 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.storage = st
-		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		cached, found, err := c.comparedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), testRepositoryID("repo:go-code"), time.Now())
 		require.NoError(t, err)
-		assert.False(t, served, "a cache miss must not be served")
+		assert.False(t, found, "a cache miss must not be reported as found")
+		assert.Zero(t, cached)
 	})
 
 	t.Run("corrupt cached blob falls through to recompute", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 
-		// A two-message gob blob with the second message truncated — mimics an
-		// incomplete concurrent write. The reader returns the first message fine
-		// but errors on the second, and the caller must fall through
-		// (served=false) without sending anything.
-		var buf bytes.Buffer
-		enc := gob.NewEncoder(&buf)
-		enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}})
-		enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
-		// Truncate well into the second gob message to guarantee corruption.
-		truncated := buf.Bytes()[:buf.Len()-5]
+		// A truncated two-message blob mimics an incomplete concurrent write.
+		// The reader returns the first message fine but errors on the second,
+		// and the caller must fall through (found=false) without returning data.
+		full := encodeChangedTargetsChunks(t, []entity.GetChangedTargetsResponse{
+			{ChangedTargets: []entity.ChangedTarget{}},
+			{Metadata: &entity.Metadata{}},
+		})
+		truncated := full[:len(full)-5]
 
 		st := storagemock.NewMockStorage(ctrl)
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 				switch {
 				case strings.Contains(req.Key, "compared-targets"):
-					return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(truncated))}, nil
+					return storage.DownloadResponse{ReadCloser: readCloser(string(truncated))}, nil
 				case strings.Contains(req.Key, "sha1"):
-					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash1"))}, nil
+					return storage.DownloadResponse{ReadCloser: readCloser("treehash1")}, nil
 				case strings.Contains(req.Key, "sha2"):
-					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash2"))}, nil
+					return storage.DownloadResponse{ReadCloser: readCloser("treehash2")}, nil
 				default:
-					return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
+					return storage.DownloadResponse{}, errors.New("unexpected key: " + req.Key)
 				}
 			}).AnyTimes()
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.storage = st
-		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-		// No Send expectation: a corrupt blob must not send anything to the client.
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		cached, found, err := c.comparedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), testRepositoryID("repo:go-code"), time.Now())
 		require.NoError(t, err)
-		assert.False(t, served, "a corrupt blob must trigger recompute, not a partial send")
+		assert.False(t, found, "a corrupt blob must trigger recompute, not a partial result")
+		assert.Zero(t, cached)
 	})
 
-	t.Run("clean hit is served", func(t *testing.T) {
+	t.Run("clean hit is found", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 
-		var buf bytes.Buffer
-		enc := gob.NewEncoder(&buf)
-		enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}})
-		enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
-		cached := buf.Bytes()
+		cachedBytes := encodeChangedTargetsChunks(t, []entity.GetChangedTargetsResponse{
+			{ChangedTargets: []entity.ChangedTarget{}},
+			{Metadata: &entity.Metadata{}},
+		})
 
 		st := storagemock.NewMockStorage(ctrl)
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
 				switch {
 				case strings.Contains(req.Key, "compared-targets"):
-					return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cached))}, nil
+					return storage.DownloadResponse{ReadCloser: readCloser(string(cachedBytes))}, nil
 				case strings.Contains(req.Key, "sha1"):
-					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash1"))}, nil
+					return storage.DownloadResponse{ReadCloser: readCloser("treehash1")}, nil
 				case strings.Contains(req.Key, "sha2"):
-					return storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("treehash2"))}, nil
+					return storage.DownloadResponse{ReadCloser: readCloser("treehash2")}, nil
 				default:
-					return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
+					return storage.DownloadResponse{}, errors.New("unexpected key: " + req.Key)
 				}
 			}).AnyTimes()
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.storage = st
-		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-		stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		cached, found, err := c.comparedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), testRepositoryID("repo:go-code"), time.Now())
 		require.NoError(t, err)
-		assert.True(t, served, "a clean cache hit must be served")
+		assert.True(t, found, "a clean cache hit must be reported as found")
+		assert.Empty(t, cached.ChangedTargets)
+		assert.NotNil(t, cached.Metadata)
 	})
 }
 

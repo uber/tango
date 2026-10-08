@@ -90,6 +90,41 @@ func SplitMetadata(
 	return metas, nil
 }
 
+// ChunkChangedTargetsResult splits a full, unchunked changed-targets result
+// into message-size-bounded response chunks: changed targets first, then
+// metadata, each within maxBytes. The controller's compared-targets cache
+// write and wire send both call this so the two chunk the same result the
+// same way.
+func ChunkChangedTargetsResult(result entity.ChangedTargetsResult, maxBytes int) ([]entity.GetChangedTargetsResponse, error) {
+	changedGroups, err := SplitBySize(result.ChangedTargets, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]entity.GetChangedTargetsResponse, 0, len(changedGroups))
+	for _, g := range changedGroups {
+		responses = append(responses, entity.GetChangedTargetsResponse{ChangedTargets: g})
+	}
+	meta := result.Metadata
+	if meta == nil {
+		meta = &entity.Metadata{}
+	}
+	metaGroups, err := SplitMetadata(
+		meta.TargetIDMapping,
+		meta.RuleTypeMapping,
+		meta.TagMapping,
+		meta.AttributeNameMapping,
+		meta.AttributeStringValueMapping,
+		maxBytes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range metaGroups {
+		responses = append(responses, entity.GetChangedTargetsResponse{Metadata: m})
+	}
+	return responses, nil
+}
+
 func splitMapByBytes(m map[int32]string, maxBytes int) []map[int32]string {
 	if len(m) == 0 {
 		return nil

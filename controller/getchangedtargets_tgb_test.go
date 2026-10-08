@@ -17,6 +17,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -422,4 +423,91 @@ func TestGetChangedTargets_TGBMixedFormatFallsBack(t *testing.T) {
 	assert.Equal(t, "//app:target2", idToName[changed[0].GetNewTarget().GetId()])
 
 	assert.EqualValues(t, 0, counterValue(scope, "tgb_native_compare"), "mixed formats must use the incumbent pipeline")
+}
+
+// TestGetChangedTargets_CacheWriteChunksResultBySize verifies that, although
+// the controller returns an unchunked entity.ChangedTargetsResult to its
+// caller, the compared-targets cache entry it writes in the background is
+// still split into size-bounded chunks (the same storage format main wrote)
+// rather than the two whole, unbounded pieces the result naturally splits
+// into. This matters because the cache read path on an older binary sharing
+// the same storage sends each stored chunk to the wire as one message
+// without re-chunking, so an oversized stored chunk would produce an
+// oversized wire message.
+func TestGetChangedTargets_CacheWriteChunksResultBySize(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	st := storage.NewMemoryStorage()
+
+	seedTreehash(t, st, "sha1", "treehash1")
+	seedTreehash(t, st, "sha2", "treehash2")
+
+	repositoryID := testRepositoryID("repo:go-code")
+	require.NoError(t, storage.WriteGraphStream(t.Context(), st,
+		cachekey.GetGraphByTreeHash(repositoryID, "treehash1", entity.ComputationStrategyUnset, nil),
+		[]entity.GetTargetGraphResponse{{Metadata: &entity.Metadata{}}}))
+
+	const targetCount = 30
+	targets := make([]entity.OptimizedTarget, targetCount)
+	targetIDMapping := make(map[int32]string, targetCount)
+	for i := 0; i < targetCount; i++ {
+		targets[i] = entity.OptimizedTarget{ID: int32(i), Hash: fmt.Sprintf("h%d", i)}
+		targetIDMapping[int32(i)] = fmt.Sprintf("//app:t%d", i)
+	}
+	require.NoError(t, storage.WriteGraphStream(t.Context(), st,
+		cachekey.GetGraphByTreeHash(repositoryID, "treehash2", entity.ComputationStrategyUnset, nil),
+		[]entity.GetTargetGraphResponse{{
+			Targets:  targets,
+			Metadata: &entity.Metadata{TargetIDMapping: targetIDMapping},
+		}}))
+
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(t.Context())
+	stream.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
+
+	const maxMessageBytes = 40
+	c := NewController(context.Background(), Params{
+		RepoConfig:      allowAnyRepositoryConfigProvider{},
+		Logger:          zaptest.NewLogger(t),
+		Storage:         st,
+		Orchestrator:    orchestratormock.NewMockOrchestrator(ctrl), // no calls expected: both graphs are cached
+		MaxMessageBytes: maxMessageBytes,
+	})
+
+	require.NoError(t, c.GetChangedTargets(changedTargetsRequest(), stream))
+
+	cacheKey := cachekey.GetComparedTargetsCachePath(repositoryID, "treehash1", "treehash2", nil)
+	var chunks []entity.GetChangedTargetsResponse
+	require.Eventually(t, func() bool {
+		resp, getErr := st.Get(t.Context(), storage.DownloadRequest{Key: cacheKey})
+		if getErr != nil {
+			return false
+		}
+		defer func() { _ = resp.ReadCloser.Close() }()
+		reader, readerErr := storage.NewChangedTargetsReader(t.Context(), st, cacheKey)
+		if readerErr != nil {
+			return false
+		}
+		defer func() { _ = reader.Close() }()
+		chunks = nil
+		for {
+			chunk, readErr := reader.Read()
+			if readErr != nil {
+				break
+			}
+			chunks = append(chunks, chunk)
+		}
+		return len(chunks) > 0
+	}, 2*time.Second, 10*time.Millisecond, "cache write never landed")
+
+	require.Greater(t, len(chunks), 2, "a small maxMessageBytes must split the result into more than the two whole, unbounded pieces")
+	for _, chunk := range chunks {
+		if len(chunk.ChangedTargets) == 0 {
+			continue
+		}
+		size := 0
+		for _, ct := range chunk.ChangedTargets {
+			size += ct.Size()
+		}
+		assert.LessOrEqual(t, size, maxMessageBytes, "each stored changed-targets chunk must stay within maxMessageBytes")
+	}
 }
