@@ -29,7 +29,8 @@ import (
 // external repo marker files and returns a map from canonical repo name
 // to a hash derived from the stable lines of each marker file.
 // This hash changes whenever the repo's version, URL, or patch file
-// contents change. ENV lines are excluded for cross-environment stability.
+// contents change. See readMarkerHash for the lines that are excluded for
+// cross-environment and cross-workspace stability.
 func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand string) (map[string][]byte, error) {
 	outputBase, err := bazel.OutputBase(ctx, workspacePath, bazelCommand)
 	if err != nil {
@@ -66,12 +67,27 @@ func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand strin
 	return hashes, nil
 }
 
+// localFilePrefix marks a FILE: marker line whose label is in the main repo
+// ("@@//pkg:file"; the main repo's canonical name is empty). These are
+// checked-in files such as patches, so their content hash is the same in any
+// checkout.
+const localFilePrefix = "FILE:@@//"
+
 // readMarkerHash computes a hash from the stable lines of a marker file.
 // The first line is a hash of the repo rule's declarative inputs (URL,
 // version, patch paths) but does NOT include the content hashes of patch
 // files. Those appear on FILE: lines alongside their SHA-256 content
-// hashes. ENV: lines are skipped because environment variables can differ
-// between CI environments and would cause unnecessary hash instability.
+// hashes.
+//
+// Only the first line and FILE: lines for main-repo files (@@// labels) are
+// hashed. Every other line is skipped:
+//   - ENV: lines, because environment variables can differ between CI hosts.
+//   - FILE: lines for files in other repos, because those can be generated
+//     during the fetch and embed the Bazel output_base path (for example
+//     go_repository_cache's go.env and the binaries built by
+//     go_repository_tools), which differs between workspaces even when no
+//     dependency changed.
+//   - REPO_MAPPING: lines, which only restate canonical repo names.
 func readMarkerHash(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -81,13 +97,16 @@ func readMarkerHash(path string) ([]byte, error) {
 
 	h := newHash()
 	hasContent := false
+	seenFirstLine := false
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "ENV:") {
+		isFirstLine := !seenFirstLine
+		seenFirstLine = true
+		if !isFirstLine && !strings.HasPrefix(line, localFilePrefix) {
 			continue
 		}
 		h.Write([]byte(line))
