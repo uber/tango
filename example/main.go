@@ -29,6 +29,7 @@ import (
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/core/storage/disk"
+	"github.com/uber/tango/handler"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/yarpc"
@@ -108,6 +109,8 @@ func run() error {
 		GraphConfig:     cfg,
 	})
 
+	h := handler.New(handler.Params{Controller: ctrl})
+
 	// YARPC transports and dispatcher
 	grpcTransport := yarpcgrpc.NewTransport()
 	port := "127.0.0.1:8081"
@@ -123,7 +126,7 @@ func run() error {
 		Name:     "tango",
 		Inbounds: inbounds,
 	})
-	dispatcher.Register(pb.BuildTangoYARPCProcedures(ctrl))
+	dispatcher.Register(pb.BuildTangoYARPCProcedures(h))
 
 	if err := dispatcher.Start(); err != nil {
 		return fmt.Errorf("failed to start dispatcher: %w", err)

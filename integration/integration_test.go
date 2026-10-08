@@ -36,6 +36,7 @@ import (
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/handler"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/yarpc"
@@ -155,6 +156,8 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		GraphConfig:  cfg,
 	})
 
+	h := handler.New(handler.Params{Controller: ctrl})
+
 	grpcTransport := yarpcgrpc.NewTransport()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err, "failed to listen on dynamic port")
@@ -163,7 +166,7 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		Name:     "tango",
 		Inbounds: []transport.Inbound{grpcTransport.NewInbound(listener)},
 	})
-	dispatcher.Register(pb.BuildTangoYARPCProcedures(ctrl))
+	dispatcher.Register(pb.BuildTangoYARPCProcedures(h))
 
 	require.NoError(t, dispatcher.Start(), "failed to start dispatcher")
 	t.Cleanup(func() { assert.NoError(t, dispatcher.Stop()) })
