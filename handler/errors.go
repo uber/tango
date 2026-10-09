@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Uber Technologies, Inc.
+// Copyright (c) 2025 Uber Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,21 +15,14 @@
 package handler
 
 import (
-	"github.com/uber/tango/controller"
-	pb "github.com/uber/tango/tangopb"
-	"go.uber.org/zap"
+	"github.com/uber/tango/mapper/proto"
 )
 
-type Params struct {
-	Logger     *zap.Logger
-	Controller controller.Controller
-}
-
-type handler struct {
-	logger     *zap.Logger
-	controller controller.Controller
-}
-
-func New(p Params) pb.TangoYARPCServer {
-	return &handler{logger: p.Logger, controller: p.Controller}
+// toWireError converts err into a YARPC error carrying a TangoError detail so
+// clients receive a classified error code on the wire. Implemented RPC
+// handlers pass their return errors through this function (typically via the
+// existing named-return defer) to satisfy the proto contract described in
+// docs/errors/errors.md. Nil errors pass through unchanged.
+func toWireError(err error) error {
+	return proto.ToProtoError(err)
 }

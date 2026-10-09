@@ -22,6 +22,7 @@ import (
 	mock_controller "github.com/uber/tango/controller/controllermock"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/mock/gomock"
+	"go.uber.org/zap/zaptest"
 )
 
 type fakeGetChangedTargetsStream struct {
@@ -30,7 +31,7 @@ type fakeGetChangedTargetsStream struct {
 
 func TestGetChangedTargetsForwardsToController(t *testing.T) {
 	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	h := New(Params{Controller: ctrl})
+	h := New(Params{Logger: zaptest.NewLogger(t), Controller: ctrl})
 
 	req := &pb.GetChangedTargetsRequest{}
 	stream := &fakeGetChangedTargetsStream{}
