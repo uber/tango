@@ -95,10 +95,6 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	)
 	defer func() {
 		op.Complete(retErr)
-		if retErr != nil {
-			logger.Error("GetChangedTargets failed", tangoerrors.Fields(retErr)...)
-			retErr = toWireError(retErr)
-		}
 	}()
 	if repositoryErr != nil {
 		return repositoryErr

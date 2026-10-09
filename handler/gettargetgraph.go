@@ -15,9 +15,16 @@
 package handler
 
 import (
+	tangoerrors "github.com/uber/tango/core/errors"
 	pb "github.com/uber/tango/tangopb"
 )
 
-func (h *handler) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) error {
+func (h *handler) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			h.logger.Error("GetTargetGraph failed", tangoerrors.Fields(retErr)...)
+			retErr = toWireError(retErr)
+		}
+	}()
 	return h.controller.GetTargetGraph(request, stream)
 }

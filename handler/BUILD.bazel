@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "handler",
     srcs = [
+        "errors.go",
         "getchangedtargetgraph.go",
         "getchangedtargets.go",
         "gettargetgraph.go",
@@ -12,7 +13,10 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//controller",
+        "//core/errors",
+        "//mapper/proto",
         "//tangopb",
+        "@org_uber_go_zap//:zap",
     ],
 )
 
@@ -22,13 +26,24 @@ go_test(
         "getchangedtargetgraph_test.go",
         "getchangedtargets_test.go",
         "gettargetgraph_test.go",
+        "testhelper_test.go",
+        "wireerror_test.go",
     ],
     embed = [":handler"],
     deps = [
+        "//config",
+        "//controller",
         "//controller/controllermock",
+        "//core/errors",
+        "//core/storage",
+        "//core/storage/storagemock",
         "//tangopb",
+        "//tangopb/tangopbmock",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@org_uber_go_mock//gomock",
+        "@org_uber_go_yarpc//encoding/protobuf",
+        "@org_uber_go_yarpc//yarpcerrors",
+        "@org_uber_go_zap//zaptest",
     ],
 )

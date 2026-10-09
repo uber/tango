@@ -109,7 +109,7 @@ func run() error {
 		GraphConfig:     cfg,
 	})
 
-	h := handler.New(handler.Params{Controller: ctrl})
+	h := handler.New(handler.Params{Logger: logger, Controller: ctrl})
 
 	// YARPC transports and dispatcher
 	grpcTransport := yarpcgrpc.NewTransport()

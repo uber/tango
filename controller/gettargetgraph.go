@@ -47,10 +47,6 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	)
 	defer func() {
 		op.Complete(retErr)
-		if retErr != nil {
-			logger.Error("GetTargetGraph failed", tangoerrors.Fields(retErr)...)
-			retErr = toWireError(retErr)
-		}
 	}()
 	start := time.Now()
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
