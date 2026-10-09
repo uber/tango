@@ -29,7 +29,8 @@ import (
 // external repo marker files and returns a map from canonical repo name
 // to a hash derived from the stable lines of each marker file.
 // This hash changes whenever the repo's version, URL, or patch file
-// contents change. ENV lines are excluded for cross-environment stability.
+// contents change. See readMarkerHash for the lines that are excluded for
+// cross-environment and cross-workspace stability.
 func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand string) (map[string][]byte, error) {
 	outputBase, err := bazel.OutputBase(ctx, workspacePath, bazelCommand)
 	if err != nil {
@@ -66,12 +67,35 @@ func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand strin
 	return hashes, nil
 }
 
+// localInputPrefixes mark the marker lines for inputs that live in the main
+// repo. Bazel records a repo rule's file-system inputs as KIND:@@<repo>//<path>
+// (the main repo's canonical name is empty), where KIND is FILE for a file,
+// DIRTREE for a directory tree and DIRENTS for a directory listing. Main-repo
+// inputs are checked-in sources such as patches, so their hashes are the same
+// in any checkout. Inputs in other repos can be generated during the fetch,
+// and inputs outside any repo are recorded as absolute paths.
+var localInputPrefixes = []string{
+	"FILE:@@//",
+	"DIRTREE:@@//",
+	"DIRENTS:@@//",
+}
+
+func isLocalInput(line string) bool {
+	for _, p := range localInputPrefixes {
+		if strings.HasPrefix(line, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // readMarkerHash computes a hash from the stable lines of a marker file.
 // The first line is a hash of the repo rule's declarative inputs (URL,
 // version, patch paths) but does NOT include the content hashes of patch
 // files. Those appear on FILE: lines alongside their SHA-256 content
 // hashes. ENV: lines are skipped because environment variables can differ
 // between CI environments and would cause unnecessary hash instability.
+// Only inputs local to the main repo are hashed, see localInputPrefixes.
 func readMarkerHash(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -81,13 +105,16 @@ func readMarkerHash(path string) ([]byte, error) {
 
 	h := newHash()
 	hasContent := false
+	seenHeader := false
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "ENV:") {
+		isHeader := !seenHeader // first line: hash of the repo rule's declarative inputs
+		seenHeader = true
+		if !isHeader && !isLocalInput(line) {
 			continue
 		}
 		h.Write([]byte(line))
