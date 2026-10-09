@@ -15,9 +15,16 @@
 package handler
 
 import (
+	tangoerrors "github.com/uber/tango/core/errors"
 	pb "github.com/uber/tango/tangopb"
 )
 
-func (h *handler) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error {
+func (h *handler) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
+	defer func() {
+		if retErr != nil {
+			h.logger.Error("GetChangedTargets failed", tangoerrors.Fields(retErr)...)
+			retErr = toWireError(retErr)
+		}
+	}()
 	return h.controller.GetChangedTargets(request, stream)
 }

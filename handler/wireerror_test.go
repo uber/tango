@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package controller
+package handler
 
 import (
 	"context"
@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/controller"
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
@@ -88,10 +89,10 @@ func TestGetTargetGraph_ValidationError_WiresTangoError(t *testing.T) {
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background())
 
-	c := NewController(context.Background(), Params{
+	c := New(Params{Logger: zaptest.NewLogger(t), Controller: controller.NewController(context.Background(), controller.Params{
 		RepoConfig: allowAnyRepositoryConfigProvider{},
 		Logger:     zaptest.NewLogger(t),
-	})
+	})})
 
 	// Missing BaseSha triggers a validation error classified as ERROR_USER.
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
@@ -117,10 +118,10 @@ func TestGetChangedTargets_ValidationError_WiresTangoError(t *testing.T) {
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background()).AnyTimes()
 
-	c := NewController(context.Background(), Params{
+	c := New(Params{Logger: zaptest.NewLogger(t), Controller: controller.NewController(context.Background(), controller.Params{
 		RepoConfig: allowAnyRepositoryConfigProvider{},
 		Logger:     zaptest.NewLogger(t),
-	})
+	})})
 
 	// Missing first revision triggers validation error classified as ERROR_USER.
 	err := c.GetChangedTargets(&pb.GetChangedTargetsRequest{
@@ -146,11 +147,11 @@ func TestGetTargetGraph_InfraError_WiresTangoError(t *testing.T) {
 	store := storagemock.NewMockStorage(ctrl)
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, errors.New("disk on fire"))
 
-	c := NewController(context.Background(), Params{
+	c := New(Params{Logger: zaptest.NewLogger(t), Controller: controller.NewController(context.Background(), controller.Params{
 		RepoConfig: allowAnyRepositoryConfigProvider{},
 		Logger:     zaptest.NewLogger(t),
 		Storage:    store,
-	})
+	})})
 
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
