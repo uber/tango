@@ -193,7 +193,7 @@ func (c *controller) GetChangedTargets(...) (retErr error) {
 	defer func() {
 		...
 		if retErr != nil {
-			retErr = toWireError(retErr) // mapper.ToProtoError
+			retErr = toWireError(retErr) // proto.ToProtoError
 		}
 	}()
 	...

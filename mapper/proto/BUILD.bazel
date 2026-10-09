@@ -1,34 +1,36 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
-    name = "mapper",
+    name = "proto",
     srcs = [
-        "build_description.go",
         "changed_targets.go",
-        "target_graph.go",
+        "errors.go",
     ],
-    importpath = "github.com/uber/tango/internal/mapper",
+    importpath = "github.com/uber/tango/mapper/proto",
     visibility = ["//visibility:public"],
     deps = [
         "//core/errors",
         "//entity",
+        "//internal/mapper",
         "//tangopb",
+        "@org_uber_go_yarpc//encoding/protobuf",
+        "@org_uber_go_yarpc//yarpcerrors",
     ],
 )
 
 go_test(
-    name = "mapper_test",
+    name = "proto_test",
     srcs = [
-        "build_description_test.go",
         "changed_targets_test.go",
-        "target_graph_test.go",
+        "errors_test.go",
     ],
-    embed = [":mapper"],
+    embed = [":proto"],
     deps = [
         "//core/errors",
-        "//entity",
         "//tangopb",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
+        "@org_uber_go_yarpc//encoding/protobuf",
+        "@org_uber_go_yarpc//yarpcerrors",
     ],
 )

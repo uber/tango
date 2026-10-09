@@ -40,100 +40,6 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
-func TestValidateGetChangedTargetsRequest(t *testing.T) {
-	tests := []struct {
-		name    string
-		request *pb.GetChangedTargetsRequest
-		wantErr bool
-	}{
-		{
-			name:    "nil request",
-			request: nil,
-			wantErr: true,
-		},
-		{
-			name: "missing first revision",
-			request: &pb.GetChangedTargetsRequest{
-				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing second revision",
-			request: &pb.GetChangedTargetsRequest{
-				FirstRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing first revision remote",
-			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing first revision base_sha",
-			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code"},
-				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing second revision remote",
-			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, BaseSha: "sha2"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing second revision base_sha",
-			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "different remotes",
-			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:other", BaseSha: "sha2"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing output_config defaults to no filtering",
-			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-			},
-		},
-		{
-			name: "valid request",
-			request: &pb.GetChangedTargetsRequest{
-				FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-				SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-				OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateGetChangedTargetsRequest(tt.request)
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 func TestCompareTargetGraphs(t *testing.T) {
 	c := newTestController(zap.NewNop())
 
@@ -423,7 +329,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 }
 
 func TestReadTreehash(t *testing.T) {
-	bd := &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"}
+	bd := entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"}
 
 	t.Run("cache miss returns empty and no error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
@@ -431,7 +337,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
 
-		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.GetRemote()), metrics.Nop(), opGetChangedTargets)
+		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.Remote), metrics.Nop(), opGetChangedTargets)
 		require.NoError(t, err)
 		assert.Empty(t, val)
 	})
@@ -443,7 +349,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{}, injected)
 
-		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.GetRemote()), metrics.Nop(), opGetChangedTargets)
+		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.Remote), metrics.Nop(), opGetChangedTargets)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
 		assert.Empty(t, val)
@@ -455,7 +361,7 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("deadbeef"))}, nil)
 
-		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.GetRemote()), metrics.Nop(), opGetChangedTargets)
+		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.Remote), metrics.Nop(), opGetChangedTargets)
 		require.NoError(t, err)
 		assert.Equal(t, "deadbeef", val)
 	})
@@ -1439,6 +1345,13 @@ func changedTargetsRequest() *pb.GetChangedTargetsRequest {
 	}
 }
 
+func changedTargetsEntityRequest() entity.GetChangedTargetsRequest {
+	return entity.GetChangedTargetsRequest{
+		First:  entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
+		Second: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+	}
+}
+
 func TestServeChangedTargetsFromCache(t *testing.T) {
 	t.Run("cache miss returns not-served, no error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
@@ -1451,7 +1364,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		c.storage = st
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
 		require.NoError(t, err)
 		assert.False(t, served, "a cache miss must not be served")
 	})
@@ -1490,7 +1403,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		// No Send expectation: a corrupt blob must not send anything to the client.
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
 		require.NoError(t, err)
 		assert.False(t, served, "a corrupt blob must trigger recompute, not a partial send")
 	})
@@ -1524,7 +1437,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
 		require.NoError(t, err)
 		assert.True(t, served, "a clean cache hit must be served")
 	})
@@ -1533,8 +1446,8 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 func TestFetchTargetGraphs(t *testing.T) {
 	// BypassCache=true keeps getGraph on the orchestrator path only, so these
 	// tests need no storage mock.
-	bypassRequest := func() *pb.GetChangedTargetsRequest {
-		r := changedTargetsRequest()
+	bypassRequest := func() entity.GetChangedTargetsRequest {
+		r := changedTargetsEntityRequest()
 		r.BypassCache = true
 		return r
 	}

@@ -30,6 +30,21 @@ func (ct ChangedTarget) Size() int {
 	return n
 }
 
+// GetChangedTargetsRequest is the input to a changed-targets comparison.
+type GetChangedTargetsRequest struct {
+	// First is the base revision of the comparison.
+	First BuildDescription
+	// Second is the revision compared against First. It has the same Remote
+	// as First.
+	Second BuildDescription
+	// ExcludeFilesRegex are additional file-path regexes to exclude when
+	// computing target hashes.
+	ExcludeFilesRegex []string
+	// BypassCache, when true, skips cache reads and recomputes both graphs
+	// and the comparison, overwriting the existing cached results.
+	BypassCache bool
+}
+
 // GetChangedTargetsResponse is one piece of a streamed changed-targets
 // result — either a batch of changed targets or a metadata mapping.
 // Exactly one field is non-nil.
