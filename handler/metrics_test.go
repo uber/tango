@@ -55,7 +55,7 @@ func TestLifecycleMetrics(t *testing.T) {
 				return h.GetTargetGraph(&pb.GetTargetGraphRequest{BuildDescription: validBuild}, targetGraphStream(ctrl))
 			},
 			expect: func(m *mock_controller.MockController) {
-				m.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+				m.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
 			},
 			wantRepo:   "test-repository",
 			wantResult: "success",

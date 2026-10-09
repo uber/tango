@@ -12,7 +12,8 @@ sit between the wire protocol and the rest of the system:
 - **Request validation and translation.** GetChangedTargets validates its
   inputs and normalizes them into the internal call shapes used downstream.
   GetTargetGraph receives an entity request and the resolved repository
-  configuration from the handler, which maps and validates the request.
+  configuration from the handler, which maps and validates the request, and
+  it returns a reader over the full target graph.
 - **Read-through caching.** Where a request can be satisfied from previously
   computed artifacts, the controller fetches them from storage and streams
   them back without invoking the orchestrator. Cache misses fall through to
@@ -22,14 +23,16 @@ sit between the wire protocol and the rest of the system:
   concurrently, classify per-target changes (new, direct, indirect),
   optionally compute reverse-dependency distances, and assemble the response
   in a canonical ID space derived from per-request mappers.
-- **Streaming and chunking.** Responses are emitted as multiple stream
-  messages sized to stay below the gRPC per-message limit. Targets,
-  metadata, and topology deltas are chunked independently.
+- **Streaming and chunking.** GetChangedTargets emits its response as
+  multiple stream messages sized to stay below the gRPC per-message limit.
+  Targets, metadata, and topology deltas are chunked independently.
+  GetTargetGraph returns a reader, and the handler sends each chunk.
 - **Observability.** GetChangedTargets emits per-call counters, per-phase
   timers, and a classified failure metric that distinguishes user from
   infrastructure errors. For GetTargetGraph, the handler owns the per-call
-  counters and the classified failure metric, and the controller emits the
-  per-phase timers and cache lookup counters, tagged with the repository.
+  counters, the send duration, and the classified failure metric, and the
+  controller emits the per-phase timers and cache lookup counters, tagged with
+  the repository.
 
 ## Collaborators
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package controller
+package handler
 
 import (
 	"testing"
@@ -110,21 +110,19 @@ func TestApplyOptimizedTargetOutputConfig_NilTarget(t *testing.T) {
 	assert.Nil(t, applyOptimizedTargetOutputConfig(nil, nil))
 }
 
-func TestApplyChangedTargetOutputConfig_StripsBothSides(t *testing.T) {
-	src := &pb.ChangedTarget{
-		ChangeType: pb.CHANGE_TYPE_CHANGED,
-		OldTarget:  fullTarget(),
-		NewTarget:  fullTarget(),
-		Distance:   2,
+func TestApplyOptimizedTargetsOutputConfigToChunk_StripsTargets(t *testing.T) {
+	chunk := &pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{
+			Targets: &pb.OptimizedTargets{Targets: []*pb.OptimizedTarget{fullTarget(), fullTarget()}},
+		},
 	}
-	got := applyChangedTargetOutputConfig(src, nil)
+	got := applyOptimizedTargetsOutputConfigToChunk(chunk, nil)
 	require.NotNil(t, got)
-	assert.Equal(t, pb.CHANGE_TYPE_CHANGED, got.GetChangeType(), "change type preserved")
-	assert.Equal(t, int32(2), got.GetDistance(), "distance preserved")
-	assert.Equal(t, "", got.GetOldTarget().GetHash())
-	assert.Equal(t, "", got.GetNewTarget().GetHash())
-	// Source unchanged.
-	assert.Equal(t, "h1", src.GetOldTarget().GetHash())
+	for _, target := range got.GetTargets().GetTargets() {
+		assert.Equal(t, "", target.GetHash())
+		assert.Nil(t, target.GetTags())
+		assert.Nil(t, target.GetAttributes())
+	}
 }
 
 func TestApplyMetadataOutputConfig_NilConfigDropsTagAndAttrMappings(t *testing.T) {
@@ -177,4 +175,39 @@ func TestApplyMetadataOutputConfig_AllIncludesPassesThrough(t *testing.T) {
 	cfg := &pb.OutputConfig{IncludeTags: true, IncludeAttributes: true}
 	got := applyMetadataOutputConfig(src, cfg)
 	assert.Same(t, src, got, "no copy when nothing needs pruning (include_hashes irrelevant for metadata)")
+}
+
+func TestApplyOptimizedTargetsOutputConfigToChunk_MetadataTagAndAttrMappingsCleared(t *testing.T) {
+	chunk := &pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Metadata{
+			Metadata: &pb.Metadata{
+				TargetIdMapping:             map[int32]string{1: "//foo"},
+				RuleTypeMapping:             map[int32]string{1: "go_library"},
+				TagMapping:                  map[int32]string{1: "manual"},
+				AttributeNameMapping:        map[int32]string{1: "visibility"},
+				AttributeStringValueMapping: map[int32]string{1: "//visibility:public"},
+			},
+		},
+	}
+	got := applyOptimizedTargetsOutputConfigToChunk(chunk, nil)
+	require.NotNil(t, got)
+	m := got.GetMetadata()
+	// target_id and rule_type mappings preserved — still referenced by surviving fields.
+	assert.Equal(t, map[int32]string{1: "//foo"}, m.GetTargetIdMapping())
+	assert.Equal(t, map[int32]string{1: "go_library"}, m.GetRuleTypeMapping())
+	// Tag and attribute mappings dropped — nothing references them after per-target stripping.
+	assert.Nil(t, m.GetTagMapping())
+	assert.Nil(t, m.GetAttributeNameMapping())
+	assert.Nil(t, m.GetAttributeStringValueMapping())
+}
+
+func TestApplyOptimizedTargetsOutputConfigToChunk_FullIncludePassesThrough(t *testing.T) {
+	chunk := &pb.GetTargetGraphResponse{
+		Item: &pb.GetTargetGraphResponse_Targets{
+			Targets: &pb.OptimizedTargets{Targets: []*pb.OptimizedTarget{fullTarget()}},
+		},
+	}
+	cfg := &pb.OutputConfig{IncludeHashes: true, IncludeTags: true, IncludeAttributes: true}
+	got := applyOptimizedTargetsOutputConfigToChunk(chunk, cfg)
+	assert.Same(t, chunk, got, "no copy when nothing needs stripping")
 }

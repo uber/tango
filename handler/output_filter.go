@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package controller
+package handler
 
 import (
 	pb "github.com/uber/tango/tangopb"
@@ -50,29 +50,47 @@ func applyOptimizedTargetOutputConfig(src *pb.OptimizedTarget, cfg *pb.OutputCon
 	return &dst
 }
 
-// applyChangedTargetOutputConfig returns a copy of src with OldTarget and
-// NewTarget filtered per cfg. Returns src unchanged when no stripping is needed.
-func applyChangedTargetOutputConfig(src *pb.ChangedTarget, cfg *pb.OutputConfig) *pb.ChangedTarget {
-	if src == nil || !optimizedTargetNeedsStripping(cfg) {
-		return src
-	}
-	dst := *src
-	dst.OldTarget = applyOptimizedTargetOutputConfig(src.GetOldTarget(), cfg)
-	dst.NewTarget = applyOptimizedTargetOutputConfig(src.GetNewTarget(), cfg)
-	return &dst
-}
-
-// applyChangedTargetsOutputConfig returns a slice with each element filtered
+// applyOptimizedTargetsOutputConfig returns a slice with each element filtered
 // per cfg. Returns the original slice unchanged when no stripping is needed.
-func applyChangedTargetsOutputConfig(src []*pb.ChangedTarget, cfg *pb.OutputConfig) []*pb.ChangedTarget {
+func applyOptimizedTargetsOutputConfig(src []*pb.OptimizedTarget, cfg *pb.OutputConfig) []*pb.OptimizedTarget {
 	if !optimizedTargetNeedsStripping(cfg) || len(src) == 0 {
 		return src
 	}
-	out := make([]*pb.ChangedTarget, len(src))
-	for i, ct := range src {
-		out[i] = applyChangedTargetOutputConfig(ct, cfg)
+	out := make([]*pb.OptimizedTarget, len(src))
+	for i, t := range src {
+		out[i] = applyOptimizedTargetOutputConfig(t, cfg)
 	}
 	return out
+}
+
+// applyOptimizedTargetsOutputConfigToChunk returns a copy of chunk with its
+// OptimizedTargets payload filtered per cfg. Non-targets chunks (Metadata)
+// and chunks that need no stripping are returned unchanged.
+func applyOptimizedTargetsOutputConfigToChunk(chunk *pb.GetTargetGraphResponse, cfg *pb.OutputConfig) *pb.GetTargetGraphResponse {
+	if chunk == nil {
+		return chunk
+	}
+	switch item := chunk.GetItem().(type) {
+	case *pb.GetTargetGraphResponse_Targets:
+		if !optimizedTargetNeedsStripping(cfg) || item.Targets == nil {
+			return chunk
+		}
+		filtered := applyOptimizedTargetsOutputConfig(item.Targets.GetTargets(), cfg)
+		return &pb.GetTargetGraphResponse{
+			Item: &pb.GetTargetGraphResponse_Targets{
+				Targets: &pb.OptimizedTargets{Targets: filtered},
+			},
+		}
+	case *pb.GetTargetGraphResponse_Metadata:
+		pruned := applyMetadataOutputConfig(item.Metadata, cfg)
+		if pruned == item.Metadata {
+			return chunk
+		}
+		return &pb.GetTargetGraphResponse{
+			Item: &pb.GetTargetGraphResponse_Metadata{Metadata: pruned},
+		}
+	}
+	return chunk
 }
 
 // metadataNeedsPruning reports whether applyMetadataOutputConfig would drop

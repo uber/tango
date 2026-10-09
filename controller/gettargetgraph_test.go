@@ -17,7 +17,6 @@ package controller
 import (
 	"bytes"
 	"context"
-	"encoding/gob"
 	"errors"
 	"io"
 	"testing"
@@ -120,44 +119,11 @@ func TestGetTargetGraph_DecodeError_ReturnsError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-	stream.EXPECT().Send(gomock.Any()).Return(nil)
-	store := storagemock.NewMockStorage(ctrl)
-	var buf bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
-
-	gomock.InOrder(
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-xyz"))}, nil),
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(buf.Bytes())}, nil),
-	)
-	c := NewController(context.Background(), Params{
-		RepoConfig: allowAnyRepositoryConfigProvider{},
-		Logger:     zaptest.NewLogger(t),
-		Storage:    store,
-	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{
-			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
-			Remote:   "repo:go-code",
-			BaseSha:  "sha",
-			Requests: []*pb.Request{
-				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
-				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
-			},
-		},
-	}, stream)
-	require.NoError(t, err)
-}
-
 // New coverage: Storage returns NotFound on treehash path -> orchestrator is called to compute the target graph.
 func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background())
-	stream.EXPECT().Send(gomock.Any()).Return(nil)
 
 	store := storagemock.NewMockStorage(ctrl)
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("x"))
@@ -236,37 +202,10 @@ func TestGetTargetGraph_GraphReadError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// New coverage: stream send error is propagated.
-func TestGetTargetGraph_StreamSendError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-	storagemock := storagemock.NewMockStorage(ctrl)
-
-	var buf bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
-
-	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send fail"))
-	gomock.InOrder(
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(buf.Bytes())}, nil),
-	)
-	c := NewController(context.Background(), Params{
-		RepoConfig: allowAnyRepositoryConfigProvider{},
-		Logger:     zaptest.NewLogger(t),
-		Storage:    storagemock,
-	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
-	}, stream)
-	assert.Error(t, err)
-}
-
 func TestGetTargetGraph_GraphNotFound_FallsThrough(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background())
-	stream.EXPECT().Send(gomock.Any()).Return(nil)
 
 	store := storagemock.NewMockStorage(ctrl)
 	gomock.InOrder(

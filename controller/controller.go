@@ -80,7 +80,9 @@ type controller struct {
 // Controller is the business-logic surface the handler depends on. repo is the
 // configured repository that the handler resolved for the request.
 type Controller interface {
-	GetTargetGraph(request entity.GetTargetGraphRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetTargetGraphYARPCServer, repo config.RepositoryConfig) error
+	// GetTargetGraph returns a reader over the target graph of request, or a nil
+	// reader when there is nothing to stream. The caller closes the reader.
+	GetTargetGraph(ctx context.Context, request entity.GetTargetGraphRequest, repo config.RepositoryConfig) (storage.GraphReader, error)
 	GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error
 }
 

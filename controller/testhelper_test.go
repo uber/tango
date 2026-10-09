@@ -16,6 +16,8 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -77,5 +79,17 @@ func getTargetGraph(c Controller, request *pb.GetTargetGraphRequest, stream pb.T
 		return tangoerrors.NewUser(err)
 	}
 	repo := config.RepositoryConfig{Remote: req.Build.Remote, RepositoryID: testRepositoryID(req.Build.Remote)}
-	return c.GetTargetGraph(req, request.GetOutputConfig(), stream, repo)
+	reader, err := c.GetTargetGraph(stream.Context(), req, repo)
+	if err != nil || reader == nil {
+		return err
+	}
+	defer func() { _ = reader.Close() }()
+	for {
+		if _, err := reader.Read(); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
 }

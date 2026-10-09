@@ -16,6 +16,8 @@ package handler
 
 import (
 	"fmt"
+	"io"
+	"time"
 
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/internal/mapper"
@@ -44,5 +46,37 @@ func (h *handler) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.Ta
 	if repositoryErr != nil {
 		return repositoryErr
 	}
-	return h.controller.GetTargetGraph(entityReq, request.GetOutputConfig(), stream, repoCfg)
+	start := time.Now()
+	ctx := stream.Context()
+	graphReader, err := h.controller.GetTargetGraph(ctx, entityReq, repoCfg)
+	if err != nil {
+		return fmt.Errorf("get graph: %w", err)
+	}
+	if graphReader == nil {
+		// Nothing to stream
+		return nil
+	}
+	defer func() { _ = graphReader.Close() }()
+	sendStart := time.Now()
+	outputConfig := request.GetOutputConfig()
+	for {
+		chunk, err := graphReader.Read()
+		if err == io.EOF {
+			sendDuration := time.Since(sendStart)
+			logger.Info("GetTargetGraph: Done streaming",
+				zap.Duration("send_duration", sendDuration),
+				zap.Duration("total_duration", time.Since(start)),
+			)
+			e.DurationHistogram(opGetTargetGraph, "send_duration", metrics.FastDurationBuckets).RecordDuration(sendDuration)
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("graph reader read: %w", err)
+		}
+		protoResp := mapper.GetTargetGraphResponseToProto(&chunk)
+		toSend := applyOptimizedTargetsOutputConfigToChunk(protoResp, outputConfig)
+		if err := stream.Send(toSend); err != nil {
+			return fmt.Errorf("send graph: %w", err)
+		}
+	}
 }

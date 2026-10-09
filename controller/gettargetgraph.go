@@ -25,55 +25,21 @@ import (
 	"github.com/uber/tango/core/cachekey"
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/entity"
-	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/observability/metrics"
 
 	"github.com/uber/tango/core/storage"
-	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
 
-// GetTargetGraph streams the target graph for a given request. repoCfg is the
-// configured repository that the caller resolved for the request.
-func (c *controller) GetTargetGraph(entityReq entity.GetTargetGraphRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetTargetGraphYARPCServer, repoCfg config.RepositoryConfig) error {
+// GetTargetGraph returns a reader over the target graph for req, preferring a
+// cached graph keyed by req.Build's treehash and falling back to the
+// orchestrator on a cache miss. Returns a nil reader and a nil error when
+// there is nothing to stream (an empty cached result).
+func (c *controller) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest, repoCfg config.RepositoryConfig) (storage.GraphReader, error) {
 	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID})
-	logger := c.logger.WithLazy(
-		zap.String("repository", repoCfg.RepositoryID),
-	)
-	start := time.Now()
-	ctx, cancelLink := c.linkRequestCtx(stream.Context())
+	ctx, cancelLink := c.linkRequestCtx(ctx)
 	defer cancelLink()
-	graphReader, err := c.getGraph(ctx, e, entityReq, repoCfg.RepositoryID)
-	if err != nil {
-		return fmt.Errorf("get graph: %w", err)
-	}
-	if graphReader == nil {
-		// Nothing to stream
-		return nil
-	}
-	defer func() { _ = graphReader.Close() }()
-	sendStart := time.Now()
-	for {
-		chunk, err := graphReader.Read()
-		if err == io.EOF {
-			sendDuration := time.Since(sendStart)
-			logger.Info("GetTargetGraph: Done streaming",
-				zap.Duration("send_duration", sendDuration),
-				zap.Duration("total_duration", time.Since(start)),
-			)
-			e.DurationHistogram(opGetTargetGraph, "send_duration", metrics.FastDurationBuckets).RecordDuration(sendDuration)
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("graph reader read: %w", err)
-		}
-		protoResp := mapper.GetTargetGraphResponseToProto(&chunk)
-		toSend := applyOptimizedTargetsOutputConfigToChunk(protoResp, outputConfig)
-		err = stream.Send(toSend)
-		if err != nil {
-			return fmt.Errorf("send graph: %w", err)
-		}
-	}
+	return c.getGraph(ctx, e, req, repoCfg.RepositoryID)
 }
 
 // getGraph retrieves the target graph for a given build description.
