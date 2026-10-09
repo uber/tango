@@ -105,16 +105,16 @@ func readMarkerHash(path string) ([]byte, error) {
 
 	h := newHash()
 	hasContent := false
-	seenFirstLine := false
+	seenHeader := false
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		isFirstLine := !seenFirstLine
-		seenFirstLine = true
-		if !isFirstLine && !isLocalInput(line) {
+		isHeader := !seenHeader // first line: hash of the repo rule's declarative inputs
+		seenHeader = true
+		if !isHeader && !isLocalInput(line) {
 			continue
 		}
 		h.Write([]byte(line))
