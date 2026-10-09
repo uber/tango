@@ -27,7 +27,9 @@ tango/                              # repo root (Go module github.com/uber/tango
 ├── proto/                          # Proto definitions (.proto files)
 ├── tangopb/                        # Generated proto code (committed)
 │   └── tangopbmock/                # Generated mocks for YARPC server interfaces
-├── controller/                     # YARPC service implementation (business logic, transport-adjacent)
+├── handler/                        # YARPC transport layer: RPC surface, validation, proto<->entity, output filtering, chunking
+├── controller/                     # Entity-level business logic: cache I/O, orchestrator calls, comparison
+│   └── controllermock/
 ├── orchestrator/                   # Cross-component coordinator: workspace lease, checkout, graph compute, cache I/O
 │   └── orchestratormock/
 ├── graphrunner/                    # Strategy-pluggable target-graph computation
@@ -59,13 +61,19 @@ tango/                              # repo root (Go module github.com/uber/tango
 └── tools/                          # Bazelisk wrapper and tooling
 ```
 
-The top-level split is by **responsibility**, not by domain: `controller/` handles the RPC surface, `orchestrator/` drives workspace materialization and graph production, `graphrunner/` computes a graph from a materialized workspace, and `core/` holds reusable infrastructure. Interfaces are used at behavioral extension seams so implementations can be mocked or replaced without forcing every cross-layer dependency into an interface.
+The top-level split is by **responsibility**, not by domain: `handler/` owns the YARPC transport, `controller/` owns entity-level business logic, `orchestrator/` drives workspace materialization and graph production, `graphrunner/` computes a graph from a materialized workspace, and `core/` holds reusable infrastructure. Interfaces are used at behavioral extension seams so implementations can be mocked or replaced without forcing every cross-layer dependency into an interface.
+
+### Handler
+
+The handler is the YARPC service implementation. It owns every transport-adjacent concern: RPC signatures and stream objects, request validation, all proto<->entity conversion (`internal/mapper`), output filtering (distance filtering, hash/tags/attributes stripping), and response chunking to stay within the gRPC per-message size limit. It owns the single `metrics.Op` Begin/Complete lifecycle for each RPC, tagged with the repository (`metrics.TagRepo`), and converts the final error at the wire boundary. It depends only on `controller.Controller` and never reaches into storage or the orchestrator directly.
+
+The handler resolves the repository of each request through a `config.RepositoryConfigProvider`. It rejects an unconfigured remote as a user error before it calls the controller, tags its metrics with the repository ID, and passes the resolved `config.RepositoryConfig` to the controller.
 
 ### Controllers
 
-The controller is the YARPC service implementation. It owns transport-adjacent concerns: request validation, metrics, cancellation linkage, response streaming, output filtering, comparison fan-out, and compared-target caching. It does **not** own workspace creation, git operations, or graph computation.
+The controller is Tango's entity-level business logic: cache reads and writes (treehash, graph, compared targets), orchestrator calls, graph comparison fan-out, and canonical ID remapping. It speaks only entity types, with no proto, no `internal/mapper` proto conversions, and no `tangopb` import in the package. It returns full, unfiltered, unchunked results. Output filtering and response chunking for the wire are the handler's job. It receives the resolved `config.RepositoryConfig` from the handler and does not look up the repository itself.
 
-The handler converts the final error of each RPC at the wire boundary. It resolves the repository of each request through a `config.RepositoryConfigProvider`, rejects an unconfigured remote as a user error before it calls the controller, and owns the metrics lifecycle of each RPC (`handler.<operation>.*`), tagged with the repository ID. It also applies the distance and field filters, splits each changed-targets result into wire-sized chunks, and streams the responses. The controller receives the resolved `config.RepositoryConfig` and does not look up the repository itself. It returns the full target graph as a reader and the full changed-targets result as an entity result. Each controller method classifies invalid input as a user error, preserves error chains, attempts applicable cache reads before expensive work, and delegates graph production to the orchestrator.
+Each `Controller` method classifies invalid input as a user error, preserves error chains, attempts applicable cache reads before expensive work, delegates graph production to the orchestrator, and writes computed compared-target results back asynchronously. It does **not** own workspace creation, git operations, graph computation, or the RPC-level metrics lifecycle. It does record its own fine-grained phase metrics (cache lookups, compare and decode durations, target counts), tagged with the repository, so operators can still see where time goes inside a request.
 
 ### Orchestrator
 
@@ -95,6 +103,7 @@ Behavioral interfaces live with the capability they describe and have a single r
 - `core/workspace.Workspace` + `core/workspace.Request` — checkout, apply
 - `graphrunner.GraphRunner` — compute a graph from a workspace
 - `orchestrator.Orchestrator` — top-level entry point
+- `controller.Controller`: entity-level business logic surface the handler depends on
 
 **Design interfaces for the technology *space*, not the implementation in front of you.** The contract must be cheaply satisfiable by every plausible backend, not just the one being built today. For example, the `Storage` interface offers `Get`/`Put`/`Exists`/`List` keyed by a string — primitives that a disk, an in-memory map, S3, GCS, or a CDN can all satisfy without contortion.
 
@@ -265,9 +274,10 @@ Key rules:
 **Add a new RPC method:**
 
 1. Edit `proto/tango.proto` → `make proto`.
-2. Add the handler in `controller/{method}.go` and tests in `controller/{method}_test.go`.
-3. Wire the handler into the YARPC dispatcher in `example/main.go` (the generated `BuildTangoYARPCProcedures` already covers new methods on the service interface).
-4. Regenerate any affected mocks; run `make gazelle`.
+2. Add the entity-level method to `controller.Controller` and its implementation in `controller/{method}.go`, with tests in `controller/{method}_test.go`.
+3. Add the RPC method in `handler/{method}.go` (validation, proto<->entity conversion, output filtering, streaming) and tests in `handler/{method}_test.go`.
+4. The generated `BuildTangoYARPCProcedures` already covers new methods on the service interface; `example/main.go` wires `handler.New` into the dispatcher.
+5. Regenerate any affected mocks (including `controller/controllermock`); run `make gazelle`.
 
 **Add a new storage backend:**
 
