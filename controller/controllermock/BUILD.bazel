@@ -1,0 +1,12 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "controllermock",
+    srcs = ["controllermock.go"],
+    importpath = "github.com/uber/tango/controller/controllermock",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tangopb",
+        "@org_uber_go_mock//gomock",
+    ],
+)

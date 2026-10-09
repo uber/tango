@@ -76,9 +76,14 @@ type controller struct {
 	appCtx context.Context
 }
 
+// Controller is the service implementation the handler depends on.
+type Controller interface {
+	pb.TangoYARPCServer
+}
+
 // NewController creates a new controller. appCtx is cancelled on process
 // shutdown to abort background work.
-func NewController(appCtx context.Context, p Params) pb.TangoYARPCServer {
+func NewController(appCtx context.Context, p Params) Controller {
 	emitter := metrics.New(p.Scope).SubScope("controller")
 	maxMessageBytes := p.MaxMessageBytes
 	if maxMessageBytes <= 0 {
