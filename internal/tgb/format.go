@@ -41,20 +41,13 @@ const (
 	// raw; anything near this cap is not a real graph.
 	maxColumnRawSize = uint64(1) << 30
 
-	// maxZstdExpansion bounds rawSize/compressedSize for zstd columns. The
-	// most compressible real column (TAG_DEG, almost all zeros) expands
-	// ~75x; 4096x is generous headroom while still stopping a kilobyte
-	// blob from claiming gigabytes.
-	maxZstdExpansion = uint64(4096)
-
 	// maxTotalRawFactor bounds the *sum* of claimed rawSize across all
 	// columns relative to the blob size, with maxTotalRawFloor as an
-	// absolute floor so tiny legitimate blobs are never rejected. The
-	// per-column expansion cap alone is not enough: a small blob full of
-	// RLE frames can honestly expand 30,000x, and everything downstream
-	// (dict expansion, degree indexes, Decode) allocates in proportion to
-	// raw bytes. The real graph measures 1.81x raw/file; 16x is ~9x
-	// headroom.
+	// absolute floor so tiny legitimate blobs are never rejected. A small
+	// blob full of RLE frames can honestly expand 30,000x, and everything
+	// downstream (dict expansion, degree indexes, Decode) allocates in
+	// proportion to raw bytes. The real graph measures 1.81x raw/file; 16x
+	// is ~9x headroom.
 	maxTotalRawFactor = uint64(16)
 	maxTotalRawFloor  = uint64(4) << 20
 
