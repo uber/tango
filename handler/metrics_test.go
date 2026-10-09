@@ -23,6 +23,7 @@ import (
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	mock_controller "github.com/uber/tango/controller/controllermock"
+	"github.com/uber/tango/entity"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
 	"go.uber.org/mock/gomock"
@@ -90,7 +91,7 @@ func TestLifecycleMetrics(t *testing.T) {
 				return h.GetChangedTargets(&pb.GetChangedTargetsRequest{FirstRevision: validBuild, SecondRevision: validBuild}, changedTargetsStream(ctrl))
 			},
 			expect: func(m *mock_controller.MockController) {
-				m.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+				m.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any(), gomock.Any()).Return(entity.ChangedTargetsResult{}, nil)
 			},
 			wantRepo:   "test-repository",
 			wantResult: "success",

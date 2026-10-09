@@ -135,6 +135,7 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		Logger:               zl,
 		RepoManagerClonePath: clonePath,
 		PoolSize:             2,
+		RepoConfig:           cfg,
 	})
 	require.NoError(t, err, "failed to create repo manager")
 
@@ -153,8 +154,11 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		Orchestrator: orch,
 		GraphConfig:  cfg,
 	})
-
-	h := handler.New(handler.Params{Logger: zl, Controller: ctrl, RepoConfig: cfg})
+	h := handler.New(handler.Params{
+		Logger:     zl,
+		Controller: ctrl,
+		RepoConfig: cfg,
+	})
 
 	grpcTransport := yarpcgrpc.NewTransport()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

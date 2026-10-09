@@ -18,22 +18,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
-	"errors"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/config"
-	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
-	"github.com/uber/tango/internal/mapper"
-	"github.com/uber/tango/mapper/proto"
 	"github.com/uber/tango/observability/metrics"
-	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
+
+var testRepositoryConfig = config.RepositoryConfig{RepositoryID: "test-repository"}
 
 func testRepositoryID(string) string {
 	return "test-repository"
@@ -67,25 +64,22 @@ func newGraphReader(t *testing.T, chunks ...entity.GetTargetGraphResponse) stora
 	return reader
 }
 
-func getTargetGraph(c Controller, request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) error {
-	req, err := mapper.ProtoToGetTargetGraphRequest(request)
-	if err != nil {
-		return tangoerrors.NewUser(err)
+// readCloser wraps a string as an io.ReadCloser for storage mock responses.
+func readCloser(s string) io.ReadCloser {
+	return io.NopCloser(strings.NewReader(s))
+}
+
+// encodeGraphChunks gob-encodes a sequence of entity.GetTargetGraphResponse
+// values the way storage.WriteGraphStream does, for use with storage mocks
+// that need raw bytes rather than a real backing store.
+func encodeGraphChunks(t *testing.T, chunks []entity.GetTargetGraphResponse) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	for i := range chunks {
+		require.NoError(t, enc.Encode(&chunks[i]))
 	}
-	repo := config.RepositoryConfig{Remote: req.Build.Remote, RepositoryID: testRepositoryID(req.Build.Remote)}
-	reader, err := c.GetTargetGraph(stream.Context(), req, repo)
-	if err != nil || reader == nil {
-		return err
-	}
-	defer func() { _ = reader.Close() }()
-	for {
-		if _, err := reader.Read(); err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-	}
+	return buf.Bytes()
 }
 
 // encodeChangedTargetsChunks gob-encodes a sequence of
@@ -102,16 +96,21 @@ func encodeChangedTargetsChunks(t *testing.T, chunks []entity.GetChangedTargetsR
 	return buf.Bytes()
 }
 
-// readCloser wraps a string as an io.ReadCloser for storage mock responses.
-func readCloser(s string) io.ReadCloser {
-	return io.NopCloser(strings.NewReader(s))
-}
-
-func callGetChangedTargets(c Controller, request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error {
-	req, err := proto.ProtoToGetChangedTargetsRequest(request)
-	if err != nil {
-		return tangoerrors.NewUser(err)
+// decodeChangedTargetsChunks reverses encodeChangedTargetsChunks, decoding a
+// gob-encoded blob the way storage.NewChangedTargetsReader does, so a test
+// can inspect exactly how many chunks a cache write produced.
+func decodeChangedTargetsChunks(t *testing.T, data []byte) []entity.GetChangedTargetsResponse {
+	t.Helper()
+	dec := gob.NewDecoder(bytes.NewReader(data))
+	var chunks []entity.GetChangedTargetsResponse
+	for {
+		var resp entity.GetChangedTargetsResponse
+		err := dec.Decode(&resp)
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		chunks = append(chunks, resp)
 	}
-	repo := config.RepositoryConfig{Remote: req.First.Remote, RepositoryID: testRepositoryID(req.First.Remote)}
-	return c.GetChangedTargets(req, request.GetOutputConfig(), stream, repo)
+	return chunks
 }

@@ -110,6 +110,23 @@ func TestApplyOptimizedTargetOutputConfig_NilTarget(t *testing.T) {
 	assert.Nil(t, applyOptimizedTargetOutputConfig(nil, nil))
 }
 
+func TestApplyChangedTargetOutputConfig_StripsBothSides(t *testing.T) {
+	src := &pb.ChangedTarget{
+		ChangeType: pb.CHANGE_TYPE_CHANGED,
+		OldTarget:  fullTarget(),
+		NewTarget:  fullTarget(),
+		Distance:   2,
+	}
+	got := applyChangedTargetOutputConfig(src, nil)
+	require.NotNil(t, got)
+	assert.Equal(t, pb.CHANGE_TYPE_CHANGED, got.GetChangeType(), "change type preserved")
+	assert.Equal(t, int32(2), got.GetDistance(), "distance preserved")
+	assert.Equal(t, "", got.GetOldTarget().GetHash())
+	assert.Equal(t, "", got.GetNewTarget().GetHash())
+	// Source unchanged.
+	assert.Equal(t, "h1", src.GetOldTarget().GetHash())
+}
+
 func TestApplyOptimizedTargetsOutputConfigToChunk_StripsTargets(t *testing.T) {
 	chunk := &pb.GetTargetGraphResponse{
 		Item: &pb.GetTargetGraphResponse_Targets{

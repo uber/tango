@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "handler",
     srcs = [
+        "distance_filter.go",
         "errors.go",
         "getchangedtargetgraph.go",
         "getchangedtargets.go",
@@ -17,7 +18,9 @@ go_library(
         "//config",
         "//controller",
         "//core/errors",
+        "//entity",
         "//internal/mapper",
+        "//internal/streaming",
         "//mapper/proto",
         "//observability/metrics",
         "//tangopb",
@@ -31,6 +34,7 @@ go_library(
 go_test(
     name = "handler_test",
     srcs = [
+        "distance_filter_test.go",
         "getchangedtargetgraph_test.go",
         "getchangedtargets_test.go",
         "gettargetgraph_test.go",
@@ -43,11 +47,8 @@ go_test(
     embed = [":handler"],
     deps = [
         "//config",
-        "//controller",
         "//controller/controllermock",
         "//core/errors",
-        "//core/storage",
-        "//core/storage/storagemock",
         "//entity",
         "//tangopb",
         "//tangopb/tangopbmock",

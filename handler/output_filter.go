@@ -63,6 +63,31 @@ func applyOptimizedTargetsOutputConfig(src []*pb.OptimizedTarget, cfg *pb.Output
 	return out
 }
 
+// applyChangedTargetOutputConfig returns a copy of src with OldTarget and
+// NewTarget filtered per cfg. Returns src unchanged when no stripping is needed.
+func applyChangedTargetOutputConfig(src *pb.ChangedTarget, cfg *pb.OutputConfig) *pb.ChangedTarget {
+	if src == nil || !optimizedTargetNeedsStripping(cfg) {
+		return src
+	}
+	dst := *src
+	dst.OldTarget = applyOptimizedTargetOutputConfig(src.GetOldTarget(), cfg)
+	dst.NewTarget = applyOptimizedTargetOutputConfig(src.GetNewTarget(), cfg)
+	return &dst
+}
+
+// applyChangedTargetsOutputConfig returns a slice with each element filtered
+// per cfg. Returns the original slice unchanged when no stripping is needed.
+func applyChangedTargetsOutputConfig(src []*pb.ChangedTarget, cfg *pb.OutputConfig) []*pb.ChangedTarget {
+	if !optimizedTargetNeedsStripping(cfg) || len(src) == 0 {
+		return src
+	}
+	out := make([]*pb.ChangedTarget, len(src))
+	for i, ct := range src {
+		out[i] = applyChangedTargetOutputConfig(ct, cfg)
+	}
+	return out
+}
+
 // applyOptimizedTargetsOutputConfigToChunk returns a copy of chunk with its
 // OptimizedTargets payload filtered per cfg. Non-targets chunks (Metadata)
 // and chunks that need no stripping are returned unchanged.

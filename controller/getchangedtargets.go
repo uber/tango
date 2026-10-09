@@ -26,14 +26,12 @@ import (
 	"github.com/uber/tango/core/cachekey"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
-	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/internal/mapper/idmapper"
 	"github.com/uber/tango/internal/streaming"
 	"github.com/uber/tango/internal/targetdiff"
 	"github.com/uber/tango/internal/tgb"
 	"github.com/uber/tango/internal/tgbdiff"
 	"github.com/uber/tango/observability/metrics"
-	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
 
@@ -77,49 +75,38 @@ type job struct {
 	cancel    context.CancelCauseFunc
 }
 
-// GetChangedTargets returns the changed targets between two revisions. If the
-// client disconnects, the stream's context is cancelled and the function
+// GetChangedTargets returns the full, unfiltered set of changes between
+// req's two revisions. If the caller's context is cancelled, the function
 // returns with context.Canceled.
-func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetChangedTargetsYARPCServer, repoCfg config.RepositoryConfig) error {
+func (c *controller) GetChangedTargets(ctx context.Context, req entity.GetChangedTargetsRequest, repoCfg config.RepositoryConfig) (entity.ChangedTargetsResult, error) {
 	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID})
 	logger := c.logger.WithLazy(
 		zap.String("repository", repoCfg.RepositoryID),
 	)
-	ctx, cancelLink := c.linkRequestCtx(stream.Context())
+	ctx, cancelLink := c.linkRequestCtx(ctx)
 	defer cancelLink()
 	start := time.Now()
 
 	logger.Info("GetChangedTargets: Processing request")
 
-	// Default max_distance to -1 (no filtering) when the client omits OutputConfig
-	// entirely. When OutputConfig is supplied, take max_distance at face value —
-	// see proto/tango.proto OutputConfig.max_distance for the wire-default caveat.
-	maxDist := int32(-1)
-	if outputConfig != nil {
-		maxDist = outputConfig.GetMaxDistance()
-	}
-
-	// Fast path: stream a previously computed result straight from cache.
-	if !entityReq.BypassCache {
-		cached, found, err := c.comparedTargetsFromCache(ctx, e, logger, entityReq, repoCfg.RepositoryID, start)
+	// Fast path: return a previously computed result straight from cache.
+	if !req.BypassCache {
+		cached, found, err := c.comparedTargetsFromCache(ctx, e, logger, req, repoCfg.RepositoryID, start)
 		if err != nil {
-			return fmt.Errorf("serve from cache: %w", err)
+			return entity.ChangedTargetsResult{}, fmt.Errorf("read from cache: %w", err)
 		}
 		if found {
-			if err := c.sendChangedTargets(stream, cached, maxDist, outputConfig); err != nil {
-				return fmt.Errorf("send cached response: %w", err)
-			}
-			return nil
+			return cached, nil
 		}
 	}
 
 	// Fetch both revisions' target graphs concurrently.
-	firstGraph, secondGraph, err := c.fetchTargetGraphs(ctx, e, logger, entityReq, repoCfg.RepositoryID)
+	firstGraph, secondGraph, err := c.fetchTargetGraphs(ctx, e, logger, req, repoCfg.RepositoryID)
 	if err != nil {
-		return fmt.Errorf("fetch target graphs: %w", err)
+		return entity.ChangedTargetsResult{}, fmt.Errorf("fetch target graphs: %w", err)
 	}
 
-	result, err := c.compareFetchedGraphs(ctx, e, logger, entityReq.First.Remote, firstGraph, secondGraph, seedAttributesFor(repoCfg))
+	result, err := c.compareFetchedGraphs(ctx, e, logger, req.First.Remote, firstGraph, secondGraph, seedAttributesFor(repoCfg))
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = fetchedGraph{}
 	secondGraph = fetchedGraph{}
@@ -127,31 +114,23 @@ func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest
 		if ctx.Err() != nil {
 			err = context.Cause(ctx)
 		}
-		return fmt.Errorf("compare target graphs: %w", err)
+		return entity.ChangedTargetsResult{}, fmt.Errorf("compare target graphs: %w", err)
 	}
 
-	// Cache the computed result concurrently so it doesn't block the stream send.
-	c.cacheComparedTargets(logger, entityReq, repoCfg.RepositoryID, result)
-
-	sendStart := time.Now()
-	if err := c.sendChangedTargets(stream, result, maxDist, outputConfig); err != nil {
-		return fmt.Errorf("send response: %w", err)
-	}
-	sendDuration := time.Since(sendStart)
-	e.DurationHistogram(opGetChangedTargets, "send_duration", metrics.FastDurationBuckets).RecordDuration(sendDuration)
+	// Cache the computed result concurrently so it doesn't block the caller.
+	c.cacheComparedTargets(logger, req, repoCfg.RepositoryID, result)
 
 	logger.Info("GetChangedTargets: Successfully processed request",
-		zap.Duration("send_duration", sendDuration),
 		zap.Duration("total_duration", time.Since(start)),
 	)
-	return nil
+	return result, nil
 }
 
 // comparedTargetsFromCache attempts to load a previously computed
 // compared-targets result straight from storage. It returns:
 //   - (result, true, nil)   when a cached result was found;
-//   - (empty, false, nil)   on a cache miss or a corrupt blob — the caller should recompute;
-//   - (empty, false, err)   on an infra failure or a cancelled context.
+//   - (nil, false, nil)     on a cache miss or a corrupt blob — the caller should recompute;
+//   - (nil, false, err)     on an infra failure or a cancelled context.
 //
 // readTreehash returns ("", nil) on a cache miss (skip cache, recompute) but any
 // real storage error surfaces here so an infra failure that disables the cache
@@ -180,8 +159,10 @@ func (c *controller) comparedTargetsFromCache(ctx context.Context, e *metrics.Em
 
 	// Buffer and merge all chunks before returning any. A concurrent goroutine
 	// write may have left a partial blob in storage; buffering lets us detect
-	// corruption and fall through to recompute before we serve anything.
-	// Merging also reads size-bounded multi-chunk blobs.
+	// corruption and fall through to recompute before we've committed to
+	// serving anything. Merging here also keeps this read compatible with
+	// older, size-bounded multi-chunk blobs written before chunking moved to
+	// the handler.
 	var cached entity.ChangedTargetsResult
 	var mergedMeta *entity.Metadata
 	var readErr error
@@ -217,15 +198,17 @@ func (c *controller) comparedTargetsFromCache(ctx context.Context, e *metrics.Em
 	cached.Metadata = mergedMeta
 
 	cacheReadDuration := time.Since(cacheStart)
-	logger.Info("GetChangedTargets: Cache hit, streaming from storage",
+	logger.Info("GetChangedTargets: Cache hit",
 		zap.Duration("cache_read_duration", cacheReadDuration),
+		zap.Duration("total_duration", time.Since(start)),
 	)
 	metrics.RecordCacheLookup(e, opGetChangedTargets, metrics.ComparedTargetsCacheLookup, nil)
 	e.DurationHistogram(opGetChangedTargets, "cache_read_duration", metrics.FastDurationBuckets).RecordDuration(cacheReadDuration)
 	return cached, true, nil
 }
 
-// mergeMetadata merges src into dst, allocating the maps of dst on first use.
+// mergeMetadata merges src into dst, allocating dst's maps on first use.
+// Used to reassemble a result from a legacy multi-chunk compared-targets blob.
 func mergeMetadata(dst *entity.Metadata, src *entity.Metadata) *entity.Metadata {
 	if dst == nil {
 		dst = &entity.Metadata{
@@ -248,7 +231,7 @@ func mergeMetadata(dst *entity.Metadata, src *entity.Metadata) *entity.Metadata 
 // fetch runs under its own cancellable context so that, when one fails, the
 // sibling is cancelled to avoid wasting work on a result that will be discarded.
 // Errors caused solely by that induced cancellation are dropped; only the
-// original failure is returned. A client disconnect surfaces as a user-cancelled
+// original failure is returned. A caller disconnect surfaces as a user-cancelled
 // error. A graph stored as a TGB blob comes back as its undrained reader; a
 // gob-era graph is drained into chunks here, inside the concurrent fetch.
 func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request entity.GetChangedTargetsRequest, repositoryID string) (fetchedGraph, fetchedGraph, error) {
@@ -376,14 +359,16 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 }
 
 // cacheComparedTargets writes the computed compared-targets result to storage in
-// a fire-and-forget goroutine so it does not block the caller. The result
-// is only read (never mutated) by the goroutine and the foreground caller, so
+// a fire-and-forget goroutine so it does not block the caller. result is only
+// read (never mutated) by the goroutine and the foreground caller, so
 // concurrent access is safe; the caller must not mutate it. This is best effort.
 //
-// The blob is written as size-bounded chunks, the format of every earlier
-// writer of this cache key, so that an older binary sharing the same storage
-// can read an entry this controller wrote. The older send path forwards each
-// stored chunk to the wire as one message without re-chunking.
+// The blob is written as size-bounded chunks, same as the gob graph write
+// path and the same as every binary that has ever written this cache key, so
+// that an older binary sharing the same storage (a rolling deploy or a
+// rollback) can read an entry this controller wrote: its read path merges
+// chunks, but its send path (for a cache hit) forwards each stored chunk to
+// the wire as one message without re-chunking.
 func (c *controller) cacheComparedTargets(logger *zap.Logger, request entity.GetChangedTargetsRequest, repositoryID string, result entity.ChangedTargetsResult) {
 	responses, err := streaming.ChunkChangedTargetsResult(result, c.maxMessageBytes)
 	if err != nil {
@@ -962,47 +947,6 @@ func toChangeType(ct targetdiff.ChangeType) entity.ChangeType {
 	}
 }
 
-// sendTrimmedChangedTargets streams responses to the client, filtering changed targets to those
-// within maxDist from any distance-0 seed when maxDist >= 0, stripping per-target
-// hash/tags/attributes per outputConfig's include_* flags, and pruning metadata mappings
-// whose IDs are no longer referenced. Each entity response is converted to proto at the
-// stream.Send boundary.
-func sendTrimmedChangedTargets(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []entity.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) error {
-	stripFields := optimizedTargetNeedsStripping(outputConfig)
-	pruneMeta := metadataNeedsPruning(outputConfig)
-	for i := range responses {
-		protoResp := mapper.ChangedTargetsResponseToProto(&responses[i])
-		toSend := protoResp
-		switch item := protoResp.GetItem().(type) {
-		case *pb.GetChangedTargetsResponse_ChangedTargets:
-			if maxDist >= 0 || stripFields {
-				kept := item.ChangedTargets.GetChangedTargets()
-				if maxDist >= 0 {
-					kept = filterChangedTargetsByDistance(kept, maxDist)
-				}
-				kept = applyChangedTargetsOutputConfig(kept, outputConfig)
-				toSend = &pb.GetChangedTargetsResponse{
-					Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-						ChangedTargets: &pb.ChangedTargets{ChangedTargets: kept},
-					},
-				}
-			}
-		case *pb.GetChangedTargetsResponse_Metadata:
-			if pruneMeta {
-				toSend = &pb.GetChangedTargetsResponse{
-					Item: &pb.GetChangedTargetsResponse_Metadata{
-						Metadata: applyMetadataOutputConfig(item.Metadata, outputConfig),
-					},
-				}
-			}
-		}
-		if err := stream.Send(toSend); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // readTreehashParallel fetches the treehashes for two build descriptions concurrently.
 // Each treehash is read via readTreehash, so a cache miss yields "" (with a nil error)
 // while any real storage/read failure is returned. The two reads run under a shared
@@ -1066,12 +1010,4 @@ func readTreehash(ctx context.Context, st storage.Storage, build entity.BuildDes
 		return "", fmt.Errorf("treehash body read failed for key %q: %w", key, err)
 	}
 	return string(b), nil
-}
-
-func (c *controller) sendChangedTargets(stream pb.TangoServiceGetChangedTargetsYARPCServer, result entity.ChangedTargetsResult, maxDist int32, outputConfig *pb.OutputConfig) error {
-	responses, err := streaming.ChunkChangedTargetsResult(result, c.maxMessageBytes)
-	if err != nil {
-		return err
-	}
-	return sendTrimmedChangedTargets(stream, responses, maxDist, outputConfig)
 }

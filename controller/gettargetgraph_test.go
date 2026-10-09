@@ -27,16 +27,31 @@ import (
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	"github.com/uber/tango/entity"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
-	pb "github.com/uber/tango/tangopb"
-	tangomock "github.com/uber/tango/tangopb/tangopbmock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 )
 
-func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
+// drainGraphReader reads every chunk off r, asserting no error occurs partway
+// through, and returns the chunks it saw.
+func drainGraphReader(t *testing.T, r storage.GraphReader) []entity.GetTargetGraphResponse {
+	t.Helper()
+	if r == nil {
+		return nil
+	}
+	defer func() { _ = r.Close() }()
+	var chunks []entity.GetTargetGraphResponse
+	for {
+		chunk, err := r.Read()
+		if err == io.EOF {
+			return chunks
+		}
+		require.NoError(t, err)
+		chunks = append(chunks, chunk)
+	}
+}
+
+func TestGetTargetGraph_CacheHitEmptyGraph(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
 	store := storagemock.NewMockStorage(ctrl)
 	// Return a valid treehash, then an empty graph blob (no messages).
 	gomock.InOrder(
@@ -49,79 +64,52 @@ func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
 		Logger:  zaptest.NewLogger(t),
 		Storage: store,
 	})
-	req := &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{
-			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
-			Remote:   "repo:go-code",
-			BaseSha:  "sha",
-			Requests: []*pb.Request{
-				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
-				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
-			},
-		},
-	}
-	err := getTargetGraph(c, req, stream)
+	reader, err := c.GetTargetGraph(t.Context(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+	}, testRepositoryConfig)
 	require.NoError(t, err)
+	assert.Empty(t, drainGraphReader(t, reader))
 }
 
 func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 	expected := errors.New("boom")
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
 	storagemock := storagemock.NewMockStorage(ctrl)
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, expected)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
 		Storage: storagemock,
 	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{
-			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
-			Remote:   "repo:go-code",
-			BaseSha:  "sha",
-			Requests: []*pb.Request{
-				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
-				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
-			},
-		},
-	}, stream)
-	assert.Error(t, expected, err)
+	_, err := c.GetTargetGraph(t.Context(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+	}, testRepositoryConfig)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, expected)
 }
 
-func TestGetTargetGraph_DecodeError_ReturnsError(t *testing.T) {
+func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-	storagemock := storagemock.NewMockStorage(ctrl)
+	store := storagemock.NewMockStorage(ctrl)
+	graphBytes := encodeGraphChunks(t, []entity.GetTargetGraphResponse{{Targets: []entity.OptimizedTarget{}}})
+
 	gomock.InOrder(
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("bad-bytes"))}, nil),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-xyz"))}, nil),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(graphBytes)}, nil),
 	)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
-		Storage: storagemock,
+		Storage: store,
 	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{
-			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
-			Remote:   "repo:go-code",
-			BaseSha:  "sha",
-			Requests: []*pb.Request{
-				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
-				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
-			},
-		},
-	}, stream)
-	assert.Error(t, err)
+	reader, err := c.GetTargetGraph(t.Context(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+	}, testRepositoryConfig)
+	require.NoError(t, err)
+	assert.Len(t, drainGraphReader(t, reader), 1)
 }
 
 // New coverage: Storage returns NotFound on treehash path -> orchestrator is called to compute the target graph.
 func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-
 	store := storagemock.NewMockStorage(ctrl)
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("x"))
 	orchestrator := orchestratormock.NewMockOrchestrator(ctrl)
@@ -132,34 +120,31 @@ func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		Storage:      store,
 		Orchestrator: orchestrator,
 	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
-	}, stream)
+	reader, err := c.GetTargetGraph(t.Context(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+	}, testRepositoryConfig)
 	require.NoError(t, err)
+	assert.Len(t, drainGraphReader(t, reader), 1)
 }
 
 // New coverage: io.ReadAll fails on treehash read -> error returned.
 func TestGetTargetGraph_TreehashReadError(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
 	store := storagemock.NewMockStorage(ctrl)
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: &errReadCloser{err: errors.New("readfail")}}, nil)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
 		Storage: store,
 	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
-	}, stream)
+	_, err := c.GetTargetGraph(t.Context(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+	}, testRepositoryConfig)
 	assert.Error(t, err)
 }
 
 // New coverage: graph fetch returns error -> classified as graph_fetch/infra.
 func TestGetTargetGraph_GraphFetchError(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
 	store := storagemock.NewMockStorage(ctrl)
 	gomock.InOrder(
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
@@ -169,37 +154,14 @@ func TestGetTargetGraph_GraphFetchError(t *testing.T) {
 		Logger:  zaptest.NewLogger(t),
 		Storage: store,
 	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
-	}, stream)
+	_, err := c.GetTargetGraph(t.Context(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+	}, testRepositoryConfig)
 	require.Error(t, err)
-}
-
-// New coverage: io.ReadFrom fails on graph read -> error returned.
-func TestGetTargetGraph_GraphReadError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-	store := storagemock.NewMockStorage(ctrl)
-	gomock.InOrder(
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: &errReadCloser{err: errors.New("readfail")}}, nil),
-	)
-	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
-	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
-	}, stream)
-	assert.Error(t, err)
 }
 
 func TestGetTargetGraph_GraphNotFound_FallsThrough(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-
 	store := storagemock.NewMockStorage(ctrl)
 	gomock.InOrder(
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
@@ -213,18 +175,17 @@ func TestGetTargetGraph_GraphNotFound_FallsThrough(t *testing.T) {
 		Storage:      store,
 		Orchestrator: orch,
 	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
-	}, stream)
+	reader, err := c.GetTargetGraph(t.Context(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+	}, testRepositoryConfig)
 	require.NoError(t, err)
+	assert.Len(t, drainGraphReader(t, reader), 1)
 }
 
 func TestGetTargetGraph_GraphReadCancelled(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	stream.EXPECT().Context().Return(ctx)
 	store := storagemock.NewMockStorage(ctrl)
 	gomock.InOrder(
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
@@ -234,18 +195,16 @@ func TestGetTargetGraph_GraphReadCancelled(t *testing.T) {
 		Logger:  zaptest.NewLogger(t),
 		Storage: store,
 	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
-	}, stream)
+	_, err := c.GetTargetGraph(ctx, entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+	}, testRepositoryConfig)
 	require.Error(t, err)
 }
 
 func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	stream.EXPECT().Context().Return(ctx)
 	store := storagemock.NewMockStorage(ctrl)
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("x"))
 	orch := orchestratormock.NewMockOrchestrator(ctrl)
@@ -255,9 +214,9 @@ func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 		Storage:      store,
 		Orchestrator: orch,
 	})
-	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
-	}, stream)
+	_, err := c.GetTargetGraph(ctx, entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
+	}, testRepositoryConfig)
 	require.Error(t, err)
 }
 

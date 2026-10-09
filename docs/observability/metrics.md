@@ -206,7 +206,7 @@ if err == nil {
 
 ### Querying
 
-The handler publishes the `start` and `finish` lifecycle metrics of each RPC under `handler.<operation>`, and it publishes the `send_duration` of GetTargetGraph there. The controller publishes its phase metrics, such as cache lookups and `target_count`, and the `send_duration` of GetChangedTargets, under `controller.<operation>`.
+The handler publishes the `start` and `finish` lifecycle metrics of each RPC under `handler.<operation>`. The controller publishes its phase metrics, such as cache lookups, durations, and `target_count`, under `controller.<operation>`.
 
 ```
 # operation rate

@@ -82,6 +82,7 @@ func run() error {
 		Logger:               logger,
 		RepoManagerClonePath: repoManagerClonePath,
 		PoolSize:             cfg.Service.MaxWorkerPoolSize,
+		RepoConfig:           cfg,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create repo manager: %w", err)
@@ -97,8 +98,8 @@ func run() error {
 		return fmt.Errorf("failed to setup orchestrator: %w", err)
 	}
 
-	// Controller (YARPC server implementation). appCtx is forwarded so the
-	// controller's background goroutines are tied to process lifetime.
+	// Controller (business logic). appCtx is forwarded so the controller's
+	// background goroutines are tied to process lifetime.
 	ctrl := controller.NewController(appCtx, controller.Params{
 		Logger:          logger,
 		Storage:         store,
@@ -107,7 +108,13 @@ func run() error {
 		GraphConfig:     cfg,
 	})
 
-	h := handler.New(handler.Params{Logger: logger, Controller: ctrl, RepoConfig: cfg})
+	// Handler (YARPC server implementation, transport layer).
+	h := handler.New(handler.Params{
+		Logger:          logger,
+		Controller:      ctrl,
+		RepoConfig:      cfg,
+		MaxMessageBytes: cfg.Service.MaxMessageBytes,
+	})
 
 	// YARPC transports and dispatcher
 	grpcTransport := yarpcgrpc.NewTransport()

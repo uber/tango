@@ -93,8 +93,8 @@ func SplitMetadata(
 // ChunkChangedTargetsResult splits a full, unchunked changed-targets result
 // into message-size-bounded response chunks: changed targets first, then
 // metadata, each within maxBytes. The controller's compared-targets cache
-// write and wire send both call this so the two chunk the same result the
-// same way.
+// write and the handler's wire send both call this so the two chunk the same
+// result the same way.
 func ChunkChangedTargetsResult(result entity.ChangedTargetsResult, maxBytes int) ([]entity.GetChangedTargetsResponse, error) {
 	changedGroups, err := SplitBySize(result.ChangedTargets, maxBytes)
 	if err != nil {
