@@ -93,18 +93,9 @@ func isLocalInput(line string) bool {
 // The first line is a hash of the repo rule's declarative inputs (URL,
 // version, patch paths) but does NOT include the content hashes of patch
 // files. Those appear on FILE: lines alongside their SHA-256 content
-// hashes.
-//
-// Only the first line and the inputs local to the main repo (FILE:, DIRTREE:
-// and DIRENTS: lines with an @@// path, see localInputPrefixes) are hashed.
-// Every other line is skipped:
-//   - ENV: lines, because environment variables can differ between CI hosts.
-//   - FILE: lines for files in other repos, because those can be generated
-//     during the fetch and embed the Bazel output_base path (for example
-//     go_repository_cache's go.env and the binaries built by
-//     go_repository_tools), which differs between workspaces even when no
-//     dependency changed.
-//   - REPO_MAPPING: lines, which only restate canonical repo names.
+// hashes. ENV: lines are skipped because environment variables can differ
+// between CI environments and would cause unnecessary hash instability.
+// Only inputs local to the main repo are hashed, see localInputPrefixes.
 func readMarkerHash(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
