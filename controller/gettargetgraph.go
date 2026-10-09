@@ -167,24 +167,18 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 	return graphReader, nil
 }
 
-// readCachedGraph opens the cached graph for a resolved treehash, preferring
-// the TGB blob when the repository is configured for it and falling back to
-// the gob stream for entries written before the format flip. A TGB blob that
-// exists but fails validation is treated as a miss (the orchestrator will
-// recompute and overwrite it), not an infra failure. Returns a not-found
-// error when neither format is present.
+// readCachedGraph opens the cached graph for a resolved treehash.
+// TGB-configured repos read only TGB; corrupt or missing TGB propagates
+// — the recovery is to recompute (which overwrites), not to serve a stale
+// gob blob from an earlier format era.
 func (c *controller) readCachedGraph(ctx context.Context, logger *zap.Logger, graphFormat, repositoryID, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) (storage.GraphReader, error) {
 	if graphFormat == config.GraphFormatTGB {
 		tgbPath := cachekey.GetTGBGraphByTreeHash(repositoryID, treehash, strategy, excludeFilesRegex)
 		graphReader, err := storage.NewTGBGraphReader(ctx, c.storage, tgbPath, c.maxMessageBytes)
-		if err == nil {
-			return graphReader, nil
+		if err != nil && errors.Is(err, storage.ErrCorruptTGB) {
+			logger.Warn("readCachedGraph: corrupt TGB blob", zap.String("path", tgbPath), zap.Error(err))
 		}
-		if errors.Is(err, storage.ErrCorruptTGB) {
-			logger.Warn("readCachedGraph: corrupt TGB blob, falling back", zap.String("path", tgbPath), zap.Error(err))
-		} else if !storage.IsNotFound(err) {
-			return nil, err
-		}
+		return graphReader, err
 	}
 	gobPath := cachekey.GetGraphByTreeHash(repositoryID, treehash, strategy, excludeFilesRegex)
 	return storage.NewGraphReader(ctx, c.storage, gobPath)

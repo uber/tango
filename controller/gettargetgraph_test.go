@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/storage"
 	storagemock "github.com/uber/tango/core/storage/storagemock"
 	"github.com/uber/tango/entity"
@@ -362,6 +363,63 @@ func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 		Logger:       zaptest.NewLogger(t),
 		Storage:      store,
 		Orchestrator: orch,
+	})
+	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
+	}, stream)
+	require.Error(t, err)
+}
+
+func TestGetTargetGraph_TGB_NotFound_DoesNotFallBackToGob(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+
+	store := storagemock.NewMockStorage(ctrl)
+	gomock.InOrder(
+		// treehash lookup succeeds
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
+		// TGB blob not found — no further Get calls (no gob fallback)
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(storage.DownloadResponse{}, storage.NewNotFoundError("tgb/graph")),
+	)
+	orch := orchestratormock.NewMockOrchestrator(ctrl)
+	graphReader := newGraphReader(t, entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
+	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(graphReader, nil)
+	stream.EXPECT().Send(gomock.Any()).Return(nil)
+	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
+		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB}),
+		Logger:       zaptest.NewLogger(t),
+		Storage:      store,
+		Orchestrator: orch,
+	})
+	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
+	}, stream)
+	require.NoError(t, err)
+}
+
+func TestGetTargetGraph_TGB_Corrupt_DoesNotFallBackToGob(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background())
+
+	store := storagemock.NewMockStorage(ctrl)
+	gomock.InOrder(
+		// treehash lookup succeeds
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
+		// TGB blob exists but is corrupt (invalid bytes → ErrCorruptTGB)
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).
+			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("not-a-tgb-blob"))}, nil),
+	)
+	c := NewController(context.Background(), Params{
+		RepoConfig:  allowAnyRepositoryConfigProvider{},
+		GraphConfig: staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB}),
+		Logger:      zaptest.NewLogger(t),
+		Storage:     store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
