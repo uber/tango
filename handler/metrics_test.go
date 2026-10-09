@@ -82,6 +82,41 @@ func TestLifecycleMetrics(t *testing.T) {
 			wantRepo:   unknownRepositoryMetricLabel,
 			wantResult: "user",
 		},
+		{
+			name:       "GetChangedTargets success carries the configured repository",
+			op:         "get_changed_targets",
+			repoConfig: allowAnyRepositoryConfigProvider{},
+			call: func(h pb.TangoYARPCServer, ctrl *gomock.Controller) error {
+				return h.GetChangedTargets(&pb.GetChangedTargetsRequest{FirstRevision: validBuild, SecondRevision: validBuild}, changedTargetsStream(ctrl))
+			},
+			expect: func(m *mock_controller.MockController) {
+				m.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+			},
+			wantRepo:   "test-repository",
+			wantResult: "success",
+		},
+		{
+			name:       "GetChangedTargets invalid request carries the unknown repository",
+			op:         "get_changed_targets",
+			repoConfig: allowAnyRepositoryConfigProvider{},
+			call: func(h pb.TangoYARPCServer, ctrl *gomock.Controller) error {
+				return h.GetChangedTargets(nil, changedTargetsStream(ctrl))
+			},
+			wantErr:    true,
+			wantRepo:   unknownRepositoryMetricLabel,
+			wantResult: "user",
+		},
+		{
+			name:       "GetChangedTargets unconfigured remote does not call the controller",
+			op:         "get_changed_targets",
+			repoConfig: noRepositoryConfigProvider{},
+			call: func(h pb.TangoYARPCServer, ctrl *gomock.Controller) error {
+				return h.GetChangedTargets(&pb.GetChangedTargetsRequest{FirstRevision: validBuild, SecondRevision: validBuild}, changedTargetsStream(ctrl))
+			},
+			wantErr:    true,
+			wantRepo:   unknownRepositoryMetricLabel,
+			wantResult: "user",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -111,6 +146,13 @@ func TestLifecycleMetrics(t *testing.T) {
 func targetGraphStream(ctrl *gomock.Controller) pb.TangoServiceGetTargetGraphYARPCServer {
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background()).AnyTimes()
+	return stream
+}
+
+func changedTargetsStream(ctrl *gomock.Controller) pb.TangoServiceGetChangedTargetsYARPCServer {
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background()).AnyTimes()
+	stream.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
 	return stream
 }
 

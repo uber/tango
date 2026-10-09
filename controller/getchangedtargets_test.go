@@ -235,9 +235,9 @@ func TestGetChangedTargets_ValidationError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-	c := NewController(context.Background(), Params{RepoConfig: allowAnyRepositoryConfigProvider{}, Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
+	c := NewController(context.Background(), Params{Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
 
-	err := c.GetChangedTargets(nil, stream)
+	err := callGetChangedTargets(c, nil, stream)
 	require.Error(t, err)
 }
 
@@ -268,7 +268,6 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -280,7 +279,7 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
-	err := c.GetChangedTargets(request, stream)
+	err := callGetChangedTargets(c, request, stream)
 	require.NoError(t, err)
 }
 
@@ -300,7 +299,6 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 		Return(storage.DownloadResponse{}, injected).Times(2)
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zap.NewNop(),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -312,7 +310,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
-	err := c.GetChangedTargets(request, stream)
+	err := callGetChangedTargets(c, request, stream)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), injected.Error())
 }
@@ -387,7 +385,6 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	})
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -399,7 +396,7 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
 	}
 
-	err := c.GetChangedTargets(request, stream)
+	err := callGetChangedTargets(c, request, stream)
 	assert.Error(t, err)
 
 	select {
@@ -483,7 +480,6 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	})
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -495,7 +491,7 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 		OutputConfig:   &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true},
 	}
 
-	err := c.GetChangedTargets(request, stream)
+	err := callGetChangedTargets(c, request, stream)
 	require.NoError(t, err)
 
 	select {
@@ -578,7 +574,6 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
 	c := NewController(appCtx, Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -591,7 +586,7 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	}
 
 	handlerDone := make(chan error, 1)
-	go func() { handlerDone <- c.GetChangedTargets(request, stream) }()
+	go func() { handlerDone <- callGetChangedTargets(c, request, stream) }()
 
 	var cacheCtx context.Context
 	select {
@@ -1071,7 +1066,6 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	}).Times(2)
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -1083,7 +1077,7 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 		OutputConfig:   &pb.OutputConfig{MaxDistance: 1},
 	}
 
-	err := c.GetChangedTargets(request, stream)
+	err := callGetChangedTargets(c, request, stream)
 	require.NoError(t, err)
 
 	require.Len(t, sent, 2)

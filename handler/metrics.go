@@ -19,5 +19,6 @@ package handler
 // metrics; these name the handler's end-to-end RPC lifecycle metrics.
 const (
 	opGetTargetGraph        = "get_target_graph"
+	opGetChangedTargets     = "get_changed_targets"
 	opGetChangedTargetGraph = "get_changed_target_graph"
 )

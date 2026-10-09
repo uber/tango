@@ -9,11 +9,10 @@ lookup, graph computation, comparison, and response streaming.
 The package is intentionally thin. It owns the cross-cutting concerns that
 sit between the wire protocol and the rest of the system:
 
-- **Request validation and translation.** GetChangedTargets validates its
-  inputs and normalizes them into the internal call shapes used downstream.
-  GetTargetGraph receives an entity request and the resolved repository
-  configuration from the handler, which maps and validates the request, and
-  it returns a reader over the full target graph.
+- **Repository input.** Each call receives the resolved repository
+  configuration from the handler. The controller does not look up the
+  repository itself. The handler maps and validates each request and passes
+  an entity request.
 - **Read-through caching.** Where a request can be satisfied from previously
   computed artifacts, the controller fetches them from storage and streams
   them back without invoking the orchestrator. Cache misses fall through to
@@ -27,12 +26,11 @@ sit between the wire protocol and the rest of the system:
   multiple stream messages sized to stay below the gRPC per-message limit.
   Targets, metadata, and topology deltas are chunked independently.
   GetTargetGraph returns a reader, and the handler sends each chunk.
-- **Observability.** GetChangedTargets emits per-call counters, per-phase
-  timers, and a classified failure metric that distinguishes user from
-  infrastructure errors. For GetTargetGraph, the handler owns the per-call
-  counters, the send duration, and the classified failure metric, and the
-  controller emits the per-phase timers and cache lookup counters, tagged with
-  the repository.
+- **Observability.** The controller emits per-phase timers and cache lookup
+  counters, tagged with the repository. It also emits the send duration of
+  GetChangedTargets. The handler owns the per-call counters and the
+  classified failure metric of each RPC, and the send duration of
+  GetTargetGraph.
 
 ## Collaborators
 
@@ -51,6 +49,6 @@ behavior:
 
 The controller is built once at startup with its logger, storage,
 orchestrator, optional metrics scope, optional max-message-bytes
-configuration, and repository/graph config providers. The constructor
+configuration, and a graph config provider. The constructor
 returns the `Controller` interface, which the `handler` package wraps to
 expose the generated YARPC server surface.

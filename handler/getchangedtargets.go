@@ -15,16 +15,36 @@
 package handler
 
 import (
+	"fmt"
+
 	tangoerrors "github.com/uber/tango/core/errors"
+	"github.com/uber/tango/mapper/proto"
+	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
+	"go.uber.org/zap"
 )
 
+// GetChangedTargets returns the changed targets between two revisions. If the
+// client disconnects, the stream's context is cancelled and the function
+// returns with context.Canceled.
 func (h *handler) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
+	entityReq, mappingErr := proto.ProtoToGetChangedTargetsRequest(request)
+	if mappingErr != nil {
+		mappingErr = tangoerrors.NewUser(fmt.Errorf("convert get changed targets request: %w", mappingErr))
+	}
+	repoCfg, repo, repositoryErr := h.resolveRequestRepository(entityReq.First.Remote, mappingErr)
+	e := h.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
+	op := metrics.Begin(e, opGetChangedTargets, metrics.SlowDurationBuckets)
+	logger := h.logger.WithLazy(zap.String("repository", repo))
 	defer func() {
+		op.Complete(retErr)
 		if retErr != nil {
-			h.logger.Error("GetChangedTargets failed", tangoerrors.Fields(retErr)...)
+			logger.Error("GetChangedTargets failed", tangoerrors.Fields(retErr)...)
 			retErr = toWireError(retErr)
 		}
 	}()
-	return h.controller.GetChangedTargets(request, stream)
+	if repositoryErr != nil {
+		return repositoryErr
+	}
+	return h.controller.GetChangedTargets(entityReq, request.GetOutputConfig(), stream, repoCfg)
 }

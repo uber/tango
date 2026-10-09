@@ -135,7 +135,6 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		Logger:               zl,
 		RepoManagerClonePath: clonePath,
 		PoolSize:             2,
-		RepoConfig:           cfg,
 	})
 	require.NoError(t, err, "failed to create repo manager")
 
@@ -152,7 +151,6 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		Logger:       zl,
 		Storage:      store,
 		Orchestrator: orch,
-		RepoConfig:   cfg,
 		GraphConfig:  cfg,
 	})
 

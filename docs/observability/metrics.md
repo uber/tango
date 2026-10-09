@@ -206,20 +206,20 @@ if err == nil {
 
 ### Querying
 
-The handler publishes the `start`, `finish`, and `send_duration` metrics of GetTargetGraph under `handler.get_target_graph`. The controller publishes the lifecycle metrics and the send durations of the other RPCs and all phase metrics, such as cache lookups, under `controller.<operation>`.
+The handler publishes the `start` and `finish` lifecycle metrics of each RPC under `handler.<operation>`, and it publishes the `send_duration` of GetTargetGraph there. The controller publishes its phase metrics, such as cache lookups and `target_count`, and the `send_duration` of GetChangedTargets, under `controller.<operation>`.
 
 ```
 # operation rate
-fetch service:tango name:controller.get_changed_targets.start
+fetch service:tango name:handler.get_changed_targets.start
 
 # success and classified error counts
-fetch service:tango name:controller.get_changed_targets.finish | sum by (result)
+fetch service:tango name:handler.get_changed_targets.finish | sum by (result)
 
 # P95 latency of successful requests
-fetch service:tango name:controller.get_changed_targets.finish result:success | histogram_percentile(95)
+fetch service:tango name:handler.get_changed_targets.finish result:success | histogram_percentile(95)
 
 # scoped to a repo
-fetch service:tango name:controller.get_changed_targets.finish result:success repo:my-monorepo | histogram_percentile(95)
+fetch service:tango name:handler.get_changed_targets.finish result:success repo:my-monorepo | histogram_percentile(95)
 
 # custom value metric — changed-target count distribution
 fetch service:tango name:controller.get_changed_targets.target_count | histogram_percentile(95)

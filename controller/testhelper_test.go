@@ -29,19 +29,11 @@ import (
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper"
+	"github.com/uber/tango/mapper/proto"
 	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
-
-type allowAnyRepositoryConfigProvider struct{}
-
-func (allowAnyRepositoryConfigProvider) GetRepositoryConfig(remote string) (config.RepositoryConfig, bool) {
-	return config.RepositoryConfig{
-		Remote:       remote,
-		RepositoryID: "test-repository",
-	}, true
-}
 
 func testRepositoryID(string) string {
 	return "test-repository"
@@ -52,7 +44,6 @@ func newTestController(logger *zap.Logger) *controller {
 		logger:          logger,
 		emitter:         metrics.Nop(),
 		maxMessageBytes: config.DefaultMaxMessageBytes,
-		repoConfig:      allowAnyRepositoryConfigProvider{},
 		appCtx:          context.Background(),
 	}
 }
@@ -114,4 +105,13 @@ func encodeChangedTargetsChunks(t *testing.T, chunks []entity.GetChangedTargetsR
 // readCloser wraps a string as an io.ReadCloser for storage mock responses.
 func readCloser(s string) io.ReadCloser {
 	return io.NopCloser(strings.NewReader(s))
+}
+
+func callGetChangedTargets(c Controller, request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error {
+	req, err := proto.ProtoToGetChangedTargetsRequest(request)
+	if err != nil {
+		return tangoerrors.NewUser(err)
+	}
+	repo := config.RepositoryConfig{Remote: req.First.Remote, RepositoryID: testRepositoryID(req.First.Remote)}
+	return c.GetChangedTargets(req, request.GetOutputConfig(), stream, repo)
 }

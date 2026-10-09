@@ -45,17 +45,17 @@ func (m *MockController) EXPECT() *MockControllerMockRecorder {
 }
 
 // GetChangedTargets mocks base method.
-func (m *MockController) GetChangedTargets(request *tangopb.GetChangedTargetsRequest, stream tangopb.TangoServiceGetChangedTargetsYARPCServer) error {
+func (m *MockController) GetChangedTargets(request entity.GetChangedTargetsRequest, outputConfig *tangopb.OutputConfig, stream tangopb.TangoServiceGetChangedTargetsYARPCServer, repo config.RepositoryConfig) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChangedTargets", request, stream)
+	ret := m.ctrl.Call(m, "GetChangedTargets", request, outputConfig, stream, repo)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // GetChangedTargets indicates an expected call of GetChangedTargets.
-func (mr *MockControllerMockRecorder) GetChangedTargets(request, stream any) *gomock.Call {
+func (mr *MockControllerMockRecorder) GetChangedTargets(request, outputConfig, stream, repo any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChangedTargets", reflect.TypeOf((*MockController)(nil).GetChangedTargets), request, stream)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChangedTargets", reflect.TypeOf((*MockController)(nil).GetChangedTargets), request, outputConfig, stream, repo)
 }
 
 // GetTargetGraph mocks base method.

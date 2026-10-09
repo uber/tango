@@ -19,7 +19,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	mock_controller "github.com/uber/tango/controller/controllermock"
+	"github.com/uber/tango/entity"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
@@ -31,14 +33,23 @@ type fakeGetChangedTargetsStream struct {
 
 func TestGetChangedTargetsForwardsToController(t *testing.T) {
 	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	h := New(Params{Logger: zaptest.NewLogger(t), Controller: ctrl})
+	h := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: ctrl})
 
-	req := &pb.GetChangedTargetsRequest{}
+	req := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
+		OutputConfig:   &pb.OutputConfig{MaxDistance: 2},
+		BypassCache:    true,
+	}
 	stream := &fakeGetChangedTargetsStream{}
-	ctrl.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(gotReq *pb.GetChangedTargetsRequest, gotStream pb.TangoServiceGetChangedTargetsYARPCServer) error {
-			assert.Same(t, req, gotReq)
+	ctrl.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(gotReq entity.GetChangedTargetsRequest, gotOutput *pb.OutputConfig, gotStream pb.TangoServiceGetChangedTargetsYARPCServer, gotRepo config.RepositoryConfig) error {
+			assert.Equal(t, "sha1", gotReq.First.BaseSha)
+			assert.Equal(t, "sha2", gotReq.Second.BaseSha)
+			assert.True(t, gotReq.BypassCache)
+			assert.Same(t, req.OutputConfig, gotOutput)
 			assert.Same(t, stream, gotStream)
+			assert.Equal(t, "test-repository", gotRepo.RepositoryID)
 			return nil
 		})
 

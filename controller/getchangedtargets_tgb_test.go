@@ -125,7 +125,6 @@ func TestGetChangedTargets_TGBNativePath(t *testing.T) {
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl), // no calls expected: both graphs are cached
@@ -135,7 +134,7 @@ func TestGetChangedTargets_TGBNativePath(t *testing.T) {
 
 	request := changedTargetsRequest()
 	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true}
-	require.NoError(t, c.GetChangedTargets(request, stream))
+	require.NoError(t, callGetChangedTargets(c, request, stream))
 
 	changed, idToName := changedTargetsSent(t, sent)
 	require.Len(t, changed, 1, "should detect exactly the hash-flipped target")
@@ -235,7 +234,6 @@ func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -245,7 +243,7 @@ func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 
 	request := changedTargetsRequest()
 	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
-	require.NoError(t, c.GetChangedTargets(request, stream))
+	require.NoError(t, callGetChangedTargets(c, request, stream))
 
 	changed, _ := changedTargetsSent(t, sent)
 	require.Len(t, changed, 4, "all targets from second graph should be reported as changed")
@@ -280,7 +278,6 @@ func TestGetChangedTargets_TGBAllTargetsTriggerPreservesMembershipChanges(t *tes
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -290,7 +287,7 @@ func TestGetChangedTargets_TGBAllTargetsTriggerPreservesMembershipChanges(t *tes
 
 	request := changedTargetsRequest()
 	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
-	require.NoError(t, c.GetChangedTargets(request, stream))
+	require.NoError(t, callGetChangedTargets(c, request, stream))
 
 	changed, idToName := changedTargetsSent(t, sent)
 	require.Len(t, changed, 4)
@@ -358,7 +355,6 @@ func TestGetChangedTargets_TGBAllTargetsNoTrigger(t *testing.T) {
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -368,7 +364,7 @@ func TestGetChangedTargets_TGBAllTargetsNoTrigger(t *testing.T) {
 
 	request := changedTargetsRequest()
 	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
-	require.NoError(t, c.GetChangedTargets(request, stream))
+	require.NoError(t, callGetChangedTargets(c, request, stream))
 
 	changed, _ := changedTargetsSent(t, sent)
 	require.Len(t, changed, 1, "only the hash-flipped target should be changed")
@@ -404,7 +400,6 @@ func TestGetChangedTargets_TGBMixedFormatFallsBack(t *testing.T) {
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -414,7 +409,7 @@ func TestGetChangedTargets_TGBMixedFormatFallsBack(t *testing.T) {
 
 	request := changedTargetsRequest()
 	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true}
-	require.NoError(t, c.GetChangedTargets(request, stream))
+	require.NoError(t, callGetChangedTargets(c, request, stream))
 
 	changed, idToName := changedTargetsSent(t, sent)
 	require.Len(t, changed, 1)
@@ -466,14 +461,13 @@ func TestGetChangedTargets_CacheWriteChunksResultBySize(t *testing.T) {
 
 	const maxMessageBytes = 40
 	c := NewController(context.Background(), Params{
-		RepoConfig:      allowAnyRepositoryConfigProvider{},
 		Logger:          zaptest.NewLogger(t),
 		Storage:         st,
 		Orchestrator:    orchestratormock.NewMockOrchestrator(ctrl), // no calls expected: both graphs are cached
 		MaxMessageBytes: maxMessageBytes,
 	})
 
-	require.NoError(t, c.GetChangedTargets(changedTargetsRequest(), stream))
+	require.NoError(t, callGetChangedTargets(c, changedTargetsRequest(), stream))
 
 	cacheKey := cachekey.GetComparedTargetsCachePath(repositoryID, "treehash1", "treehash2", nil)
 	var chunks []entity.GetChangedTargetsResponse
