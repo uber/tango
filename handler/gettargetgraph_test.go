@@ -19,7 +19,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber/tango/config"
 	mock_controller "github.com/uber/tango/controller/controllermock"
+	"github.com/uber/tango/entity"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
@@ -31,14 +33,19 @@ type fakeGetTargetGraphStream struct {
 
 func TestGetTargetGraphForwardsToController(t *testing.T) {
 	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	h := New(Params{Logger: zaptest.NewLogger(t), Controller: ctrl})
+	h := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: ctrl})
 
-	req := &pb.GetTargetGraphRequest{}
+	req := &pb.GetTargetGraphRequest{
+		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
+		OutputConfig:     &pb.OutputConfig{IncludeHashes: true},
+	}
 	stream := &fakeGetTargetGraphStream{}
-	ctrl.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(gotReq *pb.GetTargetGraphRequest, gotStream pb.TangoServiceGetTargetGraphYARPCServer) error {
-			assert.Same(t, req, gotReq)
+	ctrl.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(gotReq entity.GetTargetGraphRequest, gotOutput *pb.OutputConfig, gotStream pb.TangoServiceGetTargetGraphYARPCServer, gotRepo config.RepositoryConfig) error {
+			assert.Equal(t, "sha", gotReq.Build.BaseSha)
+			assert.Same(t, req.OutputConfig, gotOutput)
 			assert.Same(t, stream, gotStream)
+			assert.Equal(t, "test-repository", gotRepo.RepositoryID)
 			return nil
 		})
 

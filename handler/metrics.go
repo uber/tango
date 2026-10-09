@@ -14,23 +14,10 @@
 
 package handler
 
-import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	tangoerrors "github.com/uber/tango/core/errors"
-	pb "github.com/uber/tango/tangopb"
-	"go.uber.org/yarpc/yarpcerrors"
-	"go.uber.org/zap"
+// Operation names, snake_cased after the RPC interface methods they measure.
+// The controller package defines its own copy for its business-logic-level
+// metrics; these name the handler's end-to-end RPC lifecycle metrics.
+const (
+	opGetTargetGraph        = "get_target_graph"
+	opGetChangedTargetGraph = "get_changed_target_graph"
 )
-
-func TestGetChangedTargetGraph_ReturnsUnimplemented(t *testing.T) {
-	h := New(Params{Logger: zap.NewNop()})
-
-	err := h.GetChangedTargetGraph(&pb.GetChangedTargetGraphRequest{}, nil)
-
-	require.Error(t, err)
-	assert.Equal(t, yarpcerrors.CodeUnimplemented, yarpcerrors.FromError(err).Code())
-	assert.Equal(t, tangoerrors.ErrorInfra, tangoerrors.GetErrorCode(err))
-}

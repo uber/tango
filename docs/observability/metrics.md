@@ -206,6 +206,8 @@ if err == nil {
 
 ### Querying
 
+The handler publishes the `start` and `finish` lifecycle metrics of GetTargetGraph under `handler.get_target_graph`. The controller publishes the lifecycle metrics of the other RPCs and all other metrics, such as cache lookups and send durations, under `controller.<operation>`.
+
 ```
 # operation rate
 fetch service:tango name:controller.get_changed_targets.start

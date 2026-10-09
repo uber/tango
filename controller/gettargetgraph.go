@@ -33,27 +33,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// GetTargetGraph returns the target graph for a given request.
-func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
-	entityReq, mappingErr := mapper.ProtoToGetTargetGraphRequest(request)
-	if mappingErr != nil {
-		mappingErr = tangoerrors.NewUser(fmt.Errorf("convert get target graph request: %w", mappingErr))
-	}
-	repoCfg, repo, repositoryErr := c.resolveRequestRepository(entityReq.Build.Remote, mappingErr)
-	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
-	op := metrics.Begin(e, opGetTargetGraph, metrics.SlowDurationBuckets)
+// GetTargetGraph streams the target graph for a given request. repoCfg is the
+// configured repository that the caller resolved for the request.
+func (c *controller) GetTargetGraph(entityReq entity.GetTargetGraphRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetTargetGraphYARPCServer, repoCfg config.RepositoryConfig) error {
+	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID})
 	logger := c.logger.WithLazy(
-		zap.String("repository", repo),
+		zap.String("repository", repoCfg.RepositoryID),
 	)
-	defer func() {
-		op.Complete(retErr)
-	}()
 	start := time.Now()
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
-	if repositoryErr != nil {
-		return repositoryErr
-	}
 	graphReader, err := c.getGraph(ctx, e, entityReq, repoCfg.RepositoryID)
 	if err != nil {
 		return fmt.Errorf("get graph: %w", err)
@@ -64,7 +53,6 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	}
 	defer func() { _ = graphReader.Close() }()
 	sendStart := time.Now()
-	outputConfig := request.GetOutputConfig()
 	for {
 		chunk, err := graphReader.Read()
 		if err == io.EOF {

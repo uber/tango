@@ -23,6 +23,7 @@ import (
 	"github.com/uber/tango/config"
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/entity"
 	"github.com/uber/tango/observability/metrics"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
@@ -76,9 +77,11 @@ type controller struct {
 	appCtx context.Context
 }
 
-// Controller is the service implementation the handler depends on.
+// Controller is the business-logic surface the handler depends on. repo is the
+// configured repository that the handler resolved for the request.
 type Controller interface {
-	pb.TangoYARPCServer
+	GetTargetGraph(request entity.GetTargetGraphRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetTargetGraphYARPCServer, repo config.RepositoryConfig) error
+	GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error
 }
 
 // NewController creates a new controller. appCtx is cancelled on process

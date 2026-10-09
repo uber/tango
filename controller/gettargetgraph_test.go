@@ -62,7 +62,7 @@ func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
 			},
 		},
 	}
-	err := c.GetTargetGraph(req, stream)
+	err := getTargetGraph(c, req, stream)
 	require.NoError(t, err)
 }
 
@@ -78,7 +78,7 @@ func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 		Logger:     zaptest.NewLogger(t),
 		Storage:    storagemock,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
 			Remote:   "repo:go-code",
@@ -106,7 +106,7 @@ func TestGetTargetGraph_DecodeError_ReturnsError(t *testing.T) {
 		Logger:     zaptest.NewLogger(t),
 		Storage:    storagemock,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
 			Remote:   "repo:go-code",
@@ -138,7 +138,7 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 		Logger:     zaptest.NewLogger(t),
 		Storage:    store,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
 			Remote:   "repo:go-code",
@@ -150,43 +150,6 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 		},
 	}, stream)
 	require.NoError(t, err)
-}
-
-func TestGetTargetGraph_BuildDescriptionMissingRequiredFields_ReturnsError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-	store := storagemock.NewMockStorage(ctrl)
-	c := NewController(context.Background(), Params{
-		RepoConfig: allowAnyRepositoryConfigProvider{},
-		Logger:     zaptest.NewLogger(t),
-		Storage:    store,
-	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
-		BuildDescription: &pb.BuildDescription{
-			Strategy: pb.COMPUTATION_STRATEGY_UNSET,
-			Remote:   "repo:go-code",
-			Requests: []*pb.Request{
-				{Url: "github://github.com/org/repo/pull/1/1111111111111111111111111111111111111111"},
-				{Url: "github://github.com/org/repo/pull/2/2222222222222222222222222222222222222222"},
-			},
-		},
-	}, stream)
-	assert.Error(t, err)
-}
-
-func TestGetTargetGraph_MissingBuildDescription_ReturnsError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
-	store := storagemock.NewMockStorage(ctrl)
-	c := NewController(context.Background(), Params{
-		RepoConfig: allowAnyRepositoryConfigProvider{},
-		Logger:     zaptest.NewLogger(t),
-		Storage:    store,
-	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{}, stream)
-	assert.Error(t, err)
 }
 
 // New coverage: Storage returns NotFound on treehash path -> orchestrator is called to compute the target graph.
@@ -207,7 +170,7 @@ func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		Storage:      store,
 		Orchestrator: orchestrator,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.NoError(t, err)
@@ -225,7 +188,7 @@ func TestGetTargetGraph_TreehashReadError(t *testing.T) {
 		Logger:     zaptest.NewLogger(t),
 		Storage:    store,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	assert.Error(t, err)
@@ -246,7 +209,7 @@ func TestGetTargetGraph_GraphFetchError(t *testing.T) {
 		Logger:     zaptest.NewLogger(t),
 		Storage:    store,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.Error(t, err)
@@ -267,7 +230,7 @@ func TestGetTargetGraph_GraphReadError(t *testing.T) {
 		Logger:     zaptest.NewLogger(t),
 		Storage:    store,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	assert.Error(t, err)
@@ -293,7 +256,7 @@ func TestGetTargetGraph_StreamSendError(t *testing.T) {
 		Logger:     zaptest.NewLogger(t),
 		Storage:    storagemock,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	assert.Error(t, err)
@@ -319,7 +282,7 @@ func TestGetTargetGraph_GraphNotFound_FallsThrough(t *testing.T) {
 		Storage:      store,
 		Orchestrator: orch,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.NoError(t, err)
@@ -341,7 +304,7 @@ func TestGetTargetGraph_GraphReadCancelled(t *testing.T) {
 		Logger:     zaptest.NewLogger(t),
 		Storage:    store,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.Error(t, err)
@@ -363,7 +326,7 @@ func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 		Storage:      store,
 		Orchestrator: orch,
 	})
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := getTargetGraph(c, &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
 	}, stream)
 	require.Error(t, err)

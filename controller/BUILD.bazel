@@ -5,7 +5,6 @@ go_library(
     srcs = [
         "controller.go",
         "distance_filter.go",
-        "getchangedtargetgraph.go",
         "getchangedtargets.go",
         "gettargetgraph.go",
         "metrics.go",
@@ -31,7 +30,6 @@ go_library(
         "//tangopb",
         "@com_github_uber_go_tally//:tally",
         "@org_uber_go_fx//:fx",
-        "@org_uber_go_yarpc//yarpcerrors",
         "@org_uber_go_zap//:zap",
     ],
 )
@@ -44,7 +42,6 @@ go_test(
         "getchangedtargets_test.go",
         "getchangedtargets_tgb_test.go",
         "gettargetgraph_test.go",
-        "metrics_test.go",
         "output_filter_test.go",
         "testhelper_test.go",
     ],
@@ -56,6 +53,7 @@ go_test(
         "//core/storage",
         "//core/storage/storagemock",
         "//entity",
+        "//internal/mapper",
         "//observability/metrics",
         "//orchestrator/orchestratormock",
         "//tangopb",

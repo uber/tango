@@ -65,7 +65,7 @@ The top-level split is by **responsibility**, not by domain: `controller/` handl
 
 The controller is the YARPC service implementation. It owns transport-adjacent concerns: request validation, metrics, cancellation linkage, response streaming, output filtering, comparison fan-out, and compared-target caching. It does **not** own workspace creation, git operations, or graph computation.
 
-Every RPC records operation metrics, classifies invalid input as a user error, preserves error chains, attempts applicable cache reads before expensive work, delegates graph production to the orchestrator, and converts the final error at the wire boundary.
+The handler converts the final error of each RPC at the wire boundary. It also resolves the repository of each GetTargetGraph request through a `config.RepositoryConfigProvider`, rejects an unconfigured remote as a user error before it calls the controller, and owns the metrics lifecycle of that RPC (`handler.get_target_graph.*`), tagged with the repository ID. The controller receives the resolved `config.RepositoryConfig` for that RPC and does not look up the repository itself. It still owns the lifecycle metrics of GetChangedTargets. Each controller method classifies invalid input as a user error, preserves error chains, attempts applicable cache reads before expensive work, and delegates graph production to the orchestrator.
 
 ### Orchestrator
 
@@ -224,7 +224,7 @@ Errors are classified by **origin** (user vs infra) for metrics. The contract li
 1. **Classify at the deepest boundary with semantic context.** Request validation and mapping classify bad client input as user errors. Orchestrator classifiers map known lease, git, and Bazel causes to user, infra, or retryable infra outcomes. Lower capability packages return plain wrapped errors and sentinels.
 2. **Unclassified errors default to infrastructure failures.** Retryability must be supported by a known transient cause; do not mark an error retryable merely because repeating the request is convenient.
 3. **Preserve the chain with `%w`.** `TangoError` implements `Unwrap`, so `errors.Is` and `errors.As` continue to find lower-level sentinels through classification wrappers.
-4. **Complete the standard metrics lifecycle and convert errors at the wire boundary.** `metrics.Op.Complete` derives the finish histogram's `result` tag from `tangoerrors.GetErrorCode(err).String()`. The controller maps the final classified error to the RPC boundary, while `errors.Fields` provides structured log fields.
+4. **Complete the standard metrics lifecycle and convert errors at the wire boundary.** `metrics.Op.Complete` derives the finish histogram's `result` tag from `tangoerrors.GetErrorCode(err).String()`. The handler maps the final classified error to the RPC boundary, while `errors.Fields` provides structured log fields.
 
 ### Caching and Treehashes
 

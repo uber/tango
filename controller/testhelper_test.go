@@ -20,9 +20,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/config"
+	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
+	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/observability/metrics"
+	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
 
@@ -66,4 +69,13 @@ func newGraphReader(t *testing.T, chunks ...entity.GetTargetGraphResponse) stora
 	reader, err := storage.NewGraphReader(t.Context(), st, "test-graph")
 	require.NoError(t, err)
 	return reader
+}
+
+func getTargetGraph(c Controller, request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) error {
+	req, err := mapper.ProtoToGetTargetGraphRequest(request)
+	if err != nil {
+		return tangoerrors.NewUser(err)
+	}
+	repo := config.RepositoryConfig{Remote: req.Build.Remote, RepositoryID: testRepositoryID(req.Build.Remote)}
+	return c.GetTargetGraph(req, request.GetOutputConfig(), stream, repo)
 }

@@ -87,9 +87,8 @@ func TestHandlerErrors_ReturnTangoErrorDetail(t *testing.T) {
 func TestGetTargetGraph_ValidationError_WiresTangoError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background())
 
-	c := New(Params{Logger: zaptest.NewLogger(t), Controller: controller.NewController(context.Background(), controller.Params{
+	c := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: controller.NewController(context.Background(), controller.Params{
 		RepoConfig: allowAnyRepositoryConfigProvider{},
 		Logger:     zaptest.NewLogger(t),
 	})})
@@ -118,7 +117,7 @@ func TestGetChangedTargets_ValidationError_WiresTangoError(t *testing.T) {
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background()).AnyTimes()
 
-	c := New(Params{Logger: zaptest.NewLogger(t), Controller: controller.NewController(context.Background(), controller.Params{
+	c := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: controller.NewController(context.Background(), controller.Params{
 		RepoConfig: allowAnyRepositoryConfigProvider{},
 		Logger:     zaptest.NewLogger(t),
 	})})
@@ -147,7 +146,7 @@ func TestGetTargetGraph_InfraError_WiresTangoError(t *testing.T) {
 	store := storagemock.NewMockStorage(ctrl)
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, errors.New("disk on fire"))
 
-	c := New(Params{Logger: zaptest.NewLogger(t), Controller: controller.NewController(context.Background(), controller.Params{
+	c := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: controller.NewController(context.Background(), controller.Params{
 		RepoConfig: allowAnyRepositoryConfigProvider{},
 		Logger:     zaptest.NewLogger(t),
 		Storage:    store,

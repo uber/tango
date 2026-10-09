@@ -156,7 +156,7 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		GraphConfig:  cfg,
 	})
 
-	h := handler.New(handler.Params{Logger: zl, Controller: ctrl})
+	h := handler.New(handler.Params{Logger: zl, Controller: ctrl, RepoConfig: cfg})
 
 	grpcTransport := yarpcgrpc.NewTransport()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
