@@ -23,6 +23,7 @@ go_test(
     srcs = [
         "graph_rapid_test.go",
         "graph_test.go",
+        "markers_test.go",
         "mock_sourcehasher_test.go",
         "sourcehasher_test.go",
     ],

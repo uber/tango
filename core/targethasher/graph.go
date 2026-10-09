@@ -438,9 +438,11 @@ func shouldCollapseToBzlmodRepo(target *Target, repo string, fullHashRepos set.S
 //
 // Marker files track both the repo rule's declarative inputs (version,
 // URL, integrity) and per-file SHA-256 content hashes for local patches
-// applied via single_version_override. readMarkerHash hashes all stable
-// lines (skipping ENV) so the collapsed hash changes on dependency
-// upgrades AND patch content modifications.
+// applied via single_version_override. readMarkerHash hashes the first line
+// and the main-repo FILE: lines only (skipping ENV, REPO_MAPPING and FILE:
+// lines for other repos, which can embed the output_base path) so the
+// collapsed hash changes on dependency upgrades AND patch content
+// modifications.
 //
 // Every external repo referenced in the query result should have a
 // marker file after bazel query completes. Returns an error if a
