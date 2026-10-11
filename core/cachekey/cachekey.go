@@ -33,8 +33,8 @@ import (
 // SHELL vs NATIVE) can produce different graphs from the same tree state.
 // excludeFilesRegex is folded into the key when non-empty (it affects
 // computation). Empty ⇒ legacy path unchanged.
-func GetGraphByTreeHash(remote, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) string {
-	path := filepath.Join(url.ToShortRemote(remote), "graphs", treehash, strategy.String())
+func GetGraphByTreeHash(repositoryID, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) string {
+	path := filepath.Join(repositoryID, "graphs", treehash, strategy.String())
 	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
 		path += "_requests-options-" + hash
 	}
@@ -49,8 +49,8 @@ func GetGraphByTreeHash(remote, treehash string, strategy entity.ComputationStra
 // existing blob is interpreted. The suffix keeps the key a sibling of the
 // gob key rather than a child — on the disk backend a key is a file, and a
 // child key would need the gob file to be a directory.
-func GetTGBGraphByTreeHash(remote, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) string {
-	path := filepath.Join(url.ToShortRemote(remote), "graphs", treehash, strategy.String()+"-tgb")
+func GetTGBGraphByTreeHash(repositoryID, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) string {
+	path := filepath.Join(repositoryID, "graphs", treehash, strategy.String()+"-tgb")
 	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
 		path += "_requests-options-" + hash
 	}
@@ -61,8 +61,8 @@ func GetTGBGraphByTreeHash(remote, treehash string, strategy entity.ComputationS
 // The git treehash is purely a function of git state (base SHA + applied
 // requests), so neither excludeFilesRegex nor the computation strategy is
 // part of this key.
-func GetTreehashCachePath(buildDescription entity.BuildDescription) string {
-	path := filepath.Join(url.ToShortRemote(buildDescription.Remote), "treehashes", fmt.Sprintf("base-sha-%s", buildDescription.BaseSha))
+func GetTreehashCachePath(repositoryID string, buildDescription entity.BuildDescription) string {
+	path := filepath.Join(repositoryID, "treehashes", fmt.Sprintf("base-sha-%s", buildDescription.BaseSha))
 	if len(buildDescription.ChangeRequests) > 0 {
 		path += "_request-urls-" + url.GetReqURLsHash(buildDescription.ChangeRequests)
 	}
@@ -71,11 +71,11 @@ func GetTreehashCachePath(buildDescription entity.BuildDescription) string {
 
 // GetComparedTargetsCachePath returns the cache path for a compared target graph result.
 // treehash1 and treehash2 are the resolved treehashes of the first and second revisions.
-// remote is the shared git remote for both revisions.
+// repositoryID is the configured namespace shared by both revisions.
 // excludeFilesRegex is folded into the key when non-empty (it affects computation).
 // Empty ⇒ legacy path unchanged.
-func GetComparedTargetsCachePath(remote, treehash1, treehash2 string, excludeFilesRegex []string) string {
-	path := filepath.Join(url.ToShortRemote(remote), "compared-targets", treehash1+"_"+treehash2)
+func GetComparedTargetsCachePath(repositoryID, treehash1, treehash2 string, excludeFilesRegex []string) string {
+	path := filepath.Join(repositoryID, "compared-targets", treehash1+"_"+treehash2)
 	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
 		path += "_requests-options-" + hash
 	}

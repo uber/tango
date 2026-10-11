@@ -23,6 +23,7 @@ go_library(
 go_test(
     name = "tgb_test",
     srcs = [
+        "expansion_test.go",
         "fuzz_test.go",
         "hashwidth_test.go",
         "sentinel_test.go",

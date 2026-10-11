@@ -18,10 +18,15 @@ import (
 	"sort"
 	"testing"
 
+	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/targethasher"
 )
+
+func strPtr(s string) *string { return &s }
+
+func attrTypePtr(t buildpb.Attribute_Discriminator) *buildpb.Attribute_Discriminator { return &t }
 
 // --- IntSet ---
 
@@ -184,6 +189,87 @@ func TestOptimizeGraph(t *testing.T) {
 	})
 }
 
+// --- AddTarget attribute filtering ---
+
+func TestAddTargetAttributes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("only string-typed attributes are recorded", func(t *testing.T) {
+		t.Parallel()
+		targets := map[string]*targethasher.Target{
+			"//pkg:a": {
+				Name:     "//pkg:a",
+				RuleType: "go_library",
+				Attributes: []*buildpb.Attribute{
+					{Name: strPtr("importpath"), StringValue: strPtr("example.com/a"), Type: attrTypePtr(buildpb.Attribute_STRING)},
+					{Name: strPtr("deps"), StringValue: strPtr("ignored"), Type: attrTypePtr(buildpb.Attribute_LABEL_LIST)},
+				},
+			},
+		}
+		g := OptimizeGraph(targets)
+		aID := g.TargetNameToID["//pkg:a"]
+
+		assert.Len(t, g.OptimizedTargets[aID].Attributes, 1)
+		_, ok := g.AttrNameToID["importpath"]
+		assert.True(t, ok, "string attribute should be recorded")
+		_, ok = g.AttrNameToID["deps"]
+		assert.False(t, ok, "non-string attribute should be skipped")
+	})
+
+	t.Run("attribute with nil type is skipped", func(t *testing.T) {
+		t.Parallel()
+		targets := map[string]*targethasher.Target{
+			"//pkg:a": {
+				Name:     "//pkg:a",
+				RuleType: "go_library",
+				Attributes: []*buildpb.Attribute{
+					{Name: strPtr("untyped"), StringValue: strPtr("value")},
+				},
+			},
+		}
+		g := OptimizeGraph(targets)
+		aID := g.TargetNameToID["//pkg:a"]
+
+		assert.Empty(t, g.OptimizedTargets[aID].Attributes)
+	})
+
+	t.Run("string attribute with nil name or value is skipped", func(t *testing.T) {
+		t.Parallel()
+		targets := map[string]*targethasher.Target{
+			"//pkg:a": {
+				Name:     "//pkg:a",
+				RuleType: "go_library",
+				Attributes: []*buildpb.Attribute{
+					{Name: nil, StringValue: strPtr("value"), Type: attrTypePtr(buildpb.Attribute_STRING)},
+					{Name: strPtr("name"), StringValue: nil, Type: attrTypePtr(buildpb.Attribute_STRING)},
+				},
+			},
+		}
+		g := OptimizeGraph(targets)
+		aID := g.TargetNameToID["//pkg:a"]
+
+		assert.Empty(t, g.OptimizedTargets[aID].Attributes)
+	})
+
+	t.Run("nil attribute element does not panic", func(t *testing.T) {
+		t.Parallel()
+		targets := map[string]*targethasher.Target{
+			"//pkg:a": {
+				Name:     "//pkg:a",
+				RuleType: "go_library",
+				Attributes: []*buildpb.Attribute{
+					nil,
+					{Name: strPtr("importpath"), StringValue: strPtr("example.com/a"), Type: attrTypePtr(buildpb.Attribute_STRING)},
+				},
+			},
+		}
+		g := OptimizeGraph(targets)
+		aID := g.TargetNameToID["//pkg:a"]
+
+		assert.Len(t, g.OptimizedTargets[aID].Attributes, 1)
+	})
+}
+
 // --- OptimizedTarget.Copy ---
 
 func TestOptimizedTargetCopy(t *testing.T) {
@@ -287,5 +373,26 @@ func TestOptimizedTargetToTarget(t *testing.T) {
 
 		result := g.OptimizedTargetToTarget(libID)
 		assert.Contains(t, result.Deps, "//pkg:dep")
+	})
+
+	t.Run("reconstructed attributes are marked as string type", func(t *testing.T) {
+		t.Parallel()
+		targets := map[string]*targethasher.Target{
+			"//pkg:a": {
+				Name:     "//pkg:a",
+				RuleType: "go_library",
+				Attributes: []*buildpb.Attribute{
+					{Name: strPtr("importpath"), StringValue: strPtr("example.com/a"), Type: attrTypePtr(buildpb.Attribute_STRING)},
+				},
+			},
+		}
+		g := OptimizeGraph(targets)
+		aID := g.TargetNameToID["//pkg:a"]
+
+		result := g.OptimizedTargetToTarget(aID)
+		require.Len(t, result.Attributes, 1)
+		assert.Equal(t, "importpath", result.Attributes[0].GetName())
+		assert.Equal(t, "example.com/a", result.Attributes[0].GetStringValue())
+		assert.Equal(t, buildpb.Attribute_STRING, result.Attributes[0].GetType())
 	})
 }

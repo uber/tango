@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/uber/tango/core/targethasher"
 )
 
@@ -164,8 +165,11 @@ func (g *OptimizedGraph) upsertTarget(target *targethasher.Target, invalidated I
 
 	attributes := make(map[int]int, len(target.Attributes))
 	for _, attr := range target.Attributes {
-		attrNameID := getOrGenerateRecordReverse(attr.GetName(), g.AttrNameToID, g.AttrNameIDToString)
-		attrValueID := getOrGenerateRecordReverse(attr.GetStringValue(), g.AttrValueToID, g.AttrValueIDToString)
+		if attr == nil || attr.GetType() != buildpb.Attribute_STRING || attr.Name == nil || attr.StringValue == nil {
+			continue
+		}
+		attrNameID := getOrGenerateRecordReverse(*attr.Name, g.AttrNameToID, g.AttrNameIDToString)
+		attrValueID := getOrGenerateRecordReverse(*attr.StringValue, g.AttrValueToID, g.AttrValueIDToString)
 		attributes[attrNameID] = attrValueID
 	}
 

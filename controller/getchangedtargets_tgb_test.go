@@ -62,7 +62,7 @@ func tgbTestGraphChunks(hash2 string) []entity.GetTargetGraphResponse {
 // seedTreehash stores the sha→treehash mapping the request resolution reads.
 func seedTreehash(t *testing.T, st storage.Storage, baseSha, treehash string) {
 	t.Helper()
-	key := cachekey.GetTreehashCachePath(entity.BuildDescription{Remote: "repo:go-code", BaseSha: baseSha})
+	key := cachekey.GetTreehashCachePath(testRepositoryID("repo:go-code"), entity.BuildDescription{Remote: "repo:go-code", BaseSha: baseSha})
 	require.NoError(t, st.Put(t.Context(), storage.UploadRequest{Key: key, Reader: bytes.NewReader([]byte(treehash))}))
 }
 
@@ -116,20 +116,20 @@ func TestGetChangedTargets_TGBNativePath(t *testing.T) {
 	seedTreehash(t, st, "sha1", "treehash1")
 	seedTreehash(t, st, "sha2", "treehash2")
 	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
-		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash1", entity.ComputationStrategyUnset, nil),
+		cachekey.GetTGBGraphByTreeHash(testRepositoryID("repo:go-code"), "treehash1", entity.ComputationStrategyUnset, nil),
 		tgbTestGraphChunks(tgbHash2Old)))
 	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
-		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash2", entity.ComputationStrategyUnset, nil),
+		cachekey.GetTGBGraphByTreeHash(testRepositoryID("repo:go-code"), "treehash2", entity.ComputationStrategyUnset, nil),
 		tgbTestGraphChunks(tgbHash2New)))
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		Logger:        zaptest.NewLogger(t),
-		Storage:       st,
-		Orchestrator:  orchestratormock.NewMockOrchestrator(ctrl), // no calls expected: both graphs are cached
-		Scope:         scope,
-		GraphFormat:   config.GraphFormatTGB,
-		ShadowCompare: true,
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
+		Logger:       zaptest.NewLogger(t),
+		Storage:      st,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl), // no calls expected: both graphs are cached
+		Scope:        scope,
+		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB, ShadowCompare: true}),
 	})
 
 	request := changedTargetsRequest()
@@ -171,6 +171,44 @@ func tgbTestGraphChunksWithATFH(hash2 string, atfh map[string]string) []entity.G
 	}
 }
 
+func tgbAllTargetsClassificationBefore(atfh map[string]string) []entity.GetTargetGraphResponse {
+	return []entity.GetTargetGraphResponse{
+		{Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: tgbHash1, RuleType: 100},
+			{ID: 2, Hash: tgbHash2Old, RuleType: 100, DirectDependencies: []int32{1}},
+			{ID: 3, Hash: tgbHash3, RuleType: 100},
+		}},
+		{Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{
+				1: "//app:stable",
+				2: "//app:changed",
+				3: "//legacy:deleted",
+			},
+			RuleTypeMapping:      map[int32]string{100: "go_library"},
+			AllTargetsFileHashes: atfh,
+		}},
+	}
+}
+
+func tgbAllTargetsClassificationAfter(atfh map[string]string) []entity.GetTargetGraphResponse {
+	return []entity.GetTargetGraphResponse{
+		{Targets: []entity.OptimizedTarget{
+			{ID: 10, Hash: tgbHash1, RuleType: 200},
+			{ID: 20, Hash: tgbHash2New, RuleType: 200, DirectDependencies: []int32{10}},
+			{ID: 40, Hash: tgbHash4, RuleType: 200},
+		}},
+		{Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{
+				10: "//app:stable",
+				20: "//app:changed",
+				40: "//app:new",
+			},
+			RuleTypeMapping:      map[int32]string{200: "go_library"},
+			AllTargetsFileHashes: atfh,
+		}},
+	}
+}
+
 // TestGetChangedTargets_TGBAllTargetsTrigger verifies that the TGB comparison
 // path checks AllTargetsFileHashes and, when a configured file differs,
 // reports every target in the second graph as changed with distance 0.
@@ -188,19 +226,20 @@ func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 	seedTreehash(t, st, "sha1", "treehash1")
 	seedTreehash(t, st, "sha2", "treehash2")
 	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
-		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash1", entity.ComputationStrategyUnset, nil),
+		cachekey.GetTGBGraphByTreeHash(testRepositoryID("repo:go-code"), "treehash1", entity.ComputationStrategyUnset, nil),
 		tgbTestGraphChunksWithATFH(tgbHash2Old, map[string]string{".bazelrc": "old-hash"})))
 	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
-		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash2", entity.ComputationStrategyUnset, nil),
+		cachekey.GetTGBGraphByTreeHash(testRepositoryID("repo:go-code"), "treehash2", entity.ComputationStrategyUnset, nil),
 		tgbTestGraphChunksWithATFH(tgbHash2Old, map[string]string{".bazelrc": "new-hash"})))
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 		Scope:        scope,
-		GraphFormat:  config.GraphFormatTGB,
+		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB}),
 	})
 
 	request := changedTargetsRequest()
@@ -214,6 +253,82 @@ func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 		assert.Equal(t, int32(0), ct.GetDistance())
 		assert.NotNil(t, ct.GetNewTarget())
 	}
+	assert.EqualValues(t, 1, counterValue(scope, "all_targets_triggered"))
+	assert.EqualValues(t, 0, counterValue(scope, "tgb_native_compare"), "trigger should skip the normal TGB diff")
+}
+
+func TestGetChangedTargets_TGBAllTargetsTriggerPreservesMembershipChanges(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(t.Context())
+	var sent []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, _ ...interface{}) error {
+		sent = append(sent, resp)
+		return nil
+	}).AnyTimes()
+
+	st := storage.NewMemoryStorage()
+	seedTreehash(t, st, "sha1", "treehash1")
+	seedTreehash(t, st, "sha2", "treehash2")
+	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
+		cachekey.GetTGBGraphByTreeHash(testRepositoryID("repo:go-code"), "treehash1", entity.ComputationStrategyUnset, nil),
+		tgbAllTargetsClassificationBefore(map[string]string{".bazelrc": "old-hash"})))
+	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
+		cachekey.GetTGBGraphByTreeHash(testRepositoryID("repo:go-code"), "treehash2", entity.ComputationStrategyUnset, nil),
+		tgbAllTargetsClassificationAfter(map[string]string{".bazelrc": "new-hash"})))
+
+	scope := tally.NewTestScope("", nil)
+	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
+		Logger:       zaptest.NewLogger(t),
+		Storage:      st,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		Scope:        scope,
+		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB}),
+	})
+
+	request := changedTargetsRequest()
+	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
+	require.NoError(t, c.GetChangedTargets(request, stream))
+
+	changed, idToName := changedTargetsSent(t, sent)
+	require.Len(t, changed, 4)
+	byName := make(map[string]*pb.ChangedTarget, len(changed))
+	for _, target := range changed {
+		optimized := target.GetNewTarget()
+		if optimized == nil {
+			optimized = target.GetOldTarget()
+		}
+		require.NotNil(t, optimized)
+		name := idToName[optimized.GetId()]
+		require.NotEmpty(t, name)
+		byName[name] = target
+	}
+
+	assertChange := func(name string, wantType pb.ChangeType, wantOld, wantNew bool) {
+		t.Helper()
+		target := byName[name]
+		require.NotNil(t, target, name)
+		assert.Equal(t, wantType, target.GetChangeType(), name)
+		assert.Equal(t, int32(0), target.GetDistance(), name)
+		if wantOld {
+			require.NotNil(t, target.GetOldTarget(), name)
+			assert.Equal(t, name, idToName[target.GetOldTarget().GetId()])
+		} else {
+			assert.Nil(t, target.GetOldTarget(), name)
+		}
+		if wantNew {
+			require.NotNil(t, target.GetNewTarget(), name)
+			assert.Equal(t, name, idToName[target.GetNewTarget().GetId()])
+		} else {
+			assert.Nil(t, target.GetNewTarget(), name)
+		}
+	}
+	assertChange("//app:stable", pb.CHANGE_TYPE_CHANGED, true, true)
+	assertChange("//app:changed", pb.CHANGE_TYPE_CHANGED, true, true)
+	assertChange("//app:new", pb.CHANGE_TYPE_NEW, false, true)
+	assertChange("//legacy:deleted", pb.CHANGE_TYPE_DELETED, true, false)
+
 	assert.EqualValues(t, 1, counterValue(scope, "all_targets_triggered"))
 	assert.EqualValues(t, 0, counterValue(scope, "tgb_native_compare"), "trigger should skip the normal TGB diff")
 }
@@ -234,19 +349,20 @@ func TestGetChangedTargets_TGBAllTargetsNoTrigger(t *testing.T) {
 	seedTreehash(t, st, "sha1", "treehash1")
 	seedTreehash(t, st, "sha2", "treehash2")
 	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
-		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash1", entity.ComputationStrategyUnset, nil),
+		cachekey.GetTGBGraphByTreeHash(testRepositoryID("repo:go-code"), "treehash1", entity.ComputationStrategyUnset, nil),
 		tgbTestGraphChunksWithATFH(tgbHash2Old, map[string]string{".bazelrc": "same-hash"})))
 	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
-		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash2", entity.ComputationStrategyUnset, nil),
+		cachekey.GetTGBGraphByTreeHash(testRepositoryID("repo:go-code"), "treehash2", entity.ComputationStrategyUnset, nil),
 		tgbTestGraphChunksWithATFH(tgbHash2New, map[string]string{".bazelrc": "same-hash"})))
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 		Scope:        scope,
-		GraphFormat:  config.GraphFormatTGB,
+		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB}),
 	})
 
 	request := changedTargetsRequest()
@@ -279,19 +395,20 @@ func TestGetChangedTargets_TGBMixedFormatFallsBack(t *testing.T) {
 	seedTreehash(t, st, "sha2", "treehash2")
 	// First revision predates the flip: gob only, at the gob key.
 	require.NoError(t, storage.WriteGraphStream(t.Context(), st,
-		cachekey.GetGraphByTreeHash("repo:go-code", "treehash1", entity.ComputationStrategyUnset, nil),
+		cachekey.GetGraphByTreeHash(testRepositoryID("repo:go-code"), "treehash1", entity.ComputationStrategyUnset, nil),
 		tgbTestGraphChunks(tgbHash2Old)))
 	require.NoError(t, storage.WriteTGBGraph(t.Context(), st,
-		cachekey.GetTGBGraphByTreeHash("repo:go-code", "treehash2", entity.ComputationStrategyUnset, nil),
+		cachekey.GetTGBGraphByTreeHash(testRepositoryID("repo:go-code"), "treehash2", entity.ComputationStrategyUnset, nil),
 		tgbTestGraphChunks(tgbHash2New)))
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 		Scope:        scope,
-		GraphFormat:  config.GraphFormatTGB,
+		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB}),
 	})
 
 	request := changedTargetsRequest()

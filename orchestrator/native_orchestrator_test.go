@@ -383,7 +383,9 @@ func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	}, nil)
 
 	cfg := testConfig(t)
-	cfg.Service.GraphFormat = config.GraphFormatTGB
+	cfg.Graph = map[string]config.GraphConfig{
+		"default": {Format: config.GraphFormatTGB},
+	}
 
 	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
@@ -421,10 +423,10 @@ func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	assert.True(t, sawTarget, "chunk stream should carry the computed target")
 
 	// The blob landed under the tgb key only; nothing was written to the gob key.
-	tgbKey := cachekey.GetTGBGraphByTreeHash(build.Remote, "th", build.Strategy, nil)
+	tgbKey := cachekey.GetTGBGraphByTreeHash("tango", "th", build.Strategy, nil)
 	_, err = storage.NewTGBGraphReader(context.Background(), st, tgbKey, config.DefaultMaxMessageBytes)
 	require.NoError(t, err)
-	gobKey := cachekey.GetGraphByTreeHash(build.Remote, "th", build.Strategy, nil)
+	gobKey := cachekey.GetGraphByTreeHash("tango", "th", build.Strategy, nil)
 	_, err = storage.NewGraphReader(context.Background(), st, gobKey)
 	require.Error(t, err)
 	assert.True(t, storage.IsNotFound(err), "gob key must stay empty under graph_format=tgb")

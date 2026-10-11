@@ -26,7 +26,6 @@ import (
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper"
-	"github.com/uber/tango/internal/url"
 	"github.com/uber/tango/observability/metrics"
 
 	"github.com/uber/tango/core/storage"
@@ -36,27 +35,26 @@ import (
 
 // GetTargetGraph returns the target graph for a given request.
 func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
-	repo := url.ToShortRemote(request.GetBuildDescription().GetRemote())
+	entityReq, mappingErr := mapper.ProtoToGetTargetGraphRequest(request)
+	if mappingErr != nil {
+		mappingErr = tangoerrors.NewUser(fmt.Errorf("convert get target graph request: %w", mappingErr))
+	}
+	repoCfg, repo, repositoryErr := c.resolveRequestRepository(entityReq.Build.Remote, mappingErr)
 	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
 	op := metrics.Begin(e, opGetTargetGraph, metrics.SlowDurationBuckets)
 	logger := c.logger.WithLazy(
-		zap.Any("build_description", request.GetBuildDescription()),
+		zap.String("repository", repo),
 	)
 	defer func() {
 		op.Complete(retErr)
-		if retErr != nil {
-			logger.Error("GetTargetGraph failed", tangoerrors.Fields(retErr)...)
-			retErr = toWireError(retErr)
-		}
 	}()
 	start := time.Now()
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
-	entityReq, err := mapper.ProtoToGetTargetGraphRequest(request)
-	if err != nil {
-		return tangoerrors.NewUser(fmt.Errorf("convert get target graph request: %w", err))
+	if repositoryErr != nil {
+		return repositoryErr
 	}
-	graphReader, err := c.getGraph(ctx, e, entityReq, nil, request.GetBuildDescription())
+	graphReader, err := c.getGraph(ctx, e, entityReq, repoCfg.RepositoryID, nil, entityReq.Build)
 	if err != nil {
 		return fmt.Errorf("get graph: %w", err)
 	}
@@ -97,17 +95,23 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 // letting an orchestrator see it could poison the shared cache with
 // stripped graphs.
 // If resolver is provided, it is used to resolve the treehash for the build description.
-func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entity.GetTargetGraphRequest, resolver *treehashResolver, revision *pb.BuildDescription) (storage.GraphReader, error) {
+func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entity.GetTargetGraphRequest, repositoryID string, resolver *treehashResolver, revision entity.BuildDescription) (storage.GraphReader, error) {
 	start := time.Now()
 	logger := c.logger.With(
-		zap.Any("build_description", req.Build),
+		zap.String("base_sha", req.Build.BaseSha),
+		zap.Stringer("strategy", req.Build.Strategy),
 	)
+	graphFormat, err := c.graphFormatFor(req.Build.Remote)
+	if err != nil {
+		return nil, tangoerrors.NewUser(fmt.Errorf("resolve graph config: %w", err))
+	}
 	if !req.BypassCache {
+		// Look up the the git treehash based on cache path
 		var treehashValue string
 		if resolver != nil {
 			// Use the resolver to memoize treehash reads.
 			var err error
-			treehashValue, err = resolver.resolve(ctx, revision)
+			treehashValue, err = resolver.resolve(ctx, revision, repositoryID)
 			if err != nil {
 				return nil, fmt.Errorf("get treehash: %w", err)
 			}
@@ -116,7 +120,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 			}
 		} else {
 			// Look up the git treehash based on cache path
-			treehashCachePath := cachekey.GetTreehashCachePath(req.Build)
+			treehashCachePath := cachekey.GetTreehashCachePath(repositoryID, revision)
 			treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
 			metrics.RecordCacheLookup(e, opGetTargetGraph, metrics.TreehashCacheLookup, err)
 			if err != nil {
@@ -141,7 +145,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 		if treehashValue != "" {
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
-			graphReader, err := c.readCachedGraph(ctx, logger, req.Build.Remote, treehashValue, req.Build.Strategy, req.ExcludeFilesRegex)
+			graphReader, err := c.readCachedGraph(ctx, logger, graphFormat, repositoryID, treehashValue, req.Build.Strategy, req.ExcludeFilesRegex)
 			if ctx.Err() != nil {
 				err = context.Cause(ctx)
 			}
@@ -179,14 +183,14 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 }
 
 // readCachedGraph opens the cached graph for a resolved treehash, preferring
-// the TGB blob when the service is configured for it and falling back to the
-// gob stream for entries written before the format flip. A TGB blob that
+// the TGB blob when the repository is configured for it and falling back to
+// the gob stream for entries written before the format flip. A TGB blob that
 // exists but fails validation is treated as a miss (the orchestrator will
 // recompute and overwrite it), not an infra failure. Returns a not-found
 // error when neither format is present.
-func (c *controller) readCachedGraph(ctx context.Context, logger *zap.Logger, remote, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) (storage.GraphReader, error) {
-	if c.graphFormat == config.GraphFormatTGB {
-		tgbPath := cachekey.GetTGBGraphByTreeHash(remote, treehash, strategy, excludeFilesRegex)
+func (c *controller) readCachedGraph(ctx context.Context, logger *zap.Logger, graphFormat, repositoryID, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) (storage.GraphReader, error) {
+	if graphFormat == config.GraphFormatTGB {
+		tgbPath := cachekey.GetTGBGraphByTreeHash(repositoryID, treehash, strategy, excludeFilesRegex)
 		graphReader, err := storage.NewTGBGraphReader(ctx, c.storage, tgbPath, c.maxMessageBytes)
 		if err == nil {
 			return graphReader, nil
@@ -197,6 +201,6 @@ func (c *controller) readCachedGraph(ctx context.Context, logger *zap.Logger, re
 			return nil, err
 		}
 	}
-	gobPath := cachekey.GetGraphByTreeHash(remote, treehash, strategy, excludeFilesRegex)
+	gobPath := cachekey.GetGraphByTreeHash(repositoryID, treehash, strategy, excludeFilesRegex)
 	return storage.NewGraphReader(ctx, c.storage, gobPath)
 }

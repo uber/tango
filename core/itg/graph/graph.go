@@ -219,8 +219,11 @@ func (g *OptimizedGraph) AddTarget(target *targethasher.Target) {
 
 		attributes := make(map[int]int, len(target.Attributes))
 		for _, attr := range target.Attributes {
-			attrNameID := getOrGenerateRecordReverse(attr.GetName(), g.AttrNameToID, g.AttrNameIDToString)
-			attrValueID := getOrGenerateRecordReverse(attr.GetStringValue(), g.AttrValueToID, g.AttrValueIDToString)
+			if attr == nil || attr.GetType() != buildpb.Attribute_STRING || attr.Name == nil || attr.StringValue == nil {
+				continue
+			}
+			attrNameID := getOrGenerateRecordReverse(*attr.Name, g.AttrNameToID, g.AttrNameIDToString)
+			attrValueID := getOrGenerateRecordReverse(*attr.StringValue, g.AttrValueToID, g.AttrValueIDToString)
 			attributes[attrNameID] = attrValueID
 		}
 		optimizedTarget.HashWithoutDeps = target.HashWithoutDeps
@@ -271,9 +274,11 @@ func (g *OptimizedGraph) OptimizedTargetToTarget(targetID int) targethasher.Targ
 	for nameID, valID := range optimizedTarget.Attributes {
 		n := g.AttrNameIDToString[nameID]
 		v := g.AttrValueIDToString[valID]
+		t := buildpb.Attribute_STRING
 		target.Attributes = append(target.Attributes, &buildpb.Attribute{
 			Name:        &n,
 			StringValue: &v,
+			Type:        &t,
 		})
 	}
 

@@ -17,6 +17,7 @@ package graph
 import (
 	"testing"
 
+	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/core/targethasher"
@@ -245,5 +246,66 @@ func TestUpsertTarget(t *testing.T) {
 
 		libID := g.TargetNameToID["//pkg:lib"]
 		assert.True(t, invalidated.Contains(libID), "target with nil hash should be in invalidated set")
+	})
+
+	t.Run("only string-typed attributes are recorded on upsert", func(t *testing.T) {
+		t.Parallel()
+		g := OptimizeGraph(nil)
+		newTarget := &targethasher.Target{
+			Name:     "//pkg:lib",
+			RuleType: "go_library",
+			Attributes: []*buildpb.Attribute{
+				{Name: strPtr("importpath"), StringValue: strPtr("example.com/lib"), Type: attrTypePtr(buildpb.Attribute_STRING)},
+				{Name: strPtr("deps"), StringValue: strPtr("ignored"), Type: attrTypePtr(buildpb.Attribute_LABEL_LIST)},
+			},
+		}
+		require.NoError(t, g.upsertTarget(newTarget, NewIntSet()))
+
+		libID := g.TargetNameToID["//pkg:lib"]
+		assert.Len(t, g.OptimizedTargets[libID].Attributes, 1)
+		_, ok := g.AttrNameToID["deps"]
+		assert.False(t, ok, "non-string attribute should be skipped")
+	})
+
+	t.Run("nil attribute element does not panic on upsert", func(t *testing.T) {
+		t.Parallel()
+		g := OptimizeGraph(nil)
+		newTarget := &targethasher.Target{
+			Name:     "//pkg:lib",
+			RuleType: "go_library",
+			Attributes: []*buildpb.Attribute{
+				nil,
+				{Name: strPtr("importpath"), StringValue: strPtr("example.com/lib"), Type: attrTypePtr(buildpb.Attribute_STRING)},
+			},
+		}
+		require.NoError(t, g.upsertTarget(newTarget, NewIntSet()))
+
+		libID := g.TargetNameToID["//pkg:lib"]
+		assert.Len(t, g.OptimizedTargets[libID].Attributes, 1)
+	})
+
+	t.Run("attribute updates replace prior attributes on upsert", func(t *testing.T) {
+		t.Parallel()
+		g := OptimizeGraph(map[string]*targethasher.Target{
+			"//pkg:lib": {
+				Name:     "//pkg:lib",
+				RuleType: "go_library",
+				Attributes: []*buildpb.Attribute{
+					{Name: strPtr("importpath"), StringValue: strPtr("example.com/old"), Type: attrTypePtr(buildpb.Attribute_STRING)},
+				},
+			},
+		})
+		libID := g.TargetNameToID["//pkg:lib"]
+		require.Len(t, g.OptimizedTargets[libID].Attributes, 1)
+
+		updated := &targethasher.Target{
+			Name:     "//pkg:lib",
+			RuleType: "go_library",
+			Attributes: []*buildpb.Attribute{
+				{Name: strPtr("nonstring"), StringValue: strPtr("value"), Type: attrTypePtr(buildpb.Attribute_INTEGER)},
+			},
+		}
+		require.NoError(t, g.upsertTarget(updated, NewIntSet()))
+		assert.Empty(t, g.OptimizedTargets[libID].Attributes, "non-string attribute should not replace prior one")
 	})
 }

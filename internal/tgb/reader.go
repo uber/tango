@@ -383,10 +383,6 @@ func validateColumns(hdr fileHeader, cols map[uint64]colEntry, fileSize, dirOffs
 			if e.rawSize > 0 && e.compressedSize == 0 {
 				return fmt.Errorf("tgb: column %d claims %d raw bytes from empty data", id, e.rawSize)
 			}
-			if e.compressedSize > 0 && e.rawSize > e.compressedSize*maxZstdExpansion {
-				return fmt.Errorf("tgb: column %d claims %dx expansion (max %d)",
-					id, e.rawSize/e.compressedSize, maxZstdExpansion)
-			}
 		default:
 			return fmt.Errorf("tgb: column %d has unknown codec %d", id, e.codec)
 		}
@@ -396,11 +392,11 @@ func validateColumns(hdr fileHeader, cols map[uint64]colEntry, fileSize, dirOffs
 		}
 		totalRaw += e.rawSize
 	}
-	// The per-column expansion cap cannot stop a blob of highly-compressible
-	// frames from honestly claiming raw bytes far beyond anything a real
-	// graph produces; every downstream allocation is proportional to raw
-	// bytes, so bound their sum against the file itself (real graphs
-	// measure ~1.8x).
+	// Every downstream allocation is proportional to raw bytes, so bound
+	// their sum against the file itself (real graphs measure ~1.8x). A
+	// per-column compression ratio is no bound: a valid per-node column of
+	// constant values (TAG_DEG in a graph with no tags) compresses to a
+	// near-fixed size, so its ratio grows without limit as nodeCount does.
 	if budget := max(fileSize*maxTotalRawFactor, maxTotalRawFloor); totalRaw > budget {
 		return fmt.Errorf("tgb: columns claim %d total raw bytes from a %d-byte file (max %d)",
 			totalRaw, fileSize, budget)

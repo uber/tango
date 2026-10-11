@@ -1,4 +1,4 @@
-package mapper
+package proto
 
 import (
 	tangoerrors "github.com/uber/tango/core/errors"

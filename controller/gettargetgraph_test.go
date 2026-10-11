@@ -47,8 +47,9 @@ func TestGetTargetGraph_CacheMiss_NoSend(t *testing.T) {
 			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte{})}, nil),
 	)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    store,
 	})
 	req := &pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
@@ -73,8 +74,9 @@ func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 	storagemock := storagemock.NewMockStorage(ctrl)
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, expected)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: storagemock,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    storagemock,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
@@ -100,8 +102,9 @@ func TestGetTargetGraph_DecodeError_ReturnsError(t *testing.T) {
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("bad-bytes"))}, nil),
 	)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: storagemock,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    storagemock,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
@@ -131,8 +134,9 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(buf.Bytes())}, nil),
 	)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
@@ -154,8 +158,9 @@ func TestGetTargetGraph_BuildDescriptionMissingRequiredFields_ReturnsError(t *te
 	stream.EXPECT().Context().Return(context.Background())
 	store := storagemock.NewMockStorage(ctrl)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
@@ -176,8 +181,9 @@ func TestGetTargetGraph_MissingBuildDescription_ReturnsError(t *testing.T) {
 	stream.EXPECT().Context().Return(context.Background())
 	store := storagemock.NewMockStorage(ctrl)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{}, stream)
 	assert.Error(t, err)
@@ -196,6 +202,7 @@ func TestGetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	graphReader := newGraphReader(t, entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
 	orchestrator.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(graphReader, nil)
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      store,
 		Orchestrator: orchestrator,
@@ -214,8 +221,9 @@ func TestGetTargetGraph_TreehashReadError(t *testing.T) {
 	store := storagemock.NewMockStorage(ctrl)
 	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: &errReadCloser{err: errors.New("readfail")}}, nil)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
@@ -234,8 +242,9 @@ func TestGetTargetGraph_GraphFetchError(t *testing.T) {
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, errors.New("graph error")),
 	)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
@@ -254,8 +263,9 @@ func TestGetTargetGraph_GraphReadError(t *testing.T) {
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: &errReadCloser{err: errors.New("readfail")}}, nil),
 	)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
@@ -279,8 +289,9 @@ func TestGetTargetGraph_StreamSendError(t *testing.T) {
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(buf.Bytes())}, nil),
 	)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: storagemock,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    storagemock,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
@@ -303,6 +314,7 @@ func TestGetTargetGraph_GraphNotFound_FallsThrough(t *testing.T) {
 	graphReader := newGraphReader(t, entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
 	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(graphReader, nil)
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      store,
 		Orchestrator: orch,
@@ -325,8 +337,9 @@ func TestGetTargetGraph_GraphReadCancelled(t *testing.T) {
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, errors.New("context canceled")),
 	)
 	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+		Logger:     zaptest.NewLogger(t),
+		Storage:    store,
 	})
 	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"},
@@ -345,6 +358,7 @@ func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 	orch := orchestratormock.NewMockOrchestrator(ctrl)
 	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(nil, errors.New("context canceled"))
 	c := NewController(context.Background(), Params{
+		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      store,
 		Orchestrator: orch,

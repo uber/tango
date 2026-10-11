@@ -18,17 +18,22 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strings"
 
 	yaml "github.com/goccy/go-yaml"
 )
 
-var _ RepositoryConfigProvider = (*Config)(nil)
+var (
+	_ RepositoryConfigProvider = (*Config)(nil)
+	_ GraphConfigProvider      = (*Config)(nil)
+)
 
 // Config is the root configuration structure.
 type Config struct {
-	Repository []RepositoryConfig `yaml:"repository"`
-	Storage    StorageConfig      `yaml:"storage"`
-	Service    ServiceConfig      `yaml:"service"`
+	Repository []RepositoryConfig     `yaml:"repository"`
+	Storage    StorageConfig          `yaml:"storage"`
+	Service    ServiceConfig          `yaml:"service"`
+	Graph      map[string]GraphConfig `yaml:"graph"`
 
 	// repositoryByRemote is built at parse time for O(1) lookup.
 	repositoryByRemote map[string]*RepositoryConfig
@@ -42,6 +47,27 @@ func (c *Config) GetRepositoryConfig(remote string) (RepositoryConfig, bool) {
 		return RepositoryConfig{}, false
 	}
 	return *repo, true
+}
+
+// GetGraphConfig returns the GraphConfig for the given remote URL, looking up
+// by short remote name first, then falling back to the "default" entry. Returns
+// an error if neither matches.
+func (c *Config) GetGraphConfig(remote string) (GraphConfig, error) {
+	short := toShortRemote(remote)
+	if gc, ok := c.Graph[short]; ok {
+		return gc, nil
+	}
+	if gc, ok := c.Graph["default"]; ok {
+		return gc, nil
+	}
+	return GraphConfig{}, fmt.Errorf("no graph config for remote %q and no default entry", remote)
+}
+
+// toShortRemote extracts the short name from a remote URL.
+// "git@github:uber/tango" → "uber/tango".
+func toShortRemote(remote string) string {
+	parts := strings.Split(remote, ":")
+	return parts[len(parts)-1]
 }
 
 // Parse parses the full configuration from the given file path.
@@ -84,12 +110,19 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 	if config.Service.MaxMessageBytes <= 0 {
 		config.Service.MaxMessageBytes = DefaultMaxMessageBytes
 	}
-	switch config.Service.GraphFormat {
-	case "":
-		config.Service.GraphFormat = GraphFormatGob
-	case GraphFormatGob, GraphFormatTGB:
-	default:
-		return nil, fmt.Errorf("unsupported service.graph_format: %q (supported: %q, %q)", config.Service.GraphFormat, GraphFormatGob, GraphFormatTGB)
+
+	// --- graph config validation and defaults ---
+	if len(config.Graph) == 0 {
+		config.Graph = map[string]GraphConfig{
+			"default": {Format: GraphFormatGob},
+		}
+	}
+	for name, gc := range config.Graph {
+		switch gc.Format {
+		case GraphFormatGob, GraphFormatTGB:
+		default:
+			return nil, fmt.Errorf("unsupported graph.%s.format: %q (supported: %q, %q)", name, gc.Format, GraphFormatGob, GraphFormatTGB)
+		}
 	}
 
 	// --- repository validation and defaults ---
@@ -98,6 +131,9 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 		remote := config.Repository[i].Remote
 		if remote == "" {
 			return nil, fmt.Errorf("repository[%d].remote must not be empty", i)
+		}
+		if config.Repository[i].RepositoryID == "" {
+			return nil, fmt.Errorf("repository[%d].repository_id must not be empty", i)
 		}
 		if _, exists := config.repositoryByRemote[remote]; exists {
 			return nil, fmt.Errorf("duplicate repository remote %q", remote)

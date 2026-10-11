@@ -36,6 +36,7 @@ import (
 	"github.com/uber/tango/core/git"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/handler"
 	"github.com/uber/tango/orchestrator"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/yarpc"
@@ -126,16 +127,17 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 
 	store := storage.NewMemoryStorage()
 
+	cfg, err := config.Parse(configPath)
+	require.NoError(t, err, "failed to parse config")
+
 	rm, err := repomanager.NewRepoManager(appCtx, repomanager.Params{
 		Git:                  git.New(clonePath, zl),
 		Logger:               zl,
 		RepoManagerClonePath: clonePath,
 		PoolSize:             2,
+		RepoConfig:           cfg,
 	})
 	require.NoError(t, err, "failed to create repo manager")
-
-	cfg, err := config.Parse(configPath)
-	require.NoError(t, err, "failed to parse config")
 
 	orch, err := orchestrator.NewNativeOrchestrator(appCtx, orchestrator.Params{
 		Storage:     store,
@@ -150,7 +152,11 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		Logger:       zl,
 		Storage:      store,
 		Orchestrator: orch,
+		RepoConfig:   cfg,
+		GraphConfig:  cfg,
 	})
+
+	h := handler.New(handler.Params{Logger: zl, Controller: ctrl})
 
 	grpcTransport := yarpcgrpc.NewTransport()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -160,7 +166,7 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		Name:     "tango",
 		Inbounds: []transport.Inbound{grpcTransport.NewInbound(listener)},
 	})
-	dispatcher.Register(pb.BuildTangoYARPCProcedures(ctrl))
+	dispatcher.Register(pb.BuildTangoYARPCProcedures(h))
 
 	require.NoError(t, dispatcher.Start(), "failed to start dispatcher")
 	t.Cleanup(func() { assert.NoError(t, dispatcher.Stop()) })

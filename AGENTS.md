@@ -33,7 +33,8 @@ tango/                              # repo root (Go module github.com/uber/tango
 ├── graphrunner/                    # Strategy-pluggable target-graph computation
 │   └── mock/
 ├── entity/                         # Domain value types (BuildDescription, ChangedTargets, TargetGraph, etc.)
-├── mapper/                         # Proto-to-entity and entity-to-proto conversion
+├── mapper/                         # Conversion of graph hasher results to entities
+│   └── proto/                      # Public wire conversion (ToProtoError, ProtoToGetChangedTargetsRequest) for external services
 ├── internal/                       # Internal-only packages (not importable by external consumers)
 │   ├── mapper/                     # Internal mapping helpers
 │   ├── streaming/                  # Chunked stream assembly
@@ -82,7 +83,7 @@ Entities are Tango's request, result, and storage data models; they are not pers
 
 1. **Describe data, not choreography** — comments state what a type or field means, its units, optionality, identity, and invariants. Component ownership and write paths belong in the architecture sections.
 2. **Prefer values for identities and configuration** — use value structs for `BuildDescription`, requests, configs, and constructor params. Pointers are appropriate for optional payloads, mutation, or shared ownership.
-3. **Keep wire conversion at the mapper boundary** — protobuf validation and proto/entity conversion belong in `internal/mapper` or `mapper`, not in the orchestrator or graph algorithms.
+3. **Keep wire conversion at the mapper boundary** — protobuf validation and proto/entity conversion belong in `internal/mapper` or `mapper/proto`, not in the orchestrator or graph algorithms. `mapper/proto` holds `ToProtoError` and `ProtoToGetChangedTargetsRequest`, the wire conversions that external services import.
 
 ### Extensions and interfaces
 

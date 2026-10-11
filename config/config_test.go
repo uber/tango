@@ -28,6 +28,7 @@ func minimal() string {
 	return `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 2
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -49,6 +50,7 @@ func TestParseBytes_ExplicitValues(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
     query_timeout_seconds: 60
     bzlmod_enabled: false
     full_hash_repos: ["//"]
@@ -88,6 +90,7 @@ storage:
   type: "memory"
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -98,6 +101,7 @@ service:
 			yaml: `
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -112,6 +116,7 @@ storage:
     root_path: "/tmp/store"
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -125,6 +130,7 @@ storage:
   type: "disk"
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -140,6 +146,7 @@ storage:
     root_path: ""
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -153,6 +160,7 @@ storage:
   type: "s3"
 repository:
   - remote: "https://example.com/r.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -175,6 +183,7 @@ func TestParseBytes_UnknownFieldsRejected(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -188,6 +197,7 @@ func TestParseBytes_WorkerPoolSizeRequired(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 0
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -200,6 +210,19 @@ func TestParseBytes_EmptyRemoteRejected(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: ""
+    repository_id: "test-repository"
+service:
+  max_worker_pool_size: 1
+  workspaces_root_path: "/tmp/tango-repo-manager"
+`
+	_, err := ParseBytes([]byte(yamlStr))
+	require.Error(t, err)
+}
+
+func TestParseBytes_RepositoryIDRequired(t *testing.T) {
+	yamlStr := `
+repository:
+  - remote: "https://example.com/repo.git"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -212,7 +235,9 @@ func TestParseBytes_DuplicateRemoteRejected(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
   workspaces_root_path: "/tmp/tango-repo-manager"
@@ -225,6 +250,7 @@ func TestParseBytes_WorkspacesRootPathRequired(t *testing.T) {
 	yamlStr := `
 repository:
   - remote: "https://example.com/repo.git"
+    repository_id: "test-repository"
 service:
   max_worker_pool_size: 1
 `
@@ -254,12 +280,13 @@ func TestGetRepositoryConfig(t *testing.T) {
 	repo, ok := cfg.GetRepositoryConfig("https://example.com/repo.git")
 	assert.True(t, ok)
 	assert.Equal(t, "https://example.com/repo.git", repo.Remote)
+	assert.Equal(t, "test-repository", repo.RepositoryID)
 
 	_, ok = cfg.GetRepositoryConfig("https://missing.com/repo.git")
 	assert.False(t, ok)
 }
 
-func TestParseBytes_GraphFormat(t *testing.T) {
+func TestParseBytes_GraphConfig(t *testing.T) {
 	base := func(extra string) []byte {
 		return []byte(`
 service:
@@ -268,22 +295,55 @@ service:
 ` + extra)
 	}
 
-	t.Run("defaults to gob", func(t *testing.T) {
+	t.Run("defaults to gob when graph section omitted", func(t *testing.T) {
 		cfg, err := ParseBytes(base(""))
 		require.NoError(t, err)
-		assert.Equal(t, GraphFormatGob, cfg.Service.GraphFormat)
-		assert.False(t, cfg.Service.ShadowCompare)
+		gc, err := cfg.GetGraphConfig("git@github:uber/tango")
+		require.NoError(t, err)
+		assert.Equal(t, GraphFormatGob, gc.Format)
+		assert.False(t, gc.ShadowCompare)
 	})
 
-	t.Run("accepts tgb with shadow compare", func(t *testing.T) {
-		cfg, err := ParseBytes(base("  graph_format: tgb\n  shadow_compare: true\n"))
+	t.Run("per-repo override", func(t *testing.T) {
+		cfg, err := ParseBytes(base(`
+graph:
+  default:
+    format: gob
+  uber/go-code:
+    format: tgb
+    shadow_compare: true
+`))
 		require.NoError(t, err)
-		assert.Equal(t, GraphFormatTGB, cfg.Service.GraphFormat)
-		assert.True(t, cfg.Service.ShadowCompare)
+
+		gc, err := cfg.GetGraphConfig("git@github:uber/go-code")
+		require.NoError(t, err)
+		assert.Equal(t, GraphFormatTGB, gc.Format)
+		assert.True(t, gc.ShadowCompare)
+
+		gc, err = cfg.GetGraphConfig("git@github:uber/other-repo")
+		require.NoError(t, err)
+		assert.Equal(t, GraphFormatGob, gc.Format)
+		assert.False(t, gc.ShadowCompare)
+	})
+
+	t.Run("error when no match and no default", func(t *testing.T) {
+		cfg, err := ParseBytes(base(`
+graph:
+  uber/go-code:
+    format: tgb
+`))
+		require.NoError(t, err)
+
+		_, err = cfg.GetGraphConfig("git@github:uber/other-repo")
+		require.ErrorContains(t, err, "no graph config")
 	})
 
 	t.Run("rejects unknown format", func(t *testing.T) {
-		_, err := ParseBytes(base("  graph_format: msgpack\n"))
-		require.ErrorContains(t, err, "graph_format")
+		_, err := ParseBytes(base(`
+graph:
+  default:
+    format: msgpack
+`))
+		require.ErrorContains(t, err, "format")
 	})
 }

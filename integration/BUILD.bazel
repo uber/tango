@@ -5,6 +5,7 @@ go_test(
     size = "large",
     timeout = "long",
     srcs = [
+        "atf_test.go",
         "benchmark_test.go",
         "integration_test.go",
     ],
@@ -19,6 +20,7 @@ go_test(
         "//core/git",
         "//core/repomanager",
         "//core/storage",
+        "//handler",
         "//orchestrator",
         "//tangopb",
         "@com_github_stretchr_testify//assert",

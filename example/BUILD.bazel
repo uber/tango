@@ -12,6 +12,7 @@ go_library(
         "//core/repomanager",
         "//core/storage",
         "//core/storage/disk",
+        "//handler",
         "//orchestrator",
         "//tangopb",
         "@org_uber_go_yarpc//:yarpc",
