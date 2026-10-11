@@ -54,7 +54,7 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 	if repositoryErr != nil {
 		return repositoryErr
 	}
-	graphReader, err := c.getGraph(ctx, e, entityReq, repoCfg.RepositoryID)
+	graphReader, err := c.getGraph(ctx, e, entityReq, repoCfg.RepositoryID, nil, entityReq.Build)
 	if err != nil {
 		return fmt.Errorf("get graph: %w", err)
 	}
@@ -94,7 +94,8 @@ func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb
 // entries store the full payload and stripping happens at send time, so
 // letting an orchestrator see it could poison the shared cache with
 // stripped graphs.
-func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entity.GetTargetGraphRequest, repositoryID string) (storage.GraphReader, error) {
+// If resolver is provided, it is used to resolve the treehash for the build description.
+func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entity.GetTargetGraphRequest, repositoryID string, resolver *treehashResolver, revision entity.BuildDescription) (storage.GraphReader, error) {
 	start := time.Now()
 	logger := c.logger.With(
 		zap.String("base_sha", req.Build.BaseSha),
@@ -106,27 +107,45 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 	}
 	if !req.BypassCache {
 		// Look up the the git treehash based on cache path
-		treehashCachePath := cachekey.GetTreehashCachePath(repositoryID, req.Build)
-		treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
-		metrics.RecordCacheLookup(e, opGetTargetGraph, metrics.TreehashCacheLookup, err)
-		if err != nil {
-			if storage.IsNotFound(err) {
-				// Cache miss - blob doesn't exist, need to compute and store target graph
-				logger.Debug("getGraph: treehash not found", zap.Error(err))
-			} else {
-				// Other errors (network, infra issues) should be retried
+		var treehashValue string
+		if resolver != nil {
+			// Use the resolver to memoize treehash reads.
+			var err error
+			treehashValue, err = resolver.resolve(ctx, revision, repositoryID)
+			if err != nil {
 				return nil, fmt.Errorf("get treehash: %w", err)
 			}
-		} else {
-			defer func() { _ = treehashResponse.ReadCloser.Close() }()
-			treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)
-			if err != nil {
-				return nil, fmt.Errorf("read treehash: %w", err)
+			if treehashValue != "" {
+				logger.Debug("getGraph: using pre-read treehash")
 			}
-			logger.Info("getGraph: treehash found")
+		} else {
+			// Look up the git treehash based on cache path
+			treehashCachePath := cachekey.GetTreehashCachePath(repositoryID, revision)
+			treehashResponse, err := c.storage.Get(ctx, storage.DownloadRequest{Key: treehashCachePath})
+			metrics.RecordCacheLookup(e, opGetTargetGraph, metrics.TreehashCacheLookup, err)
+			if err != nil {
+				if storage.IsNotFound(err) {
+					// Cache miss - blob doesn't exist, need to compute and store target graph
+					logger.Debug("getGraph: treehash not found", zap.Error(err))
+				} else {
+					// Other errors (network, infra issues) should be retried
+					return nil, fmt.Errorf("get treehash: %w", err)
+				}
+			} else {
+				defer func() { _ = treehashResponse.ReadCloser.Close() }()
+				treehashBytes, err := io.ReadAll(treehashResponse.ReadCloser)
+				if err != nil {
+					return nil, fmt.Errorf("read treehash: %w", err)
+				}
+				treehashValue = string(treehashBytes)
+				logger.Info("getGraph: treehash found")
+			}
+		}
+
+		if treehashValue != "" {
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
-			graphReader, err := c.readCachedGraph(ctx, logger, graphFormat, repositoryID, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
+			graphReader, err := c.readCachedGraph(ctx, logger, graphFormat, repositoryID, treehashValue, req.Build.Strategy, req.ExcludeFilesRegex)
 			if ctx.Err() != nil {
 				err = context.Cause(ctx)
 			}

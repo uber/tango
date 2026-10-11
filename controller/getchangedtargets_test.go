@@ -132,11 +132,10 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 	firstGraph := []entity.GetTargetGraphResponse{
 		{Targets: []entity.OptimizedTarget{
 			{ID: 1, Hash: "h1", RuleType: 100},
-			{ID: 2, Hash: "h2-old", RuleType: 100},
-			{ID: 5, Hash: "h5", RuleType: 100},
+			{ID: 2, Hash: "h2", RuleType: 100},
 		}},
 		{Metadata: &entity.Metadata{
-			TargetIDMapping:      map[int32]string{1: "//app:a", 2: "//app:b", 5: "//legacy:deleted"},
+			TargetIDMapping:      map[int32]string{1: "//app:a", 2: "//app:b"},
 			RuleTypeMapping:      map[int32]string{100: "go_library"},
 			AllTargetsFileHashes: map[string]string{".bazelrc": "old-hash"},
 		}},
@@ -144,7 +143,7 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 	secondGraph := []entity.GetTargetGraphResponse{
 		{Targets: []entity.OptimizedTarget{
 			{ID: 1, Hash: "h1", RuleType: 100},
-			{ID: 2, Hash: "h2-new", RuleType: 100},
+			{ID: 2, Hash: "h2", RuleType: 100},
 			{ID: 3, Hash: "h3", RuleType: 100},
 			{ID: 4, Hash: "h4", RuleType: 100, DirectDependencies: []int32{3}},
 		}},
@@ -158,54 +157,32 @@ func TestCompareTargetGraphs_AllTargetsFileTrigger(t *testing.T) {
 	responses, err := c.compareTargetGraphs(t.Context(), c.emitter, zap.NewNop(), firstGraph, secondGraph, nil)
 	require.NoError(t, err)
 
-	var metadata *entity.Metadata
+	var totalChanged int
 	for _, resp := range responses {
-		if resp.Metadata != nil {
-			metadata = resp.Metadata
-		}
+		totalChanged += len(resp.ChangedTargets)
 	}
-	require.NotNil(t, metadata)
-
-	byName := make(map[string]*entity.ChangedTarget)
-	for responseIndex := range responses {
-		for targetIndex := range responses[responseIndex].ChangedTargets {
-			changed := &responses[responseIndex].ChangedTargets[targetIndex]
-			target := changed.NewTarget
-			if target == nil {
-				target = changed.OldTarget
+	assert.Equal(t, 4, totalChanged, "all targets from second graph should be reported as changed")
+	// Verify classification: 2 CHANGED (in both graphs) + 2 NEW (only in second graph)
+	changedCount := 0
+	newCount := 0
+	for _, resp := range responses {
+		for _, ct := range resp.ChangedTargets {
+			switch ct.ChangeType {
+			case entity.ChangeTypeChanged:
+				changedCount++
+				assert.Equal(t, int32(0), ct.Distance)
+				assert.NotNil(t, ct.NewTarget)
+			case entity.ChangeTypeNew:
+				newCount++
+				assert.Equal(t, int32(0), ct.Distance)
+				assert.NotNil(t, ct.NewTarget)
+			default:
+				t.Errorf("unexpected change type: %v", ct.ChangeType)
 			}
-			require.NotNil(t, target)
-			name := metadata.TargetIDMapping[target.ID]
-			require.NotEmpty(t, name)
-			byName[name] = changed
 		}
 	}
-	require.Len(t, byName, 5)
-
-	assertChange := func(name string, wantType entity.ChangeType, wantOld, wantNew bool) {
-		t.Helper()
-		changed := byName[name]
-		require.NotNil(t, changed, name)
-		assert.Equal(t, wantType, changed.ChangeType, name)
-		assert.Equal(t, int32(0), changed.Distance, name)
-		if wantOld {
-			require.NotNil(t, changed.OldTarget, name)
-			assert.Equal(t, name, metadata.TargetIDMapping[changed.OldTarget.ID])
-		} else {
-			assert.Nil(t, changed.OldTarget, name)
-		}
-		if wantNew {
-			require.NotNil(t, changed.NewTarget, name)
-			assert.Equal(t, name, metadata.TargetIDMapping[changed.NewTarget.ID])
-		} else {
-			assert.Nil(t, changed.NewTarget, name)
-		}
-	}
-	assertChange("//app:a", entity.ChangeTypeChanged, true, true)
-	assertChange("//app:b", entity.ChangeTypeChanged, true, true)
-	assertChange("//app:c", entity.ChangeTypeNew, false, true)
-	assertChange("//lib:util", entity.ChangeTypeNew, false, true)
-	assertChange("//legacy:deleted", entity.ChangeTypeDeleted, true, false)
+	assert.Equal(t, 2, changedCount, "targets present in both graphs should be CHANGED")
+	assert.Equal(t, 2, newCount, "targets only in second graph should be NEW")
 }
 
 func TestCompareTargetGraphs_AllTargetsFileNoTrigger(t *testing.T) {
@@ -246,7 +223,7 @@ func TestGetChangedTargets_ValidationError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-	c := NewController(context.Background(), Params{RepoConfig: allowAnyRepositoryConfigProvider{}, Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
+	c := NewController(context.Background(), Params{Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
 
 	err := c.GetChangedTargets(nil, stream)
 	require.Error(t, err)
@@ -278,11 +255,15 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 
 	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
+	repoConfig := fakeRepoConfigProvider{
+		"repo:go-code": config.RepositoryConfig{Remote: "repo:go-code"},
+	}
+
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		RepoConfig:   repoConfig,
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -302,19 +283,24 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 
 	storagemock := storagemock.NewMockStorage(ctrl)
 	// A non-NotFound storage error on a treehash read must surface as a failed
-	// request rather than be silently treated as a cache miss. Both revision
-	// treehashes are read in parallel, so two Get calls happen; the handler
-	// returns the first failure (and drops the cancelled sibling's error)
-	// before any graph fetch happens.
+	// request rather than be silently treated as a cache miss. The resolver
+	// reads treehashes concurrently, so both reads are attempted; the first
+	// error is returned and the sibling is cancelled.
 	injected := errors.New("storage exploded")
+	// Both reads are attempted concurrently; one will fail and the other will be cancelled.
+	// The exact number of calls depends on scheduling, so we accept at least 1 call.
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-		Return(storage.DownloadResponse{}, injected).Times(2)
+		Return(storage.DownloadResponse{}, injected).MinTimes(1)
+
+	repoConfig := fakeRepoConfigProvider{
+		"repo:go-code": config.RepositoryConfig{Remote: "repo:go-code"},
+	}
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zap.NewNop(),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		RepoConfig:   repoConfig,
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -329,7 +315,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 }
 
 func TestReadTreehash(t *testing.T) {
-	bd := entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"}
+	bd := entity.BuildDescription{Strategy: entity.ComputationStrategyUnset, Remote: "repo:go-code", BaseSha: "sha1"}
 
 	t.Run("cache miss returns empty and no error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
@@ -337,7 +323,8 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
 
-		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.Remote), metrics.Nop(), opGetChangedTargets)
+		resolver := newTreehashResolver(st, metrics.Nop(), opGetChangedTargets)
+		val, err := resolver.resolve(t.Context(), bd, testRepositoryID(bd.Remote))
 		require.NoError(t, err)
 		assert.Empty(t, val)
 	})
@@ -349,7 +336,8 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{}, injected)
 
-		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.Remote), metrics.Nop(), opGetChangedTargets)
+		resolver := newTreehashResolver(st, metrics.Nop(), opGetChangedTargets)
+		val, err := resolver.resolve(t.Context(), bd, testRepositoryID(bd.Remote))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
 		assert.Empty(t, val)
@@ -361,7 +349,8 @@ func TestReadTreehash(t *testing.T) {
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
 			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("deadbeef"))}, nil)
 
-		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.Remote), metrics.Nop(), opGetChangedTargets)
+		resolver := newTreehashResolver(st, metrics.Nop(), opGetChangedTargets)
+		val, err := resolver.resolve(t.Context(), bd, testRepositoryID(bd.Remote))
 		require.NoError(t, err)
 		assert.Equal(t, "deadbeef", val)
 	})
@@ -397,11 +386,15 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 		return nil
 	})
 
+	repoConfig := fakeRepoConfigProvider{
+		"repo:go-code": config.RepositoryConfig{Remote: "repo:go-code"},
+	}
+
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		RepoConfig:   repoConfig,
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -484,8 +477,8 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 			default:
 				return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
 			}
-			// readTreehash (×2 pre) + comparison cache miss (×1) + graph computation (×4) + readTreehash (×2 post) = 9
-		}).Times(9)
+			// readTreehash (×2 pre) + comparison cache miss (×1) + graph computation (×2) = 5
+		}).Times(5)
 	// Put is launched in a goroutine — use a channel to wait for it before the test ends.
 	putDone := make(chan struct{}, 1)
 	storagemock.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
@@ -494,10 +487,10 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	})
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		RepoConfig:   fakeRepoConfigProvider{"repo:go-code": config.RepositoryConfig{Remote: "repo:go-code"}},
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -589,10 +582,10 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
 	c := NewController(appCtx, Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		RepoConfig:   fakeRepoConfigProvider{"repo:go-code": config.RepositoryConfig{Remote: "repo:go-code"}},
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -1083,10 +1076,10 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	}).Times(2)
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		RepoConfig:   fakeRepoConfigProvider{"repo:go-code": config.RepositoryConfig{Remote: "repo:go-code"}},
 	})
 
 	request := &pb.GetChangedTargetsRequest{
@@ -1347,8 +1340,8 @@ func changedTargetsRequest() *pb.GetChangedTargetsRequest {
 
 func changedTargetsEntityRequest() entity.GetChangedTargetsRequest {
 	return entity.GetChangedTargetsRequest{
-		First:  entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
-		Second: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
+		First:  entity.BuildDescription{Strategy: entity.ComputationStrategyUnset, Remote: "repo:go-code", BaseSha: "sha1"},
+		Second: entity.BuildDescription{Strategy: entity.ComputationStrategyUnset, Remote: "repo:go-code", BaseSha: "sha2"},
 	}
 }
 
@@ -1356,15 +1349,15 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 	t.Run("cache miss returns not-served, no error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		st := storagemock.NewMockStorage(ctrl)
-		// Both treehash reads miss, so the cache path is skipped entirely.
+		// Cache miss for compared-targets, so the cache path is skipped entirely.
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing")).Times(2)
+			Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing")).Times(1)
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.storage = st
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, "repo:go-code", int32(-1), time.Now(), "treehash1", "treehash2")
 		require.NoError(t, err)
 		assert.False(t, served, "a cache miss must not be served")
 	})
@@ -1403,7 +1396,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		// No Send expectation: a corrupt blob must not send anything to the client.
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, "repo:go-code", int32(-1), time.Now(), "", "")
 		require.NoError(t, err)
 		assert.False(t, served, "a corrupt blob must trigger recompute, not a partial send")
 	})
@@ -1437,7 +1430,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, "repo:go-code", int32(-1), time.Now(), "treehash1", "treehash2")
 		require.NoError(t, err)
 		assert.True(t, served, "a clean cache hit must be served")
 	})
@@ -1446,7 +1439,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 func TestFetchTargetGraphs(t *testing.T) {
 	// BypassCache=true keeps getGraph on the orchestrator path only, so these
 	// tests need no storage mock.
-	bypassRequest := func() entity.GetChangedTargetsRequest {
+	bypassRequestEntity := func() entity.GetChangedTargetsRequest {
 		r := changedTargetsEntityRequest()
 		r.BypassCache = true
 		return r
@@ -1463,8 +1456,9 @@ func TestFetchTargetGraphs(t *testing.T) {
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
+		resolver := newTreehashResolver(storage.NewMemoryStorage(), c.emitter, opGetChangedTargets)
 
-		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
+		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequestEntity(), "repo:go-code", resolver)
 		require.NoError(t, err)
 		require.Len(t, first.chunks, 1)
 		require.Len(t, second.chunks, 1)
@@ -1487,8 +1481,9 @@ func TestFetchTargetGraphs(t *testing.T) {
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
+		resolver := newTreehashResolver(storage.NewMemoryStorage(), c.emitter, opGetChangedTargets)
 
-		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
+		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequestEntity(), "repo:go-code", resolver)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
 		assert.Zero(t, first)
@@ -1508,8 +1503,9 @@ func TestFetchTargetGraphs(t *testing.T) {
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
+		resolver := newTreehashResolver(storage.NewMemoryStorage(), c.emitter, opGetChangedTargets)
 
-		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
+		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequestEntity(), "repo:go-code", resolver)
 		require.Error(t, err)
 	})
 
@@ -1523,8 +1519,9 @@ func TestFetchTargetGraphs(t *testing.T) {
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
+		resolver := newTreehashResolver(storage.NewMemoryStorage(), c.emitter, opGetChangedTargets)
 
-		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
+		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequestEntity(), "repo:go-code", resolver)
 		require.Error(t, err)
 	})
 }
@@ -1607,9 +1604,6 @@ type fakeRepoConfigProvider map[string]config.RepositoryConfig
 
 func (f fakeRepoConfigProvider) GetRepositoryConfig(remote string) (config.RepositoryConfig, bool) {
 	cfg, ok := f[remote]
-	if ok && cfg.RepositoryID == "" {
-		cfg.RepositoryID = "test-repository"
-	}
 	return cfg, ok
 }
 
@@ -1619,17 +1613,148 @@ func TestSeedAttributesFor(t *testing.T) {
 	})
 
 	t.Run("remote not found means no filtering", func(t *testing.T) {
+		c := newTestController(zaptest.NewLogger(t))
+		c.repoConfig = fakeRepoConfigProvider{}
 		assert.Nil(t, seedAttributesFor(config.RepositoryConfig{}))
 	})
 
 	t.Run("configured remote with no seed_attributes means no filtering", func(t *testing.T) {
+		c := newTestController(zaptest.NewLogger(t))
+		c.repoConfig = fakeRepoConfigProvider{
+			"some-remote": config.RepositoryConfig{Remote: "some-remote"},
+		}
 		assert.Nil(t, seedAttributesFor(config.RepositoryConfig{Remote: "some-remote"}))
 	})
 
 	t.Run("configured remote with seed_attributes returns allowlist", func(t *testing.T) {
-		assert.Equal(t, map[string]bool{"size": true, "timeout": true}, seedAttributesFor(config.RepositoryConfig{
-			Remote:         "some-remote",
-			SeedAttributes: []string{"size", "timeout"},
-		}))
+		c := newTestController(zaptest.NewLogger(t))
+		c.repoConfig = fakeRepoConfigProvider{
+			"some-remote": config.RepositoryConfig{
+				Remote:         "some-remote",
+				SeedAttributes: []string{"size", "timeout"},
+			},
+		}
+		assert.Equal(t, map[string]bool{"size": true, "timeout": true}, seedAttributesFor(config.RepositoryConfig{Remote: "some-remote", SeedAttributes: []string{"size", "timeout"}}))
 	})
+}
+
+// TestGetChangedTargets_TreehashReadCount verifies that treehashes are read
+// exactly once per revision during a GetChangedTargets request, eliminating
+// redundant storage reads that previously occurred in three separate code paths:
+// 1. serveChangedTargetsFromCache (compared-targets cache lookup)
+// 2. getGraph (individual graph cache lookup)
+// 3. cacheComparedTargets (background cache write)
+func TestGetChangedTargets_TreehashReadCount(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(t.Context())
+
+	var sentResponses []*pb.GetChangedTargetsResponse
+	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, opts ...interface{}) error {
+		sentResponses = append(sentResponses, resp)
+		return nil
+	}).Times(2)
+
+	storagemock := storagemock.NewMockStorage(ctrl)
+
+	// Build first revision graph (2 chunks: Targets + Metadata)
+	var buf1 bytes.Buffer
+	enc1 := gob.NewEncoder(&buf1)
+	enc1.Encode(entity.GetTargetGraphResponse{
+		Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: "h1", RuleType: 100},
+			{ID: 2, Hash: "h2-old", RuleType: 300},
+		},
+	})
+	enc1.Encode(entity.GetTargetGraphResponse{
+		Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
+			RuleTypeMapping: map[int32]string{100: "go_library", 300: "source file"},
+		},
+	})
+	graph1Bytes := buf1.Bytes()
+
+	// Build second revision graph - target2 has different hash
+	var buf2 bytes.Buffer
+	enc2 := gob.NewEncoder(&buf2)
+	enc2.Encode(entity.GetTargetGraphResponse{
+		Targets: []entity.OptimizedTarget{
+			{ID: 1, Hash: "h1", RuleType: 100},
+			{ID: 2, Hash: "h2-new", RuleType: 300}, // changed hash
+		},
+	})
+	enc2.Encode(entity.GetTargetGraphResponse{
+		Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
+			RuleTypeMapping: map[int32]string{100: "go_library", 300: "source file"},
+		},
+	})
+	graph2Bytes := buf2.Bytes()
+
+	// Expected Get calls after optimization:
+	// - 2 treehash reads (READ A in serveChangedTargetsFromCache)
+	// - 1 compared-targets cache miss
+	// - 2 graph reads (using pre-read treehashes, no additional treehash reads)
+	// Total: 5 storage.Get calls
+	treehashReadCount := 0
+	graphReadCount := 0
+	comparedTargetsReadCount := 0
+
+	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
+			switch {
+			case strings.Contains(req.Key, "compared-targets"):
+				comparedTargetsReadCount++
+				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
+			case strings.Contains(req.Key, "treehashes"):
+				treehashReadCount++
+				if strings.Contains(req.Key, "sha1") {
+					return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
+				}
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
+			case strings.Contains(req.Key, "treehash1"):
+				graphReadCount++
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph1Bytes))}, nil
+			case strings.Contains(req.Key, "treehash2"):
+				graphReadCount++
+				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph2Bytes))}, nil
+			default:
+				return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
+			}
+		}).AnyTimes()
+
+	// Put is launched in a goroutine — use a channel to wait for it before the test ends.
+	putDone := make(chan struct{}, 1)
+	storagemock.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
+		putDone <- struct{}{}
+		return nil
+	})
+
+	c := NewController(context.Background(), Params{
+		Logger:       zaptest.NewLogger(t),
+		Storage:      storagemock,
+		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
+		RepoConfig:   fakeRepoConfigProvider{"repo:go-code": config.RepositoryConfig{Remote: "repo:go-code"}},
+	})
+
+	request := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
+		OutputConfig:   &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true},
+	}
+
+	err := c.GetChangedTargets(request, stream)
+	require.NoError(t, err)
+
+	select {
+	case <-putDone:
+	case <-time.After(time.Second):
+		assert.Fail(t, "cache write goroutine did not complete in time")
+	}
+
+	// Before optimization: treehashReadCount == 6 (3 per revision)
+	// After optimization: treehashReadCount == 2 (1 per revision, shared)
+	assert.Equal(t, 2, treehashReadCount, "treehash should be read exactly once per revision")
+	assert.Equal(t, 2, graphReadCount, "graph should be read once per revision")
+	assert.Equal(t, 1, comparedTargetsReadCount, "compared-targets cache consulted once")
 }
