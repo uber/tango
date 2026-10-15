@@ -86,7 +86,7 @@ type controller struct {
 // configured repository that the handler resolved for the request.
 type Controller interface {
 	GetTargetGraph(request entity.GetTargetGraphRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetTargetGraphYARPCServer, repo config.RepositoryConfig) error
-	GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error
+	GetChangedTargets(request entity.GetChangedTargetsRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetChangedTargetsYARPCServer, repo config.RepositoryConfig) error
 }
 
 // NewController creates a new controller. appCtx is cancelled on process

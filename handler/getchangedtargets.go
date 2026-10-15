@@ -25,13 +25,11 @@ import (
 )
 
 func (h *handler) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
-	// Temporary: the handler maps the request only to tag the metrics. The
-	// controller maps it again until it takes the entity request.
 	entityReq, mappingErr := proto.ProtoToGetChangedTargetsRequest(request)
 	if mappingErr != nil {
 		mappingErr = tangoerrors.NewUser(fmt.Errorf("convert get changed targets request: %w", mappingErr))
 	}
-	_, repo, repositoryErr := h.resolveRequestRepository(entityReq.First.Remote, mappingErr)
+	repoCfg, repo, repositoryErr := h.resolveRequestRepository(entityReq.First.Remote, mappingErr)
 	e := h.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
 	op := metrics.Begin(e, opGetChangedTargets, metrics.SlowDurationBuckets)
 	logger := h.logger.WithLazy(zap.String("repository", repo))
@@ -45,5 +43,5 @@ func (h *handler) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream
 	if repositoryErr != nil {
 		return repositoryErr
 	}
-	return h.controller.GetChangedTargets(request, stream)
+	return h.controller.GetChangedTargets(entityReq, request.GetOutputConfig(), stream, repoCfg)
 }
