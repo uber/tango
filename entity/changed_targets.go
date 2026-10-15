@@ -46,8 +46,9 @@ type GetChangedTargetsRequest struct {
 }
 
 // GetChangedTargetsResponse is one piece of a streamed changed-targets
-// result — either a batch of changed targets or a metadata mapping.
-// Exactly one field is non-nil.
+// result — either a batch of changed targets or a metadata mapping. A streamed
+// chunk has exactly one field set. The full, unchunked result of the
+// controller has both fields set.
 type GetChangedTargetsResponse struct {
 	ChangedTargets []ChangedTarget `json:"changed_targets"`
 	Metadata       *Metadata       `json:"metadata,omitempty"`

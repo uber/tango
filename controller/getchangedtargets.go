@@ -101,11 +101,14 @@ func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest
 
 	// Fast path: stream a previously computed result straight from cache.
 	if !entityReq.BypassCache {
-		served, err := c.serveChangedTargetsFromCache(ctx, e, logger, entityReq, outputConfig, stream, repoCfg.RepositoryID, maxDist, start)
+		cached, found, err := c.comparedTargetsFromCache(ctx, e, logger, entityReq, repoCfg.RepositoryID, start)
 		if err != nil {
 			return fmt.Errorf("serve from cache: %w", err)
 		}
-		if served {
+		if found {
+			if err := c.sendChangedTargets(stream, cached, maxDist, outputConfig); err != nil {
+				return fmt.Errorf("send cached response: %w", err)
+			}
 			return nil
 		}
 	}
@@ -116,7 +119,7 @@ func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest
 		return fmt.Errorf("fetch target graphs: %w", err)
 	}
 
-	changedTargetsResponses, err := c.compareFetchedGraphs(ctx, e, logger, entityReq.First.Remote, firstGraph, secondGraph, seedAttributesFor(repoCfg))
+	result, err := c.compareFetchedGraphs(ctx, e, logger, entityReq.First.Remote, firstGraph, secondGraph, seedAttributesFor(repoCfg))
 	// Allow GC of raw graph data while the caching goroutine runs.
 	firstGraph = fetchedGraph{}
 	secondGraph = fetchedGraph{}
@@ -128,10 +131,10 @@ func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest
 	}
 
 	// Cache the computed result concurrently so it doesn't block the stream send.
-	c.cacheComparedTargets(logger, entityReq, repoCfg.RepositoryID, changedTargetsResponses)
+	c.cacheComparedTargets(logger, entityReq, repoCfg.RepositoryID, result)
 
 	sendStart := time.Now()
-	if err := sendTrimmedChangedTargets(stream, changedTargetsResponses, maxDist, outputConfig); err != nil {
+	if err := c.sendChangedTargets(stream, result, maxDist, outputConfig); err != nil {
 		return fmt.Errorf("send response: %w", err)
 	}
 	sendDuration := time.Since(sendStart)
@@ -144,47 +147,49 @@ func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest
 	return nil
 }
 
-// serveChangedTargetsFromCache attempts to stream a previously computed
+// comparedTargetsFromCache attempts to load a previously computed
 // compared-targets result straight from storage. It returns:
-//   - (true, nil)  when a cached result was found and fully sent to the client;
-//   - (false, nil) on a cache miss or a corrupt blob — the caller should recompute;
-//   - (false, err) on an infra failure or a client disconnect that aborts the request.
+//   - (result, true, nil)   when a cached result was found;
+//   - (empty, false, nil)   on a cache miss or a corrupt blob — the caller should recompute;
+//   - (empty, false, err)   on an infra failure or a cancelled context.
 //
 // readTreehash returns ("", nil) on a cache miss (skip cache, recompute) but any
 // real storage error surfaces here so an infra failure that disables the cache
 // (e.g. a missing-deadline "missing TTL" reject) becomes a visible request failure
 // rather than silent degradation.
-func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request entity.GetChangedTargetsRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetChangedTargetsYARPCServer, repositoryID string, maxDist int32, start time.Time) (bool, error) {
+func (c *controller) comparedTargetsFromCache(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request entity.GetChangedTargetsRequest, repositoryID string, start time.Time) (entity.GetChangedTargetsResponse, bool, error) {
 	cacheStart := time.Now()
 	treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.First, request.Second, repositoryID, e, opGetChangedTargets)
 	if err != nil {
-		return false, fmt.Errorf("read revision treehash: %w", err)
+		return entity.GetChangedTargetsResponse{}, false, fmt.Errorf("read revision treehash: %w", err)
 	}
 	if treehash1 == "" || treehash2 == "" {
-		return false, nil
+		return entity.GetChangedTargetsResponse{}, false, nil
 	}
 
 	cacheKey := cachekey.GetComparedTargetsCachePath(repositoryID, treehash1, treehash2, request.ExcludeFilesRegex)
 	cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
 	if cacheErr != nil && !storage.IsNotFound(cacheErr) {
 		logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
-		return false, nil
+		return entity.GetChangedTargetsResponse{}, false, nil
 	}
 	if cachedReader == nil {
 		metrics.RecordCacheLookup(e, opGetChangedTargets, metrics.ComparedTargetsCacheLookup, cacheErr)
-		return false, nil
+		return entity.GetChangedTargetsResponse{}, false, nil
 	}
 
-	// Buffer all responses before sending any. A concurrent goroutine write may have
-	// left a partial blob in storage; buffering lets us detect corruption and fall
-	// through to recompute before we've sent anything to the client.
-	var cached []entity.GetChangedTargetsResponse
+	// Buffer and merge all chunks before returning any. A concurrent goroutine
+	// write may have left a partial blob in storage; buffering lets us detect
+	// corruption and fall through to recompute before we serve anything.
+	// Merging also reads size-bounded multi-chunk blobs.
+	var cached entity.GetChangedTargetsResponse
+	var mergedMeta *entity.Metadata
 	var readErr error
 	for {
 		if err := ctx.Err(); err != nil {
 			_ = cachedReader.Close()
-			// Client gave up while we were draining the cache. Surface as a user-cancelled error.
-			return false, fmt.Errorf("cache reader: %w", context.Cause(ctx))
+			// Caller gave up while we were draining the cache. Surface as a user-cancelled error.
+			return entity.GetChangedTargetsResponse{}, false, fmt.Errorf("cache reader: %w", context.Cause(ctx))
 		}
 		var resp entity.GetChangedTargetsResponse
 		resp, readErr = cachedReader.Read()
@@ -195,15 +200,21 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 		if readErr != nil {
 			break
 		}
-		cached = append(cached, resp)
+		if len(resp.ChangedTargets) > 0 {
+			cached.ChangedTargets = append(cached.ChangedTargets, resp.ChangedTargets...)
+		}
+		if resp.Metadata != nil {
+			mergedMeta = mergeMetadata(mergedMeta, resp.Metadata)
+		}
 	}
 	_ = cachedReader.Close()
 
 	if readErr != nil {
 		// Blob is corrupt (likely an incomplete write); recompute.
 		logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
-		return false, nil
+		return entity.GetChangedTargetsResponse{}, false, nil
 	}
+	cached.Metadata = mergedMeta
 
 	cacheReadDuration := time.Since(cacheStart)
 	logger.Info("GetChangedTargets: Cache hit, streaming from storage",
@@ -211,13 +222,26 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 	)
 	metrics.RecordCacheLookup(e, opGetChangedTargets, metrics.ComparedTargetsCacheLookup, nil)
 	e.DurationHistogram(opGetChangedTargets, "cache_read_duration", metrics.FastDurationBuckets).RecordDuration(cacheReadDuration)
-	if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, outputConfig); sendErr != nil {
-		return false, fmt.Errorf("send cached response: %w", sendErr)
+	return cached, true, nil
+}
+
+// mergeMetadata merges src into dst, allocating the maps of dst on first use.
+func mergeMetadata(dst *entity.Metadata, src *entity.Metadata) *entity.Metadata {
+	if dst == nil {
+		dst = &entity.Metadata{
+			TargetIDMapping:             make(map[int32]string, len(src.TargetIDMapping)),
+			RuleTypeMapping:             make(map[int32]string, len(src.RuleTypeMapping)),
+			TagMapping:                  make(map[int32]string, len(src.TagMapping)),
+			AttributeNameMapping:        make(map[int32]string, len(src.AttributeNameMapping)),
+			AttributeStringValueMapping: make(map[int32]string, len(src.AttributeStringValueMapping)),
+		}
 	}
-	logger.Info("GetChangedTargets: Successfully streamed from cache",
-		zap.Duration("total_duration", time.Since(start)),
-	)
-	return true, nil
+	maps.Copy(dst.TargetIDMapping, src.TargetIDMapping)
+	maps.Copy(dst.RuleTypeMapping, src.RuleTypeMapping)
+	maps.Copy(dst.TagMapping, src.TagMapping)
+	maps.Copy(dst.AttributeNameMapping, src.AttributeNameMapping)
+	maps.Copy(dst.AttributeStringValueMapping, src.AttributeStringValueMapping)
+	return dst
 }
 
 // fetchTargetGraphs fetches both revisions' target graphs concurrently. Each
@@ -352,10 +376,20 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 }
 
 // cacheComparedTargets writes the computed compared-targets result to storage in
-// a fire-and-forget goroutine so it does not block the stream send. The responses
-// is only read (never mutated) by the goroutine and the foreground send, so
+// a fire-and-forget goroutine so it does not block the caller. The result
+// is only read (never mutated) by the goroutine and the foreground caller, so
 // concurrent access is safe; the caller must not mutate it. This is best effort.
-func (c *controller) cacheComparedTargets(logger *zap.Logger, request entity.GetChangedTargetsRequest, repositoryID string, responses []entity.GetChangedTargetsResponse) {
+//
+// The blob is written as size-bounded chunks, the format of every earlier
+// writer of this cache key, so that an older binary sharing the same storage
+// can read an entry this controller wrote. The older send path forwards each
+// stored chunk to the wire as one message without re-chunking.
+func (c *controller) cacheComparedTargets(logger *zap.Logger, request entity.GetChangedTargetsRequest, repositoryID string, result entity.GetChangedTargetsResponse) {
+	responses, err := streaming.ChunkChangedTargetsResult(result, c.maxMessageBytes)
+	if err != nil {
+		logger.Warn("GetChangedTargets: skipping cache write, failed to chunk result", zap.Error(err))
+		return
+	}
 	go func() {
 		// Use c.appCtx directly: the cache write is fire-and-forget and must
 		// outlive the request (so a client disconnect doesn't abort it) but
@@ -392,15 +426,15 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request entity.Get
 // graphs: TGB-native when both revisions came back as TGB blobs, otherwise
 // the incumbent chunk pipeline (gob blobs, or the transitional mixed case
 // where exactly one revision's blob predates a format flip).
-func (c *controller) compareFetchedGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, remote string, first, second fetchedGraph, seedAttrs map[string]bool) ([]entity.GetChangedTargetsResponse, error) {
+func (c *controller) compareFetchedGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, remote string, first, second fetchedGraph, seedAttrs map[string]bool) (entity.GetChangedTargetsResponse, error) {
 	if first.tgb != nil && second.tgb != nil {
 		firstATFH, err := first.tgb.TGB().AllTargetsFileHashes()
 		if err != nil {
-			return nil, fmt.Errorf("read AllTargetsFileHashes from first TGB: %w", err)
+			return entity.GetChangedTargetsResponse{}, fmt.Errorf("read AllTargetsFileHashes from first TGB: %w", err)
 		}
 		secondATFH, err := second.tgb.TGB().AllTargetsFileHashes()
 		if err != nil {
-			return nil, fmt.Errorf("read AllTargetsFileHashes from second TGB: %w", err)
+			return entity.GetChangedTargetsResponse{}, fmt.Errorf("read AllTargetsFileHashes from second TGB: %w", err)
 		}
 		if allTargetsFileChanged(
 			&entity.Metadata{AllTargetsFileHashes: firstATFH},
@@ -414,11 +448,11 @@ func (c *controller) compareFetchedGraphs(ctx context.Context, e *metrics.Emitte
 	}
 	firstChunks, err := first.materializeChunks()
 	if err != nil {
-		return nil, fmt.Errorf("decode first graph: %w", err)
+		return entity.GetChangedTargetsResponse{}, fmt.Errorf("decode first graph: %w", err)
 	}
 	secondChunks, err := second.materializeChunks()
 	if err != nil {
-		return nil, fmt.Errorf("decode second graph: %w", err)
+		return entity.GetChangedTargetsResponse{}, fmt.Errorf("decode second graph: %w", err)
 	}
 	return c.compareTargetGraphs(ctx, e, logger, firstChunks, secondChunks, seedAttrs)
 }
@@ -430,7 +464,7 @@ func (c *controller) compareFetchedGraphs(ctx context.Context, e *metrics.Emitte
 // ShadowCompare on, the incumbent targetdiff comparison additionally runs
 // over the same two readers in a background goroutine and any divergence is
 // logged and counted (see shadowCompareTGB).
-func (c *controller) compareTargetGraphsTGB(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, remote string, before, after *tgb.Reader, seedAttrs map[string]bool) ([]entity.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphsTGB(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, remote string, before, after *tgb.Reader, seedAttrs map[string]bool) (entity.GetChangedTargetsResponse, error) {
 	compareStart := time.Now()
 	defer func() {
 		e.DurationHistogram(opGetChangedTargets, "compare_duration", metrics.SlowDurationBuckets).RecordDuration(time.Since(compareStart))
@@ -444,20 +478,20 @@ func (c *controller) compareTargetGraphsTGB(ctx context.Context, e *metrics.Emit
 		SeedAttrs:   seedAttrs,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("tgb compare: %w", err)
+		return entity.GetChangedTargetsResponse{}, fmt.Errorf("tgb compare: %w", err)
 	}
 	e.DurationHistogram(opGetChangedTargets, "diff_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(diffStart))
 
 	materializeStart := time.Now()
 	result, err := tgbdiff.Materialize(before, after, res, seedAttrs)
 	if err != nil {
-		return nil, fmt.Errorf("materialize changed targets: %w", err)
+		return entity.GetChangedTargetsResponse{}, fmt.Errorf("materialize changed targets: %w", err)
 	}
 	e.DurationHistogram(opGetChangedTargets, "materialize_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(materializeStart))
 	e.ValueHistogram(opGetChangedTargets, "target_count", metrics.LargeCountBuckets).RecordValue(float64(len(result.ChangedTargets)))
 
 	if ctx.Err() != nil {
-		return nil, context.Cause(ctx)
+		return entity.GetChangedTargetsResponse{}, context.Cause(ctx)
 	}
 
 	if c.shadowCompareFor(remote) {
@@ -467,12 +501,9 @@ func (c *controller) compareTargetGraphsTGB(ctx context.Context, e *metrics.Emit
 		c.shadowCompareTGB(logger, e, before, after, seedAttrs, result)
 	}
 
-	responses, err := c.resultToResponses(result)
-	if err != nil {
-		return nil, err
-	}
+	changedResult := resultToChangedTargets(result)
 	logger.Info("GetChangedTargets: Target graphs compared (TGB)")
-	return responses, nil
+	return changedResult, nil
 }
 
 // shadowCompareTGB runs the incumbent targetdiff comparison over the same two
@@ -519,7 +550,7 @@ func (c *controller) shadowCompareTGB(logger *zap.Logger, e *metrics.Emitter, be
 // are re-mapped into a canonical per-call ID namespace so the response metadata
 // only carries the names actually referenced. See internal/targetdiff for the
 // classification and distance rules.
-func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse, seedAttrs map[string]bool) ([]entity.GetChangedTargetsResponse, error) {
+func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, firstGraph, secondGraph []entity.GetTargetGraphResponse, seedAttrs map[string]bool) (entity.GetChangedTargetsResponse, error) {
 	compareStart := time.Now()
 	defer func() {
 		e.DurationHistogram(opGetChangedTargets, "compare_duration", metrics.SlowDurationBuckets).RecordDuration(time.Since(compareStart))
@@ -530,11 +561,11 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	decodeStart := time.Now()
 	firstTargetsByID, firstMetadata, err := getTargetsAndMetadata(ctx, firstGraph)
 	if err != nil {
-		return nil, err
+		return entity.GetChangedTargetsResponse{}, err
 	}
 	secondTargetsByID, secondMetadata, err := getTargetsAndMetadata(ctx, secondGraph)
 	if err != nil {
-		return nil, err
+		return entity.GetChangedTargetsResponse{}, err
 	}
 	// Release raw chunk slices — individual target protos are now held by the ID maps.
 	firstGraph = nil
@@ -548,14 +579,14 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 
 	before, err := toDiffGraph(ctx, firstTargetsByID, firstMetadata, seedAttrs)
 	if err != nil {
-		return nil, err
+		return entity.GetChangedTargetsResponse{}, err
 	}
 	// Metadata and ID map are fully consumed by the name-resolved graph; drop them.
 	firstTargetsByID = nil
 	firstMetadata = nil
 	after, err := toDiffGraph(ctx, secondTargetsByID, secondMetadata, seedAttrs)
 	if err != nil {
-		return nil, err
+		return entity.GetChangedTargetsResponse{}, err
 	}
 	secondTargetsByID = nil
 	secondMetadata = nil
@@ -569,7 +600,7 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 		MaxDistance: -1,
 	})
 	if err != nil {
-		return nil, err
+		return entity.GetChangedTargetsResponse{}, err
 	}
 	// Release the input graphs; only result is needed from here on.
 	before = nil
@@ -578,23 +609,20 @@ func (c *controller) compareTargetGraphs(ctx context.Context, e *metrics.Emitter
 	e.ValueHistogram(opGetChangedTargets, "target_count", metrics.LargeCountBuckets).RecordValue(float64(len(result.ChangedTargets)))
 
 	if ctx.Err() != nil {
-		return nil, context.Cause(ctx)
+		return entity.GetChangedTargetsResponse{}, context.Cause(ctx)
 	}
 
-	// 3) Re-map into the canonical response shape.
-	results, err := c.resultToResponses(result)
-	if err != nil {
-		return nil, err
-	}
+	// 3) Re-map into the canonical result shape.
+	changedResult := resultToChangedTargets(result)
 	logger.Info("GetChangedTargets: Target graphs compared")
-	return results, nil
+	return changedResult, nil
 }
 
-// resultToResponses re-maps each change into a canonical per-call ID
-// namespace and splits the result into message-size-bounded response chunks.
-// The mappers only assign IDs to names they actually see, so the emitted
-// metadata is pruned to what the changed targets reference.
-func (c *controller) resultToResponses(result targetdiff.Result) ([]entity.GetChangedTargetsResponse, error) {
+// resultToChangedTargets re-maps each change into a canonical per-call ID
+// namespace. The mappers only assign IDs to names they actually see, so the
+// emitted metadata is pruned to what the changed targets reference. Splitting
+// the result into wire-sized chunks is the handler's responsibility.
+func resultToChangedTargets(result targetdiff.Result) entity.GetChangedTargetsResponse {
 	mappers := newCanonicalMappers()
 	changed := make([]entity.ChangedTarget, 0, len(result.ChangedTargets))
 	for _, ct := range result.ChangedTargets {
@@ -605,30 +633,16 @@ func (c *controller) resultToResponses(result targetdiff.Result) ([]entity.GetCh
 			Distance:   ct.Distance,
 		})
 	}
-
-	changedGroups, err := streaming.SplitBySize(changed, c.maxMessageBytes)
-	if err != nil {
-		return nil, err
+	return entity.GetChangedTargetsResponse{
+		ChangedTargets: changed,
+		Metadata: &entity.Metadata{
+			TargetIDMapping:             mappers.target.Invert(),
+			RuleTypeMapping:             mappers.ruleType.Invert(),
+			TagMapping:                  mappers.tag.Invert(),
+			AttributeNameMapping:        mappers.attrName.Invert(),
+			AttributeStringValueMapping: mappers.attrVal.Invert(),
+		},
 	}
-	results := make([]entity.GetChangedTargetsResponse, 0, len(changedGroups))
-	for _, g := range changedGroups {
-		results = append(results, entity.GetChangedTargetsResponse{ChangedTargets: g})
-	}
-	metaGroups, err := streaming.SplitMetadata(
-		mappers.target.Invert(),
-		mappers.ruleType.Invert(),
-		mappers.tag.Invert(),
-		mappers.attrName.Invert(),
-		mappers.attrVal.Invert(),
-		c.maxMessageBytes,
-	)
-	if err != nil {
-		return nil, err
-	}
-	for _, m := range metaGroups {
-		results = append(results, entity.GetChangedTargetsResponse{Metadata: m})
-	}
-	return results, nil
 }
 
 // cancelCheckInterval is how often long-running loops check ctx.Err().
@@ -696,20 +710,20 @@ func (c *controller) allTargetsChangedFromGraph(
 	beforeMeta *entity.Metadata,
 	afterTargetsByID map[int32]*entity.OptimizedTarget,
 	afterMeta *entity.Metadata,
-) ([]entity.GetChangedTargetsResponse, error) {
+) (entity.GetChangedTargetsResponse, error) {
 	before, err := toDiffGraph(ctx, beforeTargetsByID, beforeMeta, nil)
 	if err != nil {
-		return nil, err
+		return entity.GetChangedTargetsResponse{}, err
 	}
 	after, err := toDiffGraph(ctx, afterTargetsByID, afterMeta, nil)
 	if err != nil {
-		return nil, err
+		return entity.GetChangedTargetsResponse{}, err
 	}
 	result, err := allTargetsChanged(ctx, before, after)
 	if err != nil {
-		return nil, err
+		return entity.GetChangedTargetsResponse{}, err
 	}
-	return c.resultToResponses(result)
+	return resultToChangedTargets(result), nil
 }
 
 // allTargetsChanged retains the ordinary comparison's membership changes and
@@ -762,14 +776,14 @@ func allTargetsChanged(ctx context.Context, before, after targetdiff.Graph) (tar
 
 // allTargetsChangedFromTGB decodes both TGB revisions and applies the same
 // AllTargetsFiles classification rules as the chunk comparison path.
-func (c *controller) allTargetsChangedFromTGB(ctx context.Context, beforeReader, afterReader *tgb.Reader) ([]entity.GetChangedTargetsResponse, error) {
+func (c *controller) allTargetsChangedFromTGB(ctx context.Context, beforeReader, afterReader *tgb.Reader) (entity.GetChangedTargetsResponse, error) {
 	beforeGraph, err := beforeReader.DecodeGraph()
 	if err != nil {
-		return nil, fmt.Errorf("decode first TGB graph: %w", err)
+		return entity.GetChangedTargetsResponse{}, fmt.Errorf("decode first TGB graph: %w", err)
 	}
 	afterGraph, err := afterReader.DecodeGraph()
 	if err != nil {
-		return nil, fmt.Errorf("decode second TGB graph: %w", err)
+		return entity.GetChangedTargetsResponse{}, fmt.Errorf("decode second TGB graph: %w", err)
 	}
 	beforeTargetsByID := make(map[int32]*entity.OptimizedTarget, len(beforeGraph.Targets))
 	for i := range beforeGraph.Targets {
@@ -1052,4 +1066,12 @@ func readTreehash(ctx context.Context, st storage.Storage, build entity.BuildDes
 		return "", fmt.Errorf("treehash body read failed for key %q: %w", key, err)
 	}
 	return string(b), nil
+}
+
+func (c *controller) sendChangedTargets(stream pb.TangoServiceGetChangedTargetsYARPCServer, result entity.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) error {
+	responses, err := streaming.ChunkChangedTargetsResult(result, c.maxMessageBytes)
+	if err != nil {
+		return err
+	}
+	return sendTrimmedChangedTargets(stream, responses, maxDist, outputConfig)
 }

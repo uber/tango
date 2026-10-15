@@ -15,7 +15,11 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -56,4 +60,23 @@ func newGraphReader(t *testing.T, chunks ...entity.GetTargetGraphResponse) stora
 	reader, err := storage.NewGraphReader(t.Context(), st, "test-graph")
 	require.NoError(t, err)
 	return reader
+}
+
+// encodeChangedTargetsChunks gob-encodes a sequence of
+// entity.GetChangedTargetsResponse values the way
+// storage.WriteChangedTargetsStream does, for use with storage mocks that
+// need raw bytes rather than a real backing store.
+func encodeChangedTargetsChunks(t *testing.T, chunks []entity.GetChangedTargetsResponse) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	for i := range chunks {
+		require.NoError(t, enc.Encode(&chunks[i]))
+	}
+	return buf.Bytes()
+}
+
+// readCloser wraps a string as an io.ReadCloser for storage mock responses.
+func readCloser(s string) io.ReadCloser {
+	return io.NopCloser(strings.NewReader(s))
 }
