@@ -269,7 +269,6 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -298,7 +297,6 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 		Return(storage.DownloadResponse{}, injected).Times(2)
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zap.NewNop(),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -382,7 +380,6 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 	})
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -475,7 +472,6 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 	})
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -567,7 +563,6 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
 	c := NewController(appCtx, Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -1060,7 +1055,6 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 	}).Times(2)
 
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      storagemock,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),

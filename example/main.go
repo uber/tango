@@ -105,7 +105,6 @@ func run() error {
 		Storage:         store,
 		Orchestrator:    orch,
 		MaxMessageBytes: cfg.Service.MaxMessageBytes,
-		RepoConfig:      cfg,
 		GraphConfig:     cfg,
 	})
 

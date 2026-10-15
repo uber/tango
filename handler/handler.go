@@ -27,8 +27,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// Duplicate of the constant in the controller. Temporary: the controller
-// drops its copy when it takes the resolved repository from the handler.
 const unknownRepositoryMetricLabel = "unknown"
 
 type Params struct {
@@ -59,9 +57,6 @@ func New(p Params) pb.TangoYARPCServer {
 // for a validated request. Invalid requests retain the common unknown label and
 // their existing error; valid requests must exactly match the configured
 // repository allowlist before controller cache I/O.
-//
-// Duplicate of controller.resolveRequestRepository. Temporary: the controller
-// drops its copy when it takes the resolved repository from the handler.
 func (h *handler) resolveRequestRepository(remote string, requestErr error) (config.RepositoryConfig, string, error) {
 	if requestErr != nil {
 		return config.RepositoryConfig{}, unknownRepositoryMetricLabel, requestErr
