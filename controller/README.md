@@ -1,33 +1,35 @@
 # Controller
 
-The controller is the request-handling layer of Tango. The handler calls
-it, and it turns each streaming RPC into a
-deterministic pipeline of cache lookup, graph computation, comparison, and
-response streaming.
+The controller is Tango's entity-level business logic layer. It implements
+the `Controller` interface that the `handler` package depends on, and turns
+each call into a deterministic pipeline of cache lookup, graph computation,
+and comparison. It speaks only entity types; it never imports the generated
+proto package or `internal/mapper`'s proto conversions.
 
 ## Responsibilities
 
 The package is intentionally thin. It owns the cross-cutting concerns that
-sit between the wire protocol and the rest of the system:
+sit between the handler and the rest of the system:
 
-- **Repository input.** Each call receives an entity request and the
-  resolved repository configuration from the handler. The controller does
-  not map the request or look up the repository itself.
+- **Repository input.** Each call receives the resolved repository
+  configuration from the handler. The controller does not look up the
+  repository itself.
 - **Read-through caching.** Where a request can be satisfied from previously
-  computed artifacts, the controller fetches them from storage and streams
-  them back without invoking the orchestrator. Cache misses fall through to
+  computed artifacts, the controller fetches them from storage and returns
+  them without invoking the orchestrator. Cache misses fall through to
   computation, and computed results are written back asynchronously so they
-  do not block the response.
-- **Graph diffing.** Comparison-style RPCs fetch two target graphs
-  concurrently, classify per-target changes (new, direct, indirect),
-  optionally compute reverse-dependency distances, and assemble the response
+  do not block the caller.
+- **Graph diffing.** `GetChangedTargets` fetches two target graphs
+  concurrently, classifies per-target changes (new, direct, indirect),
+  optionally computes reverse-dependency distances, and assembles the result
   in a canonical ID space derived from per-request mappers.
-- **Streaming and chunking.** Responses are emitted as multiple stream
-  messages sized to stay below the gRPC per-message limit. Targets,
-  metadata, and topology deltas are chunked independently.
-- **Observability.** Every RPC emits per-phase timers. The handler emits the
-  per-call counters and the classified failure metric that distinguishes
-  user from infrastructure errors.
+- **Full, unfiltered results.** The controller always returns the complete
+  computed or cached payload. Distance filtering and field stripping based on
+  output options are the handler's responsibility, applied while sending, so
+  a single cached entry serves every output-option combination.
+- **Observability.** The controller emits per-phase timers and cache lookup
+  counters, tagged with the repository. The handler owns the per-RPC
+  lifecycle counters and the classified failure metric.
 
 ## Collaborators
 
@@ -39,12 +41,14 @@ behavior:
   not concern itself with the underlying medium.
 - **Orchestrator** — invoked on cache misses to compute a target graph from
   a build description. The controller treats it as an opaque graph source.
-- **Protobuf types** — the controller speaks the generated service and
-  message types directly; it does not introduce its own domain model.
+- **Entity types** - the controller speaks `entity` request and response
+  types directly; it does not introduce its own wire format and never touches
+  the generated proto types.
 
 ## Construction
 
 The controller is built once at startup with its logger, storage,
-orchestrator, optional metrics scope, and optional max-message-bytes
-configuration. The constructor returns the
-`Controller` interface, which the handler calls.
+orchestrator, optional metrics scope, optional max-message-bytes
+configuration, and repository/graph config providers. `NewController` returns
+the `Controller` interface, which the `handler` package wraps to expose the
+generated YARPC server surface.

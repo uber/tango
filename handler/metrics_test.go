@@ -15,43 +15,146 @@
 package handler
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber-go/tally"
+	"github.com/uber/tango/config"
 	mock_controller "github.com/uber/tango/controller/controllermock"
+	"github.com/uber/tango/entity"
 	pb "github.com/uber/tango/tangopb"
+	tangomock "github.com/uber/tango/tangopb/tangopbmock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
 
-func TestGetTargetGraphMetrics(t *testing.T) {
-	ts := tally.NewTestScope("", nil)
-	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	ctrl.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
-	h := New(Params{Logger: zap.NewNop(), Controller: ctrl, RepoConfig: allowAnyRepositoryConfigProvider{}, Scope: ts})
+type noRepositoryConfigProvider struct{}
 
-	build := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha", Strategy: pb.COMPUTATION_STRATEGY_UNSET}
-	require.NoError(t, h.GetTargetGraph(&pb.GetTargetGraphRequest{BuildDescription: build}, nil))
-
-	snap := ts.Snapshot()
-	assert.Contains(t, snap.Counters(), "handler.get_target_graph.start+repo=test-repository")
-	assert.Contains(t, snap.Histograms(), "handler.get_target_graph.finish+repo=test-repository,result=success")
+func (noRepositoryConfigProvider) GetRepositoryConfig(string) (config.RepositoryConfig, bool) {
+	return config.RepositoryConfig{}, false
 }
 
-func TestGetChangedTargetsMetrics(t *testing.T) {
-	ts := tally.NewTestScope("", nil)
-	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	ctrl.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
-	h := New(Params{Logger: zap.NewNop(), Controller: ctrl, RepoConfig: allowAnyRepositoryConfigProvider{}, Scope: ts})
+func TestLifecycleMetrics(t *testing.T) {
+	validBuild := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha", Strategy: pb.COMPUTATION_STRATEGY_UNSET}
+	tests := []struct {
+		name       string
+		op         string
+		repoConfig config.RepositoryConfigProvider
+		call       func(h pb.TangoYARPCServer, ctrl *gomock.Controller) error
+		expect     func(m *mock_controller.MockController)
+		wantErr    bool
+		wantRepo   string
+		wantResult string
+	}{
+		{
+			name:       "GetTargetGraph success carries the configured repository",
+			op:         "get_target_graph",
+			repoConfig: allowAnyRepositoryConfigProvider{},
+			call: func(h pb.TangoYARPCServer, ctrl *gomock.Controller) error {
+				return h.GetTargetGraph(&pb.GetTargetGraphRequest{BuildDescription: validBuild}, targetGraphStream(ctrl))
+			},
+			expect: func(m *mock_controller.MockController) {
+				m.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
+			},
+			wantRepo:   "test-repository",
+			wantResult: "success",
+		},
+		{
+			name:       "GetTargetGraph invalid request carries the unknown repository",
+			op:         "get_target_graph",
+			repoConfig: allowAnyRepositoryConfigProvider{},
+			call: func(h pb.TangoYARPCServer, ctrl *gomock.Controller) error {
+				return h.GetTargetGraph(&pb.GetTargetGraphRequest{}, targetGraphStream(ctrl))
+			},
+			wantErr:    true,
+			wantRepo:   unknownRepositoryMetricLabel,
+			wantResult: "user",
+		},
+		{
+			name:       "GetTargetGraph unconfigured remote does not call the controller",
+			op:         "get_target_graph",
+			repoConfig: noRepositoryConfigProvider{},
+			call: func(h pb.TangoYARPCServer, ctrl *gomock.Controller) error {
+				return h.GetTargetGraph(&pb.GetTargetGraphRequest{BuildDescription: validBuild}, targetGraphStream(ctrl))
+			},
+			wantErr:    true,
+			wantRepo:   unknownRepositoryMetricLabel,
+			wantResult: "user",
+		},
+		{
+			name:       "GetChangedTargets success carries the configured repository",
+			op:         "get_changed_targets",
+			repoConfig: allowAnyRepositoryConfigProvider{},
+			call: func(h pb.TangoYARPCServer, ctrl *gomock.Controller) error {
+				return h.GetChangedTargets(&pb.GetChangedTargetsRequest{FirstRevision: validBuild, SecondRevision: validBuild}, changedTargetsStream(ctrl))
+			},
+			expect: func(m *mock_controller.MockController) {
+				m.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any(), gomock.Any()).Return(entity.GetChangedTargetsResponse{}, nil)
+			},
+			wantRepo:   "test-repository",
+			wantResult: "success",
+		},
+		{
+			name:       "GetChangedTargets invalid request carries the unknown repository",
+			op:         "get_changed_targets",
+			repoConfig: allowAnyRepositoryConfigProvider{},
+			call: func(h pb.TangoYARPCServer, ctrl *gomock.Controller) error {
+				return h.GetChangedTargets(nil, changedTargetsStream(ctrl))
+			},
+			wantErr:    true,
+			wantRepo:   unknownRepositoryMetricLabel,
+			wantResult: "user",
+		},
+		{
+			name:       "GetChangedTargets unconfigured remote does not call the controller",
+			op:         "get_changed_targets",
+			repoConfig: noRepositoryConfigProvider{},
+			call: func(h pb.TangoYARPCServer, ctrl *gomock.Controller) error {
+				return h.GetChangedTargets(&pb.GetChangedTargetsRequest{FirstRevision: validBuild, SecondRevision: validBuild}, changedTargetsStream(ctrl))
+			},
+			wantErr:    true,
+			wantRepo:   unknownRepositoryMetricLabel,
+			wantResult: "user",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := tally.NewTestScope("", nil)
+			gc := gomock.NewController(t)
+			ctrl := mock_controller.NewMockController(gc)
+			if tt.expect != nil {
+				tt.expect(ctrl)
+			}
+			h := New(Params{Logger: zap.NewNop(), Scope: ts, Controller: ctrl, RepoConfig: tt.repoConfig})
 
-	build := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha", Strategy: pb.COMPUTATION_STRATEGY_UNSET}
-	require.NoError(t, h.GetChangedTargets(&pb.GetChangedTargetsRequest{FirstRevision: build, SecondRevision: build}, nil))
+			err := tt.call(h, gc)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
 
-	snap := ts.Snapshot()
-	assert.Contains(t, snap.Counters(), "handler.get_changed_targets.start+repo=test-repository")
-	assert.Contains(t, snap.Histograms(), "handler.get_changed_targets.finish+repo=test-repository,result=success")
+			snap := ts.Snapshot()
+			prefix := "handler." + tt.op
+			assert.Contains(t, snap.Counters(), prefix+".start+repo="+tt.wantRepo)
+			assert.Contains(t, snap.Histograms(), prefix+".finish+repo="+tt.wantRepo+",result="+tt.wantResult)
+		})
+	}
+}
+
+func targetGraphStream(ctrl *gomock.Controller) pb.TangoServiceGetTargetGraphYARPCServer {
+	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background()).AnyTimes()
+	return stream
+}
+
+func changedTargetsStream(ctrl *gomock.Controller) pb.TangoServiceGetChangedTargetsYARPCServer {
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
+	stream.EXPECT().Context().Return(context.Background()).AnyTimes()
+	stream.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
+	return stream
 }
 
 func TestGetChangedTargetGraphMetrics(t *testing.T) {

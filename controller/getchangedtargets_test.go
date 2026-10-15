@@ -19,8 +19,6 @@ import (
 	"context"
 	"encoding/gob"
 	"errors"
-	"fmt"
-	"io"
 	"strings"
 	"testing"
 	"time"
@@ -33,8 +31,6 @@ import (
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/observability/metrics"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
-	pb "github.com/uber/tango/tangopb"
-	tangomock "github.com/uber/tango/tangopb/tangopbmock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -233,29 +229,24 @@ func TestCompareTargetGraphs_AllTargetsFileNoTrigger(t *testing.T) {
 
 func TestGetChangedTargets_CacheHit(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(t.Context())
 
-	// Build a cached response with one ChangedTargets message and one Metadata message,
-	// gob-encoded (the storage layer streams a gob-encoded sequence of values).
+	// Build a cached response with one ChangedTargets message and one Metadata message.
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
-	enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}})
-	enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
+	require.NoError(t, enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}}))
+	require.NoError(t, enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}}))
 	cachedBytes := buf.Bytes()
 
 	storagemock := storagemock.NewMockStorage(ctrl)
 	// First two Gets resolve the treehashes, third gets the cached comparison result.
 	gomock.InOrder(
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil),
+			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash1"))}, nil),
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil),
+			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash2"))}, nil),
 		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cachedBytes))}, nil),
+			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(cachedBytes)}, nil),
 	)
-
-	stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
 	c := NewController(context.Background(), Params{
 		Logger:       zaptest.NewLogger(t),
@@ -263,17 +254,14 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 	})
 
-	request := changedTargetsRequest()
-	outputConfig := &pb.OutputConfig{MaxDistance: -1}
-
-	err := c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
+	got, err := c.GetChangedTargets(t.Context(), changedTargetsRequest(), testRepositoryConfig)
 	require.NoError(t, err)
+	assert.Empty(t, got.ChangedTargets)
+	assert.NotNil(t, got.Metadata)
 }
 
 func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(t.Context())
 
 	storagemock := storagemock.NewMockStorage(ctrl)
 	// A non-NotFound storage error on a treehash read must surface as a failed
@@ -291,10 +279,7 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 	})
 
-	request := changedTargetsRequest()
-	outputConfig := &pb.OutputConfig{MaxDistance: -1}
-
-	err := c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
+	_, err := c.GetChangedTargets(t.Context(), changedTargetsRequest(), testRepositoryConfig)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), injected.Error())
 }
@@ -330,166 +315,12 @@ func TestReadTreehash(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		st := storagemock.NewMockStorage(ctrl)
 		st.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(strings.NewReader("deadbeef"))}, nil)
+			Return(storage.DownloadResponse{ReadCloser: readCloser("deadbeef")}, nil)
 
 		val, err := readTreehash(t.Context(), st, bd, testRepositoryID(bd.Remote), metrics.Nop(), opGetChangedTargets)
 		require.NoError(t, err)
 		assert.Equal(t, "deadbeef", val)
 	})
-}
-
-func TestGetChangedTargets_StreamSendError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(t.Context())
-
-	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send error"))
-	storagemock := storagemock.NewMockStorage(ctrl)
-
-	var buf bytes.Buffer
-	gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{})
-	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
-		if strings.Contains(req.Key, "compared-targets") {
-			return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
-		}
-		if strings.Contains(req.Key, "treehashes") {
-			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("th")))}, nil
-		}
-		if strings.Contains(req.Key, "graphs") {
-			return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes()))}, nil
-		}
-		return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
-	}).AnyTimes()
-
-	// Put is launched in a goroutine — use a channel to wait for it before the test ends.
-	putDone := make(chan struct{}, 1)
-	storagemock.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
-		putDone <- struct{}{}
-		return nil
-	})
-
-	c := NewController(context.Background(), Params{
-		Logger:       zaptest.NewLogger(t),
-		Storage:      storagemock,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
-	})
-
-	request := changedTargetsRequest()
-	outputConfig := &pb.OutputConfig{MaxDistance: -1}
-
-	err := c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
-	assert.Error(t, err)
-
-	select {
-	case <-putDone:
-	case <-time.After(time.Second):
-		assert.Fail(t, "cache write goroutine did not complete in time")
-	}
-}
-
-func TestGetChangedTargets_streamChunks(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(t.Context())
-
-	var sentResponses []*pb.GetChangedTargetsResponse
-	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, opts ...interface{}) error {
-		sentResponses = append(sentResponses, resp)
-		return nil
-	}).Times(2)
-
-	storagemock := storagemock.NewMockStorage(ctrl)
-
-	// Build first revision graph (2 chunks: Targets + Metadata)
-	var buf1 bytes.Buffer
-	enc1 := gob.NewEncoder(&buf1)
-	enc1.Encode(entity.GetTargetGraphResponse{
-		Targets: []entity.OptimizedTarget{
-			{ID: 1, Hash: "h1", RuleType: 100},
-			{ID: 2, Hash: "h2-old", RuleType: 300},
-		},
-	})
-	enc1.Encode(entity.GetTargetGraphResponse{
-		Metadata: &entity.Metadata{
-			TargetIDMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
-			RuleTypeMapping: map[int32]string{100: "go_library", 300: "source file"},
-		},
-	})
-	graph1Bytes := buf1.Bytes()
-
-	// Build second revision graph - target2 has different hash
-	var buf2 bytes.Buffer
-	enc2 := gob.NewEncoder(&buf2)
-	enc2.Encode(entity.GetTargetGraphResponse{
-		Targets: []entity.OptimizedTarget{
-			{ID: 1, Hash: "h1", RuleType: 100},
-			{ID: 2, Hash: "h2-new", RuleType: 300}, // changed hash
-		},
-	})
-	enc2.Encode(entity.GetTargetGraphResponse{
-		Metadata: &entity.Metadata{
-			TargetIDMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
-			RuleTypeMapping: map[int32]string{100: "go_library", 300: "source file"},
-		},
-	})
-	graph2Bytes := buf2.Bytes()
-
-	// Each revision needs: treehash lookup + graph lookup. Plus one initial cache miss.
-	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
-			switch {
-			case strings.Contains(req.Key, "compared-targets"):
-				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
-			case strings.Contains(req.Key, "sha1"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
-			case strings.Contains(req.Key, "sha2"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
-			case strings.Contains(req.Key, "treehash1"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph1Bytes))}, nil
-			case strings.Contains(req.Key, "treehash2"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph2Bytes))}, nil
-			default:
-				return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
-			}
-			// readTreehash (×2 pre) + comparison cache miss (×1) + graph computation (×4) + readTreehash (×2 post) = 9
-		}).Times(9)
-	// Put is launched in a goroutine — use a channel to wait for it before the test ends.
-	putDone := make(chan struct{}, 1)
-	storagemock.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
-		putDone <- struct{}{}
-		return nil
-	})
-
-	c := NewController(context.Background(), Params{
-		Logger:       zaptest.NewLogger(t),
-		Storage:      storagemock,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
-	})
-
-	request := changedTargetsRequest()
-	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true}
-
-	err := c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
-	require.NoError(t, err)
-
-	select {
-	case <-putDone:
-	case <-time.After(time.Second):
-		assert.Fail(t, "cache write goroutine did not complete in time")
-	}
-
-	require.Len(t, sentResponses, 2)
-	changedTargets := sentResponses[0].GetChangedTargets()
-	metadata := sentResponses[1].GetMetadata()
-
-	// Verify target2 is detected as changed (hash changed from h2-old to h2-new)
-	require.Len(t, changedTargets.GetChangedTargets(), 1, "should detect 1 changed target")
-	changed := changedTargets.GetChangedTargets()[0]
-	assert.Equal(t, "h2-old", changed.GetOldTarget().GetHash())
-	assert.Equal(t, "h2-new", changed.GetNewTarget().GetHash())
-
-	targetID := changed.GetNewTarget().GetId()
-	assert.Equal(t, "//app:target2", metadata.GetTargetIdMapping()[targetID])
 }
 
 // TestGetChangedTargets_CacheWriteUsesAppCtx verifies the cache-write
@@ -499,29 +330,20 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 // sees inside Put, and asserts each cancellation source independently.
 func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	reqCtx, cancelReq := context.WithCancel(t.Context())
-	defer cancelReq()
-	stream.EXPECT().Context().Return(reqCtx)
-	stream.EXPECT().Send(gomock.Any()).Return(nil).AnyTimes()
 
 	storagemock := storagemock.NewMockStorage(ctrl)
 
 	// Minimal single-chunk graph so the comparison succeeds and the cache
 	// goroutine runs. Both revisions share the same target so there are no
-	// diffs to send beyond the metadata chunk.
-	var graphBuf bytes.Buffer
-	enc := gob.NewEncoder(&graphBuf)
-	enc.Encode(entity.GetTargetGraphResponse{
-		Targets: []entity.OptimizedTarget{{ID: 1, Hash: "h1", RuleType: 100}},
-	})
-	enc.Encode(entity.GetTargetGraphResponse{
-		Metadata: &entity.Metadata{
+	// diffs beyond the metadata chunk.
+	graphChunks := []entity.GetTargetGraphResponse{
+		{Targets: []entity.OptimizedTarget{{ID: 1, Hash: "h1", RuleType: 100}}},
+		{Metadata: &entity.Metadata{
 			TargetIDMapping: map[int32]string{1: "//app:t1"},
 			RuleTypeMapping: map[int32]string{100: "go_library"},
-		},
-	})
-	graphBytes := graphBuf.Bytes()
+		}},
+	}
+	graphBytes := encodeGraphChunks(t, graphChunks)
 
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
@@ -529,13 +351,13 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 			case strings.Contains(req.Key, "compared-targets"):
 				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
 			case strings.Contains(req.Key, "sha1"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
+				return storage.DownloadResponse{ReadCloser: readCloser("treehash1")}, nil
 			case strings.Contains(req.Key, "sha2"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
+				return storage.DownloadResponse{ReadCloser: readCloser("treehash2")}, nil
 			case strings.Contains(req.Key, "treehash"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graphBytes))}, nil
+				return storage.DownloadResponse{ReadCloser: readCloser(string(graphBytes))}, nil
 			default:
-				return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
+				return storage.DownloadResponse{}, errors.New("unexpected key: " + req.Key)
 			}
 		}).AnyTimes()
 
@@ -557,12 +379,13 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 	})
 
-	request := changedTargetsRequest()
-	outputConfig := &pb.OutputConfig{MaxDistance: -1}
+	reqCtx, cancelReq := context.WithCancel(context.Background())
+	defer cancelReq()
 
 	handlerDone := make(chan error, 1)
 	go func() {
-		handlerDone <- c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
+		_, err := c.GetChangedTargets(reqCtx, changedTargetsRequest(), testRepositoryConfig)
+		handlerDone <- err
 	}()
 
 	var cacheCtx context.Context
@@ -572,8 +395,8 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 		t.Fatal("cache-write goroutine never reached storage.Put")
 	}
 
-	// Handler should be free to return regardless of the still-running
-	// goroutine — that is the whole point of the detached cache write.
+	// The call should return regardless of the still-running goroutine —
+	// that is the whole point of the detached cache write.
 	select {
 	case err := <-handlerDone:
 		require.NoError(t, err)
@@ -963,105 +786,6 @@ func TestCompareTargetGraphs_ChangedWhenNewAttributeAdded(t *testing.T) {
 	assert.Equal(t, int32(0), got.Distance, "Target with own-config (attrs) change is a seed (distance 0)")
 }
 
-func TestSendTrimmedChangedTargets_MetadataAlwaysForwarded(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-
-	responses := []entity.GetChangedTargetsResponse{
-		{
-			ChangedTargets: []entity.ChangedTarget{
-				{Distance: 5, ChangeType: entity.ChangeTypeChanged},
-			},
-		},
-		{
-			Metadata: &entity.Metadata{TargetIDMapping: map[int32]string{1: "//app:T"}},
-		},
-	}
-
-	var sent []*pb.GetChangedTargetsResponse
-	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsResponse, _ ...any) error {
-		sent = append(sent, r)
-		return nil
-	}).Times(2)
-
-	// max_distance=1 filters out the distance-5 target, metadata always forwarded
-	require.NoError(t, sendTrimmedChangedTargets(stream, responses, 1, nil))
-
-	// First response: target filtered out (distance 5 > maxDist 1)
-	assert.Empty(t, sent[0].GetChangedTargets().GetChangedTargets())
-	// Second response: metadata always forwarded
-	assert.NotNil(t, sent[1].GetMetadata())
-}
-
-func TestSendTrimmedChangedTargets_SendError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-
-	responses := []entity.GetChangedTargetsResponse{
-		{
-			ChangedTargets: []entity.ChangedTarget{},
-		},
-	}
-
-	stream.EXPECT().Send(gomock.Any()).Return(errors.New("send error"))
-
-	err := sendTrimmedChangedTargets(stream, responses, -1, nil)
-	assert.EqualError(t, err, "send error")
-}
-
-func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(t.Context())
-
-	// Cached response: two targets at distances 0 and 2, plus metadata.
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	enc.Encode(entity.GetChangedTargetsResponse{
-		ChangedTargets: []entity.ChangedTarget{
-			{Distance: 0, ChangeType: entity.ChangeTypeChanged},
-			{Distance: 2, ChangeType: entity.ChangeTypeChanged},
-		},
-	})
-	enc.Encode(entity.GetChangedTargetsResponse{Metadata: &entity.Metadata{}})
-	cachedBytes := buf.Bytes()
-
-	storagemock := storagemock.NewMockStorage(ctrl)
-	gomock.InOrder(
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil),
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil),
-		storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(cachedBytes))}, nil),
-	)
-
-	var sent []*pb.GetChangedTargetsResponse
-	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsResponse, _ ...any) error {
-		sent = append(sent, r)
-		return nil
-	}).Times(2)
-
-	c := NewController(context.Background(), Params{
-		Logger:       zaptest.NewLogger(t),
-		Storage:      storagemock,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
-	})
-
-	request := changedTargetsRequest()
-	outputConfig := &pb.OutputConfig{MaxDistance: 1}
-
-	err := c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
-	require.NoError(t, err)
-
-	require.Len(t, sent, 2)
-	kept := sent[0].GetChangedTargets().GetChangedTargets()
-	require.Len(t, kept, 1, "only the distance-0 target should survive the filter")
-	assert.Equal(t, int32(0), kept[0].GetDistance())
-	// Metadata always forwarded
-	assert.NotNil(t, sent[1].GetMetadata())
-}
-
 func TestCompareTargetGraphs_HashOnlyChangePropagatesViaBFS(t *testing.T) {
 	c := newTestController(zaptest.NewLogger(t))
 
@@ -1256,41 +980,6 @@ func TestCompareTargetGraphs_DeletedTargetEmitted(t *testing.T) {
 	assert.Equal(t, int32(0), got.Distance, "DELETED targets are seeds (distance 0)")
 	// Old id is remapped into the canonical id space; metadata must resolve back to the deleted name.
 	assert.Equal(t, "//app:T", res.Metadata.TargetIDMapping[got.OldTarget.ID])
-}
-
-func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-
-	// DELETED entries are seeds (distance 0) and must survive max_distance=1.
-	responses := []entity.GetChangedTargetsResponse{
-		{
-			ChangedTargets: []entity.ChangedTarget{
-				{Distance: 0, ChangeType: entity.ChangeTypeDeleted},
-				{Distance: 1, ChangeType: entity.ChangeTypeChanged},
-				{Distance: 5, ChangeType: entity.ChangeTypeChanged},
-			},
-		},
-	}
-
-	var sent []*pb.GetChangedTargetsResponse
-	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(r *pb.GetChangedTargetsResponse, _ ...any) error {
-		sent = append(sent, r)
-		return nil
-	}).Times(1)
-
-	require.NoError(t, sendTrimmedChangedTargets(stream, responses, 1, nil))
-
-	kept := sent[0].GetChangedTargets().GetChangedTargets()
-	require.Len(t, kept, 2, "distance-0 DELETED and distance-1 CHANGED both kept; distance-5 dropped")
-	gotDeleted := false
-	for _, ct := range kept {
-		if ct.GetChangeType() == pb.CHANGE_TYPE_DELETED {
-			gotDeleted = true
-			assert.Equal(t, int32(0), ct.GetDistance())
-		}
-	}
-	assert.True(t, gotDeleted, "DELETED entry at distance 0 must survive max_distance=1")
 }
 
 func changedTargetsRequest() entity.GetChangedTargetsRequest {

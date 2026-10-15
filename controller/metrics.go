@@ -15,6 +15,8 @@
 package controller
 
 // Operation names, snake_cased after the RPC interface methods they measure.
+// The handler package defines its own copy for its RPC-level lifecycle
+// metrics; these name the controller's business-logic-level metrics.
 const (
 	opGetTargetGraph    = "get_target_graph"
 	opGetChangedTargets = "get_changed_targets"

@@ -63,7 +63,7 @@ The top-level split is by **responsibility**, not by domain: `controller/` handl
 
 ### Controllers
 
-The controller is the YARPC service implementation. It owns transport-adjacent concerns: request validation, metrics, cancellation linkage, response streaming, output filtering, comparison fan-out, and compared-target caching. It does **not** own workspace creation, git operations, or graph computation.
+The controller is Tango's entity-level business logic: cache reads and writes (treehash, graph, compared targets), orchestrator calls, graph comparison fan-out, and canonical ID remapping. It speaks only entity types, with no proto, no `internal/mapper` proto conversions, and no `tangopb` import in the package. It returns full, unfiltered, unchunked results. Output filtering and response chunking for the wire are the handler's job. It receives the resolved `config.RepositoryConfig` from the handler and does not look up the repository itself.
 
 The handler records the operation metrics of every RPC, under the `handler` scope. Every RPC classifies invalid input as a user error, preserves error chains, attempts applicable cache reads before expensive work, delegates graph production to the orchestrator, and converts the final error at the wire boundary.
 

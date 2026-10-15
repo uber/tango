@@ -10,11 +10,12 @@
 package mock_controller
 
 import (
+	context "context"
 	reflect "reflect"
 
 	config "github.com/uber/tango/config"
+	storage "github.com/uber/tango/core/storage"
 	entity "github.com/uber/tango/entity"
-	tangopb "github.com/uber/tango/tangopb"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -43,29 +44,31 @@ func (m *MockController) EXPECT() *MockControllerMockRecorder {
 }
 
 // GetChangedTargets mocks base method.
-func (m *MockController) GetChangedTargets(request entity.GetChangedTargetsRequest, outputConfig *tangopb.OutputConfig, stream tangopb.TangoServiceGetChangedTargetsYARPCServer, repo config.RepositoryConfig) error {
+func (m *MockController) GetChangedTargets(ctx context.Context, req entity.GetChangedTargetsRequest, repo config.RepositoryConfig) (entity.GetChangedTargetsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChangedTargets", request, outputConfig, stream, repo)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "GetChangedTargets", ctx, req, repo)
+	ret0, _ := ret[0].(entity.GetChangedTargetsResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // GetChangedTargets indicates an expected call of GetChangedTargets.
-func (mr *MockControllerMockRecorder) GetChangedTargets(request, outputConfig, stream, repo any) *gomock.Call {
+func (mr *MockControllerMockRecorder) GetChangedTargets(ctx, req, repo any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChangedTargets", reflect.TypeOf((*MockController)(nil).GetChangedTargets), request, outputConfig, stream, repo)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChangedTargets", reflect.TypeOf((*MockController)(nil).GetChangedTargets), ctx, req, repo)
 }
 
 // GetTargetGraph mocks base method.
-func (m *MockController) GetTargetGraph(request entity.GetTargetGraphRequest, outputConfig *tangopb.OutputConfig, stream tangopb.TangoServiceGetTargetGraphYARPCServer, repo config.RepositoryConfig) error {
+func (m *MockController) GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest, repo config.RepositoryConfig) (storage.GraphReader, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetTargetGraph", request, outputConfig, stream, repo)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "GetTargetGraph", ctx, req, repo)
+	ret0, _ := ret[0].(storage.GraphReader)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // GetTargetGraph indicates an expected call of GetTargetGraph.
-func (mr *MockControllerMockRecorder) GetTargetGraph(request, outputConfig, stream, repo any) *gomock.Call {
+func (mr *MockControllerMockRecorder) GetTargetGraph(ctx, req, repo any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTargetGraph", reflect.TypeOf((*MockController)(nil).GetTargetGraph), request, outputConfig, stream, repo)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTargetGraph", reflect.TypeOf((*MockController)(nil).GetTargetGraph), ctx, req, repo)
 }

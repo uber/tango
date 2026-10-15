@@ -21,10 +21,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber/tango/controller"
+	mock_controller "github.com/uber/tango/controller/controllermock"
 	tangoerrors "github.com/uber/tango/core/errors"
-	"github.com/uber/tango/core/storage"
-	storagemock "github.com/uber/tango/core/storage/storagemock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
 	"go.uber.org/mock/gomock"
@@ -79,21 +77,23 @@ func TestHandlerErrors_ReturnTangoErrorDetail(t *testing.T) {
 	}
 }
 
-// TestGetTargetGraph_ValidationError_WiresTangoError verifies that a validation
+// TestGetTargetGraph_ValidationError_WiresTangoError verifies that a mapping
 // failure in GetTargetGraph returns a YARPC error carrying a TangoError detail
 // with ERROR_USER code. This is the end-to-end contract: the handler wraps
-// validation errors with tangoerrors.NewUser, and the defer converts them
+// mapping errors with tangoerrors.NewUser, and the defer converts them
 // through toWireError before returning to the transport.
 func TestGetTargetGraph_ValidationError_WiresTangoError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 
-	c := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: controller.NewController(context.Background(), controller.Params{
-		Logger: zaptest.NewLogger(t),
-	})})
+	h := New(Params{
+		Logger:     zaptest.NewLogger(t),
+		Controller: mock_controller.NewMockController(ctrl),
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+	})
 
-	// Missing BaseSha triggers a validation error classified as ERROR_USER.
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	// Missing BaseSha triggers a mapping error classified as ERROR_USER.
+	err := h.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Remote: "repo:go-code",
 		},
@@ -114,14 +114,15 @@ func TestGetTargetGraph_ValidationError_WiresTangoError(t *testing.T) {
 func TestGetChangedTargets_ValidationError_WiresTangoError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background()).AnyTimes()
 
-	c := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: controller.NewController(context.Background(), controller.Params{
-		Logger: zaptest.NewLogger(t),
-	})})
+	h := New(Params{
+		Logger:     zaptest.NewLogger(t),
+		Controller: mock_controller.NewMockController(ctrl),
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+	})
 
 	// Missing first revision triggers validation error classified as ERROR_USER.
-	err := c.GetChangedTargets(&pb.GetChangedTargetsRequest{
+	err := h.GetChangedTargets(&pb.GetChangedTargetsRequest{
 		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
 	}, stream)
 	require.Error(t, err)
@@ -135,21 +136,24 @@ func TestGetChangedTargets_ValidationError_WiresTangoError(t *testing.T) {
 }
 
 // TestGetTargetGraph_InfraError_WiresTangoError verifies that an infra-classified
-// error (e.g. storage failure) returns a YARPC error with ERROR_INFRA code.
+// error from the controller (e.g. a storage failure) returns a YARPC error
+// with ERROR_INFRA code.
 func TestGetTargetGraph_InfraError_WiresTangoError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background())
 
-	store := storagemock.NewMockStorage(ctrl)
-	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, errors.New("disk on fire"))
+	mockController := mock_controller.NewMockController(ctrl)
+	mockController.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, tangoerrors.NewInfra(errors.New("disk on fire")))
 
-	c := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: controller.NewController(context.Background(), controller.Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
-	})})
+	h := New(Params{
+		Logger:     zaptest.NewLogger(t),
+		Controller: mockController,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+	})
 
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := h.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Remote:   "repo:go-code",
 			BaseSha:  "sha",

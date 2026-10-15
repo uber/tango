@@ -23,26 +23,55 @@ import (
 	tangoerrors "github.com/uber/tango/core/errors"
 )
 
-type rejectAllRepositoryConfigProvider struct{}
-
-func (rejectAllRepositoryConfigProvider) GetRepositoryConfig(string) (config.RepositoryConfig, bool) {
-	return config.RepositoryConfig{}, false
-}
-
 func TestResolveRequestRepository(t *testing.T) {
-	h := &handler{repoConfig: rejectAllRepositoryConfigProvider{}}
-
-	t.Run("request error uses unknown repository", func(t *testing.T) {
-		repo, label, err := h.resolveRequestRepository("ignored", assert.AnError)
-		assert.Empty(t, repo)
-		assert.Equal(t, unknownRepositoryMetricLabel, label)
-		assert.ErrorIs(t, err, assert.AnError)
-	})
-
-	t.Run("plain remote", func(t *testing.T) {
-		_, label, err := h.resolveRequestRepository("git@github.com:other/repo.git", nil)
-		require.Error(t, err)
-		assert.Equal(t, unknownRepositoryMetricLabel, label)
-		assert.Equal(t, tangoerrors.ErrorUser, tangoerrors.GetErrorCode(err))
-	})
+	tests := []struct {
+		name       string
+		provider   config.RepositoryConfigProvider
+		remote     string
+		requestErr error
+		wantLabel  string
+		wantErr    bool
+		wantCode   tangoerrors.ErrorCode
+	}{
+		{
+			name:       "request error uses unknown repository",
+			provider:   noRepositoryConfigProvider{},
+			remote:     "ignored",
+			requestErr: assert.AnError,
+			wantLabel:  unknownRepositoryMetricLabel,
+			wantErr:    true,
+		},
+		{
+			name:      "plain remote",
+			provider:  noRepositoryConfigProvider{},
+			remote:    "git@github.com:other/repo.git",
+			wantLabel: unknownRepositoryMetricLabel,
+			wantErr:   true,
+			wantCode:  tangoerrors.ErrorUser,
+		},
+		{
+			name:      "configured remote uses the repository ID",
+			provider:  allowAnyRepositoryConfigProvider{},
+			remote:    "git@github.com:other/repo.git",
+			wantLabel: "test-repository",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &handler{repoConfig: tt.provider}
+			repo, label, err := h.resolveRequestRepository(tt.remote, tt.requestErr)
+			assert.Equal(t, tt.wantLabel, label)
+			if !tt.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			assert.Empty(t, repo)
+			require.Error(t, err)
+			if tt.requestErr != nil {
+				assert.ErrorIs(t, err, tt.requestErr)
+				return
+			}
+			assert.Equal(t, tt.wantCode, tangoerrors.GetErrorCode(err))
+		})
+	}
 }
