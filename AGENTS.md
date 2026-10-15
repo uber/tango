@@ -65,7 +65,7 @@ The top-level split is by **responsibility**, not by domain: `controller/` handl
 
 The controller is the YARPC service implementation. It owns transport-adjacent concerns: request validation, metrics, cancellation linkage, response streaming, output filtering, comparison fan-out, and compared-target caching. It does **not** own workspace creation, git operations, or graph computation.
 
-Every RPC records operation metrics, classifies invalid input as a user error, preserves error chains, attempts applicable cache reads before expensive work, delegates graph production to the orchestrator, and converts the final error at the wire boundary.
+The handler records the operation metrics of every RPC, under the `handler` scope. Every RPC classifies invalid input as a user error, preserves error chains, attempts applicable cache reads before expensive work, delegates graph production to the orchestrator, and converts the final error at the wire boundary.
 
 ### Orchestrator
 

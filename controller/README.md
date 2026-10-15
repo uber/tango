@@ -1,7 +1,7 @@
 # Controller
 
-The controller is the request-handling layer of Tango. It implements the
-generated YARPC service surface and turns each streaming RPC into a
+The controller is the request-handling layer of Tango. The handler calls
+it, and it turns each streaming RPC into a
 deterministic pipeline of cache lookup, graph computation, comparison, and
 response streaming.
 
@@ -24,9 +24,9 @@ sit between the wire protocol and the rest of the system:
 - **Streaming and chunking.** Responses are emitted as multiple stream
   messages sized to stay below the gRPC per-message limit. Targets,
   metadata, and topology deltas are chunked independently.
-- **Observability.** Every RPC emits per-call counters, per-phase timers,
-  and a classified failure metric that distinguishes user from
-  infrastructure errors.
+- **Observability.** Every RPC emits per-phase timers. The handler emits the
+  per-call counters and the classified failure metric that distinguishes
+  user from infrastructure errors.
 
 ## Collaborators
 
@@ -46,5 +46,4 @@ behavior:
 The controller is built once at startup with its logger, storage,
 orchestrator, optional metrics scope, and optional max-message-bytes
 configuration. The constructor returns the
-generated server interface, so the controller can be registered with a
-YARPC dispatcher without additional adaptation.
+`Controller` interface, which the handler calls.

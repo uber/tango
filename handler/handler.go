@@ -15,21 +15,62 @@
 package handler
 
 import (
+	"fmt"
+
+	"github.com/uber-go/tally"
+	"github.com/uber/tango/config"
 	"github.com/uber/tango/controller"
+	tangoerrors "github.com/uber/tango/core/errors"
+	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
+	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
 
+// Duplicate of the constant in the controller. Temporary: the controller
+// drops its copy when it takes the resolved repository from the handler.
+const unknownRepositoryMetricLabel = "unknown"
+
 type Params struct {
+	fx.In
 	Logger     *zap.Logger
 	Controller controller.Controller
+	RepoConfig config.RepositoryConfigProvider
+	Scope      tally.Scope `optional:"true"`
 }
 
 type handler struct {
 	logger     *zap.Logger
 	controller controller.Controller
+	repoConfig config.RepositoryConfigProvider
+	emitter    *metrics.Emitter
 }
 
 func New(p Params) pb.TangoYARPCServer {
-	return &handler{logger: p.Logger, controller: p.Controller}
+	return &handler{
+		logger:     p.Logger,
+		controller: p.Controller,
+		repoConfig: p.RepoConfig,
+		emitter:    metrics.New(p.Scope).SubScope("handler"),
+	}
+}
+
+// resolveRequestRepository returns the configured repository and metric label
+// for a validated request. Invalid requests retain the common unknown label and
+// their existing error; valid requests must exactly match the configured
+// repository allowlist before controller cache I/O.
+//
+// Duplicate of controller.resolveRequestRepository. Temporary: the controller
+// drops its copy when it takes the resolved repository from the handler.
+func (h *handler) resolveRequestRepository(remote string, requestErr error) (config.RepositoryConfig, string, error) {
+	if requestErr != nil {
+		return config.RepositoryConfig{}, unknownRepositoryMetricLabel, requestErr
+	}
+	repo, ok := h.repoConfig.GetRepositoryConfig(remote)
+	if !ok {
+		return config.RepositoryConfig{}, unknownRepositoryMetricLabel, tangoerrors.NewUser(
+			fmt.Errorf("repository remote %q is not configured", remote),
+		)
+	}
+	return repo, repo.RepositoryID, nil
 }

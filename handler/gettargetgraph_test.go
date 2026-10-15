@@ -31,9 +31,9 @@ type fakeGetTargetGraphStream struct {
 
 func TestGetTargetGraphForwardsToController(t *testing.T) {
 	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	h := New(Params{Logger: zaptest.NewLogger(t), Controller: ctrl})
+	h := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: ctrl})
 
-	req := &pb.GetTargetGraphRequest{}
+	req := &pb.GetTargetGraphRequest{BuildDescription: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha"}}
 	stream := &fakeGetTargetGraphStream{}
 	ctrl.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(gotReq *pb.GetTargetGraphRequest, gotStream pb.TangoServiceGetTargetGraphYARPCServer) error {

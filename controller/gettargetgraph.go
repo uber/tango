@@ -34,20 +34,16 @@ import (
 )
 
 // GetTargetGraph returns the target graph for a given request.
-func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
+func (c *controller) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) error {
 	entityReq, mappingErr := mapper.ProtoToGetTargetGraphRequest(request)
 	if mappingErr != nil {
 		mappingErr = tangoerrors.NewUser(fmt.Errorf("convert get target graph request: %w", mappingErr))
 	}
 	repoCfg, repo, repositoryErr := c.resolveRequestRepository(entityReq.Build.Remote, mappingErr)
 	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
-	op := metrics.Begin(e, opGetTargetGraph, metrics.SlowDurationBuckets)
 	logger := c.logger.WithLazy(
 		zap.String("repository", repo),
 	)
-	defer func() {
-		op.Complete(retErr)
-	}()
 	start := time.Now()
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()

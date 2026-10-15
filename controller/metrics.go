@@ -16,7 +16,6 @@ package controller
 
 // Operation names, snake_cased after the RPC interface methods they measure.
 const (
-	opGetTargetGraph        = "get_target_graph"
-	opGetChangedTargets     = "get_changed_targets"
-	opGetChangedTargetGraph = "get_changed_target_graph"
+	opGetTargetGraph    = "get_target_graph"
+	opGetChangedTargets = "get_changed_targets"
 )
