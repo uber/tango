@@ -17,11 +17,9 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
-	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/observability/metrics"
@@ -31,40 +29,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// Duplicated in the handler. Temporary: the controller drops this copy when it
-// takes the resolved repository from the handler.
-const unknownRepositoryMetricLabel = "unknown"
-
 // Params are the parameters for the controller.
 type Params struct {
 	fx.In
 	Logger          *zap.Logger
 	Storage         storage.Storage
 	Orchestrator    orchestrator.Orchestrator
-	Scope           tally.Scope `optional:"true"`
-	MaxMessageBytes int         `optional:"true"`
-	RepoConfig      config.RepositoryConfigProvider
+	Scope           tally.Scope                `optional:"true"`
+	MaxMessageBytes int                        `optional:"true"`
 	GraphConfig     config.GraphConfigProvider `optional:"true"`
-}
-
-// resolveRequestRepository returns the configured repository and metric label
-// for a validated request. Invalid requests retain the common unknown label and
-// their existing error; valid requests must exactly match the configured
-// repository allowlist before controller cache I/O.
-//
-// Duplicated in the handler. Temporary: the controller drops this copy when it
-// takes the resolved repository from the handler.
-func (c *controller) resolveRequestRepository(remote string, requestErr error) (config.RepositoryConfig, string, error) {
-	if requestErr != nil {
-		return config.RepositoryConfig{}, unknownRepositoryMetricLabel, requestErr
-	}
-	repo, ok := c.repoConfig.GetRepositoryConfig(remote)
-	if !ok {
-		return config.RepositoryConfig{}, unknownRepositoryMetricLabel, tangoerrors.NewUser(
-			fmt.Errorf("repository remote %q is not configured", remote),
-		)
-	}
-	return repo, repo.RepositoryID, nil
 }
 
 type controller struct {
@@ -73,7 +46,6 @@ type controller struct {
 	orchestrator    orchestrator.Orchestrator
 	emitter         *metrics.Emitter
 	maxMessageBytes int
-	repoConfig      config.RepositoryConfigProvider
 	graphConfig     config.GraphConfigProvider
 
 	// appCtx is the application lifetime; cancel it on process shutdown.
@@ -103,7 +75,6 @@ func NewController(appCtx context.Context, p Params) Controller {
 		orchestrator:    p.Orchestrator,
 		emitter:         emitter,
 		maxMessageBytes: maxMessageBytes,
-		repoConfig:      p.RepoConfig,
 		graphConfig:     p.GraphConfig,
 		appCtx:          appCtx,
 	}

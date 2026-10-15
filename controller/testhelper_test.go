@@ -26,15 +26,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type allowAnyRepositoryConfigProvider struct{}
-
-func (allowAnyRepositoryConfigProvider) GetRepositoryConfig(remote string) (config.RepositoryConfig, bool) {
-	return config.RepositoryConfig{
-		Remote:       remote,
-		RepositoryID: "test-repository",
-	}, true
-}
-
 func testRepositoryID(string) string {
 	return "test-repository"
 }
@@ -44,7 +35,6 @@ func newTestController(logger *zap.Logger) *controller {
 		logger:          logger,
 		emitter:         metrics.Nop(),
 		maxMessageBytes: config.DefaultMaxMessageBytes,
-		repoConfig:      allowAnyRepositoryConfigProvider{},
 		appCtx:          context.Background(),
 	}
 }

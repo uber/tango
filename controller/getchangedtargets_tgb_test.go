@@ -124,7 +124,6 @@ func TestGetChangedTargets_TGBNativePath(t *testing.T) {
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl), // no calls expected: both graphs are cached
@@ -234,7 +233,6 @@ func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -279,7 +277,6 @@ func TestGetChangedTargets_TGBAllTargetsTriggerPreservesMembershipChanges(t *tes
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -357,7 +354,6 @@ func TestGetChangedTargets_TGBAllTargetsNoTrigger(t *testing.T) {
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
@@ -403,7 +399,6 @@ func TestGetChangedTargets_TGBMixedFormatFallsBack(t *testing.T) {
 
 	scope := tally.NewTestScope("", nil)
 	c := NewController(context.Background(), Params{
-		RepoConfig:   allowAnyRepositoryConfigProvider{},
 		Logger:       zaptest.NewLogger(t),
 		Storage:      st,
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
