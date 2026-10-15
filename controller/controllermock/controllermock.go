@@ -12,6 +12,8 @@ package mock_controller
 import (
 	reflect "reflect"
 
+	config "github.com/uber/tango/config"
+	entity "github.com/uber/tango/entity"
 	tangopb "github.com/uber/tango/tangopb"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -40,44 +42,30 @@ func (m *MockController) EXPECT() *MockControllerMockRecorder {
 	return m.recorder
 }
 
-// GetChangedTargetGraph mocks base method.
-func (m *MockController) GetChangedTargetGraph(arg0 *tangopb.GetChangedTargetGraphRequest, arg1 tangopb.TangoServiceGetChangedTargetGraphYARPCServer) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChangedTargetGraph", arg0, arg1)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// GetChangedTargetGraph indicates an expected call of GetChangedTargetGraph.
-func (mr *MockControllerMockRecorder) GetChangedTargetGraph(arg0, arg1 any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChangedTargetGraph", reflect.TypeOf((*MockController)(nil).GetChangedTargetGraph), arg0, arg1)
-}
-
 // GetChangedTargets mocks base method.
-func (m *MockController) GetChangedTargets(arg0 *tangopb.GetChangedTargetsRequest, arg1 tangopb.TangoServiceGetChangedTargetsYARPCServer) error {
+func (m *MockController) GetChangedTargets(request *tangopb.GetChangedTargetsRequest, stream tangopb.TangoServiceGetChangedTargetsYARPCServer) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetChangedTargets", arg0, arg1)
+	ret := m.ctrl.Call(m, "GetChangedTargets", request, stream)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // GetChangedTargets indicates an expected call of GetChangedTargets.
-func (mr *MockControllerMockRecorder) GetChangedTargets(arg0, arg1 any) *gomock.Call {
+func (mr *MockControllerMockRecorder) GetChangedTargets(request, stream any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChangedTargets", reflect.TypeOf((*MockController)(nil).GetChangedTargets), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetChangedTargets", reflect.TypeOf((*MockController)(nil).GetChangedTargets), request, stream)
 }
 
 // GetTargetGraph mocks base method.
-func (m *MockController) GetTargetGraph(arg0 *tangopb.GetTargetGraphRequest, arg1 tangopb.TangoServiceGetTargetGraphYARPCServer) error {
+func (m *MockController) GetTargetGraph(request entity.GetTargetGraphRequest, outputConfig *tangopb.OutputConfig, stream tangopb.TangoServiceGetTargetGraphYARPCServer, repo config.RepositoryConfig) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetTargetGraph", arg0, arg1)
+	ret := m.ctrl.Call(m, "GetTargetGraph", request, outputConfig, stream, repo)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // GetTargetGraph indicates an expected call of GetTargetGraph.
-func (mr *MockControllerMockRecorder) GetTargetGraph(arg0, arg1 any) *gomock.Call {
+func (mr *MockControllerMockRecorder) GetTargetGraph(request, outputConfig, stream, repo any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTargetGraph", reflect.TypeOf((*MockController)(nil).GetTargetGraph), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTargetGraph", reflect.TypeOf((*MockController)(nil).GetTargetGraph), request, outputConfig, stream, repo)
 }

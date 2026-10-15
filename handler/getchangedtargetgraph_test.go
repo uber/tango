@@ -19,27 +19,18 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	mock_controller "github.com/uber/tango/controller/controllermock"
+	tangoerrors "github.com/uber/tango/core/errors"
 	pb "github.com/uber/tango/tangopb"
-	"go.uber.org/mock/gomock"
+	"go.uber.org/yarpc/yarpcerrors"
+	"go.uber.org/zap"
 )
 
-type fakeGetChangedTargetGraphStream struct {
-	pb.TangoServiceGetChangedTargetGraphYARPCServer
-}
+func TestGetChangedTargetGraph_ReturnsUnimplemented(t *testing.T) {
+	h := New(Params{Logger: zap.NewNop()})
 
-func TestGetChangedTargetGraphForwardsToController(t *testing.T) {
-	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	h := New(Params{Controller: ctrl})
+	err := h.GetChangedTargetGraph(&pb.GetChangedTargetGraphRequest{}, nil)
 
-	req := &pb.GetChangedTargetGraphRequest{}
-	stream := &fakeGetChangedTargetGraphStream{}
-	ctrl.EXPECT().GetChangedTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(gotReq *pb.GetChangedTargetGraphRequest, gotStream pb.TangoServiceGetChangedTargetGraphYARPCServer) error {
-			assert.Same(t, req, gotReq)
-			assert.Same(t, stream, gotStream)
-			return nil
-		})
-
-	require.NoError(t, h.GetChangedTargetGraph(req, stream))
+	require.Error(t, err)
+	assert.Equal(t, yarpcerrors.CodeUnimplemented, yarpcerrors.FromError(err).Code())
+	assert.Equal(t, tangoerrors.ErrorInfra, tangoerrors.GetErrorCode(err))
 }

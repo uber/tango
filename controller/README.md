@@ -10,8 +10,10 @@ response streaming.
 The package is intentionally thin. It owns the cross-cutting concerns that
 sit between the wire protocol and the rest of the system:
 
-- **Request validation and translation.** Each RPC validates its inputs and
-  normalizes them into the internal call shapes used downstream.
+- **Request validation and translation.** GetChangedTargets validates its
+  inputs and normalizes them into the internal call shapes used downstream.
+  GetTargetGraph receives an entity request and the resolved repository
+  configuration from the handler, which maps and validates the request.
 - **Read-through caching.** Where a request can be satisfied from previously
   computed artifacts, the controller fetches them from storage and streams
   them back without invoking the orchestrator. Cache misses fall through to

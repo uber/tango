@@ -25,13 +25,11 @@ import (
 )
 
 func (h *handler) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.TangoServiceGetTargetGraphYARPCServer) (retErr error) {
-	// Temporary: the handler maps the request only to tag the metrics. The
-	// controller maps it again until it takes the entity request.
 	entityReq, mappingErr := mapper.ProtoToGetTargetGraphRequest(request)
 	if mappingErr != nil {
 		mappingErr = tangoerrors.NewUser(fmt.Errorf("convert get target graph request: %w", mappingErr))
 	}
-	_, repo, repositoryErr := h.resolveRequestRepository(entityReq.Build.Remote, mappingErr)
+	repoCfg, repo, repositoryErr := h.resolveRequestRepository(entityReq.Build.Remote, mappingErr)
 	e := h.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
 	op := metrics.Begin(e, opGetTargetGraph, metrics.SlowDurationBuckets)
 	logger := h.logger.WithLazy(zap.String("repository", repo))
@@ -45,5 +43,5 @@ func (h *handler) GetTargetGraph(request *pb.GetTargetGraphRequest, stream pb.Ta
 	if repositoryErr != nil {
 		return repositoryErr
 	}
-	return h.controller.GetTargetGraph(request, stream)
+	return h.controller.GetTargetGraph(entityReq, request.GetOutputConfig(), stream, repoCfg)
 }

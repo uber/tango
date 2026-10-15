@@ -15,14 +15,12 @@
 package handler
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber-go/tally"
 	mock_controller "github.com/uber/tango/controller/controllermock"
-	tangoerrors "github.com/uber/tango/core/errors"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -31,7 +29,7 @@ import (
 func TestGetTargetGraphMetrics(t *testing.T) {
 	ts := tally.NewTestScope("", nil)
 	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	ctrl.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(nil)
+	ctrl.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 	h := New(Params{Logger: zap.NewNop(), Controller: ctrl, RepoConfig: allowAnyRepositoryConfigProvider{}, Scope: ts})
 
 	build := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha", Strategy: pb.COMPUTATION_STRATEGY_UNSET}
@@ -58,9 +56,7 @@ func TestGetChangedTargetsMetrics(t *testing.T) {
 
 func TestGetChangedTargetGraphMetrics(t *testing.T) {
 	ts := tally.NewTestScope("", nil)
-	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	ctrl.EXPECT().GetChangedTargetGraph(gomock.Any(), gomock.Any()).Return(tangoerrors.NewInfra(errors.New("unimplemented")))
-	h := New(Params{Logger: zap.NewNop(), Controller: ctrl, Scope: ts})
+	h := New(Params{Logger: zap.NewNop(), Scope: ts})
 
 	require.Error(t, h.GetChangedTargetGraph(nil, nil))
 

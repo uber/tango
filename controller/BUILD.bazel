@@ -5,7 +5,6 @@ go_library(
     srcs = [
         "controller.go",
         "distance_filter.go",
-        "getchangedtargetgraph.go",
         "getchangedtargets.go",
         "gettargetgraph.go",
         "metrics.go",
@@ -31,7 +30,6 @@ go_library(
         "//tangopb",
         "@com_github_uber_go_tally//:tally",
         "@org_uber_go_fx//:fx",
-        "@org_uber_go_yarpc//yarpcerrors",
         "@org_uber_go_zap//:zap",
     ],
 )

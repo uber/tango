@@ -22,6 +22,7 @@ go_library(
         "//tangopb",
         "@com_github_uber_go_tally//:tally",
         "@org_uber_go_fx//:fx",
+        "@org_uber_go_yarpc//yarpcerrors",
         "@org_uber_go_zap//:zap",
     ],
 )
@@ -45,6 +46,7 @@ go_test(
         "//core/errors",
         "//core/storage",
         "//core/storage/storagemock",
+        "//entity",
         "//tangopb",
         "//tangopb/tangopbmock",
         "@com_github_stretchr_testify//assert",
