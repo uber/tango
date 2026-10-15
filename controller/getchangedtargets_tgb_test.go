@@ -133,8 +133,8 @@ func TestGetChangedTargets_TGBNativePath(t *testing.T) {
 	})
 
 	request := changedTargetsRequest()
-	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true}
-	require.NoError(t, c.GetChangedTargets(request, stream))
+	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true}
+	require.NoError(t, c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")}))
 
 	changed, idToName := changedTargetsSent(t, sent)
 	require.Len(t, changed, 1, "should detect exactly the hash-flipped target")
@@ -243,8 +243,8 @@ func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 	})
 
 	request := changedTargetsRequest()
-	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
-	require.NoError(t, c.GetChangedTargets(request, stream))
+	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
+	require.NoError(t, c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")}))
 
 	changed, _ := changedTargetsSent(t, sent)
 	require.Len(t, changed, 4, "all targets from second graph should be reported as changed")
@@ -288,8 +288,8 @@ func TestGetChangedTargets_TGBAllTargetsTriggerPreservesMembershipChanges(t *tes
 	})
 
 	request := changedTargetsRequest()
-	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
-	require.NoError(t, c.GetChangedTargets(request, stream))
+	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
+	require.NoError(t, c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")}))
 
 	changed, idToName := changedTargetsSent(t, sent)
 	require.Len(t, changed, 4)
@@ -366,8 +366,8 @@ func TestGetChangedTargets_TGBAllTargetsNoTrigger(t *testing.T) {
 	})
 
 	request := changedTargetsRequest()
-	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
-	require.NoError(t, c.GetChangedTargets(request, stream))
+	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
+	require.NoError(t, c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")}))
 
 	changed, _ := changedTargetsSent(t, sent)
 	require.Len(t, changed, 1, "only the hash-flipped target should be changed")
@@ -412,8 +412,8 @@ func TestGetChangedTargets_TGBMixedFormatFallsBack(t *testing.T) {
 	})
 
 	request := changedTargetsRequest()
-	request.OutputConfig = &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true}
-	require.NoError(t, c.GetChangedTargets(request, stream))
+	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true}
+	require.NoError(t, c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")}))
 
 	changed, idToName := changedTargetsSent(t, sent)
 	require.Len(t, changed, 1)

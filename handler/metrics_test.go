@@ -43,7 +43,7 @@ func TestGetTargetGraphMetrics(t *testing.T) {
 func TestGetChangedTargetsMetrics(t *testing.T) {
 	ts := tally.NewTestScope("", nil)
 	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	ctrl.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any()).Return(nil)
+	ctrl.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 	h := New(Params{Logger: zap.NewNop(), Controller: ctrl, RepoConfig: allowAnyRepositoryConfigProvider{}, Scope: ts})
 
 	build := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha", Strategy: pb.COMPUTATION_STRATEGY_UNSET}

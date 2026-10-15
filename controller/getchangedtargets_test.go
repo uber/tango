@@ -242,16 +242,6 @@ func TestCompareTargetGraphs_AllTargetsFileNoTrigger(t *testing.T) {
 	assert.Equal(t, 0, totalChanged, "no targets should be changed when AllTargetsFiles hashes match")
 }
 
-func TestGetChangedTargets_ValidationError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-
-	c := NewController(context.Background(), Params{RepoConfig: allowAnyRepositoryConfigProvider{}, Logger: zap.NewNop(), Orchestrator: orchestratormock.NewMockOrchestrator(ctrl)})
-
-	err := c.GetChangedTargets(nil, stream)
-	require.Error(t, err)
-}
-
 func TestGetChangedTargets_CacheHit(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
@@ -285,13 +275,10 @@ func TestGetChangedTargets_CacheHit(t *testing.T) {
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 	})
 
-	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
-	}
+	request := changedTargetsRequest()
+	outputConfig := &pb.OutputConfig{MaxDistance: -1}
 
-	err := c.GetChangedTargets(request, stream)
+	err := c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
 	require.NoError(t, err)
 }
 
@@ -317,13 +304,10 @@ func TestGetChangedTargets_TreehashReadError(t *testing.T) {
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 	})
 
-	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
-	}
+	request := changedTargetsRequest()
+	outputConfig := &pb.OutputConfig{MaxDistance: -1}
 
-	err := c.GetChangedTargets(request, stream)
+	err := c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), injected.Error())
 }
@@ -404,13 +388,10 @@ func TestGetChangedTargets_StreamSendError(t *testing.T) {
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 	})
 
-	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
-	}
+	request := changedTargetsRequest()
+	outputConfig := &pb.OutputConfig{MaxDistance: -1}
 
-	err := c.GetChangedTargets(request, stream)
+	err := c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
 	assert.Error(t, err)
 
 	select {
@@ -500,13 +481,10 @@ func TestGetChangedTargets_streamChunks(t *testing.T) {
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 	})
 
-	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-		OutputConfig:   &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true},
-	}
+	request := changedTargetsRequest()
+	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true}
 
-	err := c.GetChangedTargets(request, stream)
+	err := c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
 	require.NoError(t, err)
 
 	select {
@@ -595,14 +573,13 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 	})
 
-	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
-	}
+	request := changedTargetsRequest()
+	outputConfig := &pb.OutputConfig{MaxDistance: -1}
 
 	handlerDone := make(chan error, 1)
-	go func() { handlerDone <- c.GetChangedTargets(request, stream) }()
+	go func() {
+		handlerDone <- c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
+	}()
 
 	var cacheCtx context.Context
 	select {
@@ -1089,13 +1066,10 @@ func TestGetChangedTargets_CacheHitWithDistanceFilter(t *testing.T) {
 		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
 	})
 
-	request := &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-		OutputConfig:   &pb.OutputConfig{MaxDistance: 1},
-	}
+	request := changedTargetsRequest()
+	outputConfig := &pb.OutputConfig{MaxDistance: 1}
 
-	err := c.GetChangedTargets(request, stream)
+	err := c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
 	require.NoError(t, err)
 
 	require.Len(t, sent, 2)
@@ -1337,15 +1311,7 @@ func TestSendTrimmedChangedTargets_RetainsDeletedAtMaxDistanceOne(t *testing.T) 
 	assert.True(t, gotDeleted, "DELETED entry at distance 0 must survive max_distance=1")
 }
 
-func changedTargetsRequest() *pb.GetChangedTargetsRequest {
-	return &pb.GetChangedTargetsRequest{
-		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
-		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
-		OutputConfig:   &pb.OutputConfig{MaxDistance: -1},
-	}
-}
-
-func changedTargetsEntityRequest() entity.GetChangedTargetsRequest {
+func changedTargetsRequest() entity.GetChangedTargetsRequest {
 	return entity.GetChangedTargetsRequest{
 		First:  entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha1"},
 		Second: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
@@ -1364,7 +1330,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		c.storage = st
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
 		require.NoError(t, err)
 		assert.False(t, served, "a cache miss must not be served")
 	})
@@ -1403,7 +1369,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		// No Send expectation: a corrupt blob must not send anything to the client.
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
 		require.NoError(t, err)
 		assert.False(t, served, "a corrupt blob must trigger recompute, not a partial send")
 	})
@@ -1437,7 +1403,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 		stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsEntityRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
 		require.NoError(t, err)
 		assert.True(t, served, "a clean cache hit must be served")
 	})
@@ -1447,7 +1413,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 	// BypassCache=true keeps getGraph on the orchestrator path only, so these
 	// tests need no storage mock.
 	bypassRequest := func() entity.GetChangedTargetsRequest {
-		r := changedTargetsEntityRequest()
+		r := changedTargetsRequest()
 		r.BypassCache = true
 		return r
 	}

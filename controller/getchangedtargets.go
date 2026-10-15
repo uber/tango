@@ -24,7 +24,6 @@ import (
 
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/cachekey"
-	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/mapper"
@@ -33,7 +32,6 @@ import (
 	"github.com/uber/tango/internal/targetdiff"
 	"github.com/uber/tango/internal/tgb"
 	"github.com/uber/tango/internal/tgbdiff"
-	"github.com/uber/tango/mapper/proto"
 	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
@@ -82,19 +80,11 @@ type job struct {
 // GetChangedTargets returns the changed targets between two revisions. If the
 // client disconnects, the stream's context is cancelled and the function
 // returns with context.Canceled.
-func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error {
-	entityReq, mappingErr := proto.ProtoToGetChangedTargetsRequest(request)
-	if mappingErr != nil {
-		mappingErr = tangoerrors.NewUser(fmt.Errorf("convert get changed targets request: %w", mappingErr))
-	}
-	repoCfg, repo, repositoryErr := c.resolveRequestRepository(entityReq.First.Remote, mappingErr)
-	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
+func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetChangedTargetsYARPCServer, repoCfg config.RepositoryConfig) error {
+	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID})
 	logger := c.logger.WithLazy(
-		zap.String("repository", repo),
+		zap.String("repository", repoCfg.RepositoryID),
 	)
-	if repositoryErr != nil {
-		return repositoryErr
-	}
 	ctx, cancelLink := c.linkRequestCtx(stream.Context())
 	defer cancelLink()
 	start := time.Now()
@@ -105,13 +95,13 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	// entirely. When OutputConfig is supplied, take max_distance at face value —
 	// see proto/tango.proto OutputConfig.max_distance for the wire-default caveat.
 	maxDist := int32(-1)
-	if request.GetOutputConfig() != nil {
-		maxDist = request.GetOutputConfig().GetMaxDistance()
+	if outputConfig != nil {
+		maxDist = outputConfig.GetMaxDistance()
 	}
 
 	// Fast path: stream a previously computed result straight from cache.
-	if !request.GetBypassCache() {
-		served, err := c.serveChangedTargetsFromCache(ctx, e, logger, entityReq, request.GetOutputConfig(), stream, repoCfg.RepositoryID, maxDist, start)
+	if !entityReq.BypassCache {
+		served, err := c.serveChangedTargetsFromCache(ctx, e, logger, entityReq, outputConfig, stream, repoCfg.RepositoryID, maxDist, start)
 		if err != nil {
 			return fmt.Errorf("serve from cache: %w", err)
 		}
@@ -141,7 +131,7 @@ func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, str
 	c.cacheComparedTargets(logger, entityReq, repoCfg.RepositoryID, changedTargetsResponses)
 
 	sendStart := time.Now()
-	if err := sendTrimmedChangedTargets(stream, changedTargetsResponses, maxDist, request.GetOutputConfig()); err != nil {
+	if err := sendTrimmedChangedTargets(stream, changedTargetsResponses, maxDist, outputConfig); err != nil {
 		return fmt.Errorf("send response: %w", err)
 	}
 	sendDuration := time.Since(sendStart)
