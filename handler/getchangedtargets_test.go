@@ -31,9 +31,12 @@ type fakeGetChangedTargetsStream struct {
 
 func TestGetChangedTargetsForwardsToController(t *testing.T) {
 	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	h := New(Params{Logger: zaptest.NewLogger(t), Controller: ctrl})
+	h := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: ctrl})
 
-	req := &pb.GetChangedTargetsRequest{}
+	req := &pb.GetChangedTargetsRequest{
+		FirstRevision:  &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha1"},
+		SecondRevision: &pb.BuildDescription{Strategy: pb.COMPUTATION_STRATEGY_UNSET, Remote: "repo:go-code", BaseSha: "sha2"},
+	}
 	stream := &fakeGetChangedTargetsStream{}
 	ctrl.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(gotReq *pb.GetChangedTargetsRequest, gotStream pb.TangoServiceGetChangedTargetsYARPCServer) error {

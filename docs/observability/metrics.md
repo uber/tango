@@ -208,16 +208,16 @@ if err == nil {
 
 ```
 # operation rate
-fetch service:tango name:controller.get_changed_targets.start
+fetch service:tango name:handler.get_changed_targets.start
 
 # success and classified error counts
-fetch service:tango name:controller.get_changed_targets.finish | sum by (result)
+fetch service:tango name:handler.get_changed_targets.finish | sum by (result)
 
 # P95 latency of successful requests
-fetch service:tango name:controller.get_changed_targets.finish result:success | histogram_percentile(95)
+fetch service:tango name:handler.get_changed_targets.finish result:success | histogram_percentile(95)
 
 # scoped to a repo
-fetch service:tango name:controller.get_changed_targets.finish result:success repo:my-monorepo | histogram_percentile(95)
+fetch service:tango name:handler.get_changed_targets.finish result:success repo:my-monorepo | histogram_percentile(95)
 
 # custom value metric — changed-target count distribution
 fetch service:tango name:controller.get_changed_targets.target_count | histogram_percentile(95)

@@ -30,6 +30,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// Duplicated in the handler. Temporary: the controller drops this copy when it
+// takes the resolved repository from the handler.
 const unknownRepositoryMetricLabel = "unknown"
 
 // Params are the parameters for the controller.
@@ -48,6 +50,9 @@ type Params struct {
 // for a validated request. Invalid requests retain the common unknown label and
 // their existing error; valid requests must exactly match the configured
 // repository allowlist before controller cache I/O.
+//
+// Duplicated in the handler. Temporary: the controller drops this copy when it
+// takes the resolved repository from the handler.
 func (c *controller) resolveRequestRepository(remote string, requestErr error) (config.RepositoryConfig, string, error) {
 	if requestErr != nil {
 		return config.RepositoryConfig{}, unknownRepositoryMetricLabel, requestErr

@@ -44,7 +44,6 @@ go_test(
         "getchangedtargets_test.go",
         "getchangedtargets_tgb_test.go",
         "gettargetgraph_test.go",
-        "metrics_test.go",
         "output_filter_test.go",
         "testhelper_test.go",
     ],

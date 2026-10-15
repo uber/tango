@@ -15,9 +15,14 @@
 package handler
 
 import (
+	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
 )
 
-func (h *handler) GetChangedTargetGraph(request *pb.GetChangedTargetGraphRequest, stream pb.TangoServiceGetChangedTargetGraphYARPCServer) error {
+func (h *handler) GetChangedTargetGraph(request *pb.GetChangedTargetGraphRequest, stream pb.TangoServiceGetChangedTargetGraphYARPCServer) (retErr error) {
+	op := metrics.Begin(h.emitter, opGetChangedTargetGraph, metrics.SlowDurationBuckets)
+	defer func() {
+		op.Complete(retErr)
+	}()
 	return h.controller.GetChangedTargetGraph(request, stream)
 }

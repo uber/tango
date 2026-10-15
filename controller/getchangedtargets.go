@@ -82,20 +82,16 @@ type job struct {
 // GetChangedTargets returns the changed targets between two revisions. If the
 // client disconnects, the stream's context is cancelled and the function
 // returns with context.Canceled.
-func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) (retErr error) {
+func (c *controller) GetChangedTargets(request *pb.GetChangedTargetsRequest, stream pb.TangoServiceGetChangedTargetsYARPCServer) error {
 	entityReq, mappingErr := proto.ProtoToGetChangedTargetsRequest(request)
 	if mappingErr != nil {
 		mappingErr = tangoerrors.NewUser(fmt.Errorf("convert get changed targets request: %w", mappingErr))
 	}
 	repoCfg, repo, repositoryErr := c.resolveRequestRepository(entityReq.First.Remote, mappingErr)
 	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
-	op := metrics.Begin(e, opGetChangedTargets, metrics.SlowDurationBuckets)
 	logger := c.logger.WithLazy(
 		zap.String("repository", repo),
 	)
-	defer func() {
-		op.Complete(retErr)
-	}()
 	if repositoryErr != nil {
 		return repositoryErr
 	}
