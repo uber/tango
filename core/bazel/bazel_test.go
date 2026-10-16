@@ -16,7 +16,9 @@ package bazel
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -83,4 +85,33 @@ func TestNewBazelClient_WithNilExecCommand(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "/workspace", execCmd.Dir)
 	assert.Contains(t, execCmd.Env, "KEY=value")
+}
+
+func TestRepoMapping(t *testing.T) {
+	fakeBazel := func(t *testing.T, script string) string {
+		path := filepath.Join(t.TempDir(), "fake-bazel")
+		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o755))
+		return path
+	}
+
+	t.Run("parses the mapping", func(t *testing.T) {
+		bazelCmd := fakeBazel(t, `[ "$1 $2 $3" = "mod dump_repo_mapping " ] && echo '{"apparent":"+ext+canonical","bazel_tools":"bazel_tools"}'`)
+
+		got, err := RepoMapping(context.Background(), t.TempDir(), bazelCmd)
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"apparent": "+ext+canonical", "bazel_tools": "bazel_tools"}, got)
+	})
+
+	t.Run("errors when bazel fails", func(t *testing.T) {
+		_, err := RepoMapping(context.Background(), t.TempDir(), fakeBazel(t, "exit 1"))
+
+		require.Error(t, err)
+	})
+
+	t.Run("errors on output that is not a JSON mapping", func(t *testing.T) {
+		_, err := RepoMapping(context.Background(), t.TempDir(), fakeBazel(t, "echo not-json"))
+
+		require.Error(t, err)
+	})
 }

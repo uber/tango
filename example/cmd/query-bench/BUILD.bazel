@@ -8,7 +8,9 @@ go_library(
     deps = [
         "//config",
         "//core/bazel",
+        "//core/git",
         "//core/targethasher",
+        "//entity",
         "//internal/mapper",
         "//mapper",
         "@com_github_gogo_protobuf//jsonpb",
