@@ -10,7 +10,7 @@ require (
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.7.0-rc.1
 	github.com/google/go-cmp v0.6.0
-	github.com/klauspost/compress v1.18.4
+	github.com/klauspost/compress v1.18.7
 	github.com/stretchr/testify v1.10.0
 	github.com/uber-go/tally v3.5.8+incompatible
 	go.uber.org/fx v1.24.0
