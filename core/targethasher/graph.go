@@ -79,8 +79,8 @@ type HashConfig struct {
 	// extracted from KnownSourceHashes into Result.AllTargetsFileHashes.
 	AllTargetsFiles []string
 	// RepoMarkerHashes maps canonical bzlmod repo names to repo rule input
-	// hashes read from Bazel's marker files ($(output_base)/external/@repo.marker),
-	// or from the repo contents cache's .recorded_inputs file for cached repos.
+	// hashes read from Bazel's marker files ($(output_base)/external/@repo.marker
+	// or the repo contents cache's .recorded_inputs).
 	// Used by HashExternalTargetsBzlmod to pre-hash external source files
 	// without reading their content from disk. The marker hash changes on any
 	// dependency upgrade, so repos whose canonical name stays the same across

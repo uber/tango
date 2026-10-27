@@ -25,8 +25,7 @@ import (
 	"github.com/uber/tango/core/bazel"
 )
 
-// recordedInputsSuffix names the file that holds a repo's marker contents
-// inside Bazel's repo contents cache, next to the cached repo directory.
+// recordedInputsSuffix names a repo contents cache entry's moved marker file.
 const recordedInputsSuffix = ".recorded_inputs"
 
 // ReadRepoMarkerHashes resolves the Bazel output base, then reads the
@@ -43,13 +42,7 @@ func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand strin
 	return readRepoMarkerHashes(filepath.Join(outputBase, "external"))
 }
 
-// readRepoMarkerHashes reads repo metadata from an output base's external
-// directory. A repo's metadata is its @<repo>.marker file. When the repo
-// contents cache is enabled, Bazel instead moves a cacheable repo's
-// directory and marker into the cache, leaving external/<repo> as a symlink
-// to <cache>/<predeclared inputs hash>/<entry> with the marker contents in
-// the sibling file <entry>.recorded_inputs. Repos with neither, such as
-// --override_repository targets, get no hash.
+// readRepoMarkerHashes falls back to <symlink target>.recorded_inputs for repos the repo contents cache moved out of externalDir.
 func readRepoMarkerHashes(externalDir string) (map[string][]byte, error) {
 	entries, err := os.ReadDir(externalDir)
 	if err != nil {
@@ -105,9 +98,7 @@ func readRepoMarkerHashes(externalDir string) (map[string][]byte, error) {
 	return hashes, nil
 }
 
-// recordedInputsPath returns the repo contents cache recorded inputs file for
-// the repo symlink at link, and false when the symlink does not point at a
-// cache entry.
+// recordedInputsPath reports false when link does not point at a repo contents cache entry.
 func recordedInputsPath(link string) (string, bool, error) {
 	target, err := os.Readlink(link)
 	if err != nil {

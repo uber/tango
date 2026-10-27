@@ -114,8 +114,7 @@ func TestReadRepoMarkerHashes(t *testing.T) {
 	marker := func(lines ...string) string { return strings.Join(lines, "\n") + "\n" }
 
 	tests := []struct {
-		name string
-		// setup populates externalDir and cacheDir.
+		name  string
 		setup func(t *testing.T, externalDir, cacheDir string)
 		want  map[string][]byte
 	}{
