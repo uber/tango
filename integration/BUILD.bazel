@@ -7,6 +7,7 @@ go_test(
     srcs = [
         "atf_test.go",
         "benchmark_test.go",
+        "bzlmod_test.go",
         "integration_test.go",
     ],
     data = glob(["testdata/**"]),
