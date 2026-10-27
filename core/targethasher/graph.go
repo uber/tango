@@ -79,7 +79,8 @@ type HashConfig struct {
 	// extracted from KnownSourceHashes into Result.AllTargetsFileHashes.
 	AllTargetsFiles []string
 	// RepoMarkerHashes maps canonical bzlmod repo names to repo rule input
-	// hashes read from Bazel's marker files ($(output_base)/external/@repo.marker).
+	// hashes read from Bazel's marker files ($(output_base)/external/@repo.marker
+	// or the repo contents cache's .recorded_inputs).
 	// Used by HashExternalTargetsBzlmod to pre-hash external source files
 	// without reading their content from disk. The marker hash changes on any
 	// dependency upgrade, so repos whose canonical name stays the same across
@@ -463,7 +464,7 @@ func HashExternalTargetsBzlmod(targets map[string]*Target, fullHashRepos set.Set
 		if !ok {
 			markerHash, hasMarker := repoMarkerHashes[repo]
 			if !hasMarker || len(markerHash) == 0 {
-				return fmt.Errorf("bzlmod repo %q has targets in query but no marker file", repo)
+				return fmt.Errorf("bzlmod repo %q has targets in query but no marker or repo contents cache recorded inputs file", repo)
 			}
 			rh := newHash()
 			rh.Write(markerHash)

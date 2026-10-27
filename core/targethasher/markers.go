@@ -25,6 +25,9 @@ import (
 	"github.com/uber/tango/core/bazel"
 )
 
+// recordedInputsSuffix names a repo contents cache entry's moved marker file.
+const recordedInputsSuffix = ".recorded_inputs"
+
 // ReadRepoMarkerHashes resolves the Bazel output base, then reads the
 // external repo marker files and returns a map from canonical repo name
 // to a hash derived from the stable lines of each marker file.
@@ -36,14 +39,18 @@ func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand strin
 	if err != nil {
 		return nil, fmt.Errorf("bazel output base: %w", err)
 	}
+	return readRepoMarkerHashes(filepath.Join(outputBase, "external"))
+}
 
-	markerDir := filepath.Join(outputBase, "external")
-	entries, err := os.ReadDir(markerDir)
+// readRepoMarkerHashes falls back to <symlink target>.recorded_inputs for repos the repo contents cache moved out of externalDir.
+func readRepoMarkerHashes(externalDir string) (map[string][]byte, error) {
+	entries, err := os.ReadDir(externalDir)
 	if err != nil {
-		return nil, fmt.Errorf("read marker dir %s: %w", markerDir, err)
+		return nil, fmt.Errorf("read marker dir %s: %w", externalDir, err)
 	}
 
 	hashes := make(map[string][]byte)
+	hasMarker := make(map[string]bool)
 	for _, e := range entries {
 		name := e.Name()
 		if !strings.HasSuffix(name, ".marker") {
@@ -53,8 +60,9 @@ func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand strin
 		if repo == "" {
 			continue
 		}
+		hasMarker[repo] = true
 
-		h, err := readMarkerHash(filepath.Join(markerDir, name))
+		h, err := readMarkerHash(filepath.Join(externalDir, name))
 		if err != nil {
 			return nil, fmt.Errorf("read marker for repo %s: %w", repo, err)
 		}
@@ -64,7 +72,53 @@ func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand strin
 		hashes[repo] = h
 	}
 
+	for _, e := range entries {
+		repo := e.Name()
+		if e.Type()&os.ModeSymlink == 0 || hasMarker[repo] {
+			continue
+		}
+		path, ok, err := recordedInputsPath(filepath.Join(externalDir, repo))
+		if err != nil {
+			return nil, fmt.Errorf("resolve recorded inputs for repo %s: %w", repo, err)
+		}
+		if !ok {
+			continue
+		}
+
+		h, err := readMarkerHash(path)
+		if err != nil {
+			return nil, fmt.Errorf("read recorded inputs for repo %s: %w", repo, err)
+		}
+		if len(h) == 0 {
+			continue
+		}
+		hashes[repo] = h
+	}
+
 	return hashes, nil
+}
+
+// recordedInputsPath reports false when link does not point at a repo contents cache entry.
+func recordedInputsPath(link string) (string, bool, error) {
+	target, err := os.Readlink(link)
+	if err != nil {
+		return "", false, err
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(link), target)
+	}
+	path := filepath.Clean(target) + recordedInputsSuffix
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if !info.Mode().IsRegular() {
+		return "", false, nil
+	}
+	return path, true, nil
 }
 
 // localInputPrefixes mark the marker lines for inputs that live in the main
