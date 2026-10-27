@@ -1,4 +1,4 @@
-.PHONY: build cover test test-integration test-integration-tgb test-integration-gob test-integration-atf bench lint proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets version help
+.PHONY: build cover test test-integration test-integration-tgb test-integration-gob test-integration-atf test-integration-bzlmod bench lint proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets version help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -24,6 +24,12 @@ ATF_BASE_SHA    ?= 0d79296cfd507440f536ea01e626b294d74d19a8
 ATF_HEAD_SHA    ?= fd703ed51746d989e3b793876e5610bcf0d68c7a
 ATF_PR_URL      ?= github://github.com/xytan0056/bazel-fixture/pull/3/$(ATF_HEAD_SHA)
 
+# Bzlmod upgrade fixture: PR #1 bumps testify through go.mod/go_deps. It lives in its own repo, so it has its own remote.
+BZLMOD_REMOTE   ?= https://github.com/yushan8/bzlmod-fixture.git
+BZLMOD_BASE_SHA ?= 0d79296cfd507440f536ea01e626b294d74d19a8
+BZLMOD_HEAD_SHA ?= a1b7439c73a78efdf8b50a3488a45c7a128d3ba2
+BZLMOD_PR_URL   ?= github://github.com/yushan8/bzlmod-fixture/pull/1/$(BZLMOD_HEAD_SHA)
+
 COMMON_ENV = \
 	--test_env=HOME=$$HOME \
 	--test_env=TANGO_REPO_REMOTE=$(FIXTURE_REMOTE)
@@ -40,8 +46,15 @@ ATF_ENV = \
 	--test_env=TANGO_ATF_HEAD_SHA=$(ATF_HEAD_SHA) \
 	--test_env=TANGO_ATF_PR_URL=$(ATF_PR_URL)
 
+BZLMOD_ENV = \
+	--test_env=HOME=$$HOME \
+	--test_env=TANGO_BZLMOD_REMOTE=$(BZLMOD_REMOTE) \
+	--test_env=TANGO_BZLMOD_BASE_SHA=$(BZLMOD_BASE_SHA) \
+	--test_env=TANGO_BZLMOD_HEAD_SHA=$(BZLMOD_HEAD_SHA) \
+	--test_env=TANGO_BZLMOD_PR_URL=$(BZLMOD_PR_URL)
+
 # Run all integration test suites
-test-integration: test-integration-tgb test-integration-gob test-integration-atf
+test-integration: test-integration-tgb test-integration-gob test-integration-atf test-integration-bzlmod
 
 test-integration-tgb:
 	@echo "Running integration tests (tgb)..."
@@ -61,6 +74,14 @@ test-integration-atf:
 		--test_filter=AllTargetsFiles \
 		$(ATF_ENV) --test_env=TANGO_GRAPH_FORMAT=tgb
 	@echo "AllTargetsFiles integration tests passed!"
+
+# Run the Bzlmod dependency-upgrade integration tests (TGB only)
+test-integration-bzlmod:
+	@echo "Running Bzlmod upgrade integration tests (tgb)..."
+	@$(BAZEL) test //integration:integration_test --test_output=errors \
+		--test_filter=BzlmodUpgrade \
+		$(BZLMOD_ENV) --test_env=TANGO_GRAPH_FORMAT=tgb
+	@echo "Bzlmod upgrade integration tests passed!"
 
 # Run GetChangedTargets benchmarks against fixed, checked-in commit pairs.
 # Measurement only: not part of `make test` / `make test-integration` and not
@@ -161,6 +182,7 @@ help:
 	@echo "  make test-integration-tgb - Run integration tests with TGB format"
 	@echo "  make test-integration-gob - Run integration tests with gob format"
 	@echo "  make test-integration-atf - Run AllTargetsFiles integration tests (TGB only)"
+	@echo "  make test-integration-bzlmod - Run Bzlmod upgrade integration tests (TGB only)"
 	@echo "  make bench            - Run GetChangedTargets benchs (measurement only, not in CI)"
 	@echo "  make lint             - Run golangci-lint"
 	@echo "  make gazelle          - Update BUILD.bazel files"
