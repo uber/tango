@@ -109,6 +109,99 @@ func TestReadMarkerHash_IgnoresAbsolutePathInputs(t *testing.T) {
 	assert.Equal(t, base, withAbsolute)
 }
 
+func TestReadRepoMarkerHashes(t *testing.T) {
+	bumpedDigest := strings.Replace(testDigest, "fbbfccf5", "00000000", 1)
+	marker := func(lines ...string) string { return strings.Join(lines, "\n") + "\n" }
+
+	tests := []struct {
+		name string
+		// setup populates externalDir and cacheDir.
+		setup func(t *testing.T, externalDir, cacheDir string)
+		want  map[string][]byte
+	}{
+		{
+			name: "marker file",
+			setup: func(t *testing.T, externalDir, _ string) {
+				writeFile(t, filepath.Join(externalDir, "@rules_go+.marker"), marker(testDigest, testPatchLine))
+				require.NoError(t, os.Mkdir(filepath.Join(externalDir, "rules_go+"), 0o755))
+			},
+			want: map[string][]byte{"rules_go+": markerHash(t, testDigest, testPatchLine)},
+		},
+		{
+			name: "repo contents cache entry",
+			setup: func(t *testing.T, externalDir, cacheDir string) {
+				entry := filepath.Join(cacheDir, testDigest, "1")
+				require.NoError(t, os.MkdirAll(entry, 0o755))
+				writeFile(t, entry+recordedInputsSuffix, marker(testDigest, testPatchLine, testEnv))
+				require.NoError(t, os.Symlink(entry, filepath.Join(externalDir, "abseil-cpp+")))
+			},
+			want: map[string][]byte{"abseil-cpp+": markerHash(t, testDigest, testPatchLine)},
+		},
+		{
+			name: "relative symlink to cache entry",
+			setup: func(t *testing.T, externalDir, cacheDir string) {
+				entry := filepath.Join(cacheDir, testDigest, "1")
+				require.NoError(t, os.MkdirAll(entry, 0o755))
+				writeFile(t, entry+recordedInputsSuffix, marker(testDigest))
+				rel, err := filepath.Rel(externalDir, entry)
+				require.NoError(t, err)
+				require.NoError(t, os.Symlink(rel, filepath.Join(externalDir, "abseil-cpp+")))
+			},
+			want: map[string][]byte{"abseil-cpp+": markerHash(t, testDigest)},
+		},
+		{
+			name: "marker takes precedence over symlink",
+			setup: func(t *testing.T, externalDir, cacheDir string) {
+				writeFile(t, filepath.Join(externalDir, "@bazel_tools.marker"), marker(testDigest))
+				entry := filepath.Join(cacheDir, bumpedDigest, "1")
+				require.NoError(t, os.MkdirAll(entry, 0o755))
+				writeFile(t, entry+recordedInputsSuffix, marker(bumpedDigest))
+				require.NoError(t, os.Symlink(entry, filepath.Join(externalDir, "bazel_tools")))
+			},
+			want: map[string][]byte{"bazel_tools": markerHash(t, testDigest)},
+		},
+		{
+			name: "symlink outside the cache has no hash",
+			setup: func(t *testing.T, externalDir, cacheDir string) {
+				override := filepath.Join(cacheDir, "local_checkout")
+				require.NoError(t, os.Mkdir(override, 0o755))
+				require.NoError(t, os.Symlink(override, filepath.Join(externalDir, "overridden+")))
+			},
+			want: map[string][]byte{},
+		},
+		{
+			name: "dangling symlink to collected cache entry has no hash",
+			setup: func(t *testing.T, externalDir, cacheDir string) {
+				require.NoError(t, os.Symlink(filepath.Join(cacheDir, testDigest, "1"), filepath.Join(externalDir, "abseil-cpp+")))
+			},
+			want: map[string][]byte{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			externalDir := filepath.Join(t.TempDir(), "external")
+			cacheDir := t.TempDir()
+			require.NoError(t, os.Mkdir(externalDir, 0o755))
+			tt.setup(t, externalDir, cacheDir)
+
+			got, err := readRepoMarkerHashes(externalDir)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestReadRepoMarkerHashes_MissingDir(t *testing.T) {
+	_, err := readRepoMarkerHashes(filepath.Join(t.TempDir(), "missing"))
+	require.Error(t, err)
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+}
+
 func TestReadMarkerHash_Empty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "empty.marker")
 	require.NoError(t, os.WriteFile(path, []byte("\n  \n"), 0o644))
