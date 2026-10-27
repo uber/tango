@@ -414,14 +414,14 @@ func TestResolveBzlmodRepo(t *testing.T) {
 		wantCanon      string
 		wantMappedFrom string
 	}{
-		{"canonical label", "@@rules_python++pip+foo//pkg:file.py", "rules_python++pip+foo", ""},
-		{"apparent label is mapped", "@apparent//pkg:file.jar", "+ext+canonical", "apparent"},
-		{"apparent label mapped to itself", "@bazel_tools//tools:f", "bazel_tools", "bazel_tools"},
-		{"unmapped apparent label", "@unknown//pkg:file", "", ""},
-		{"apparent label with empty mapping", "@empty//pkg:file", "", ""},
-		{"internal target", "//src/pkg:lib", "", ""},
-		{"no double slash", "@apparent", "", ""},
-		{"empty apparent name", "@//pkg:file", "", ""},
+		{name: "canonical label", give: "@@rules_python++pip+foo//pkg:file.py", wantCanon: "rules_python++pip+foo"},
+		{name: "apparent label is mapped", give: "@apparent//pkg:file.jar", wantCanon: "+ext+canonical", wantMappedFrom: "apparent"},
+		{name: "apparent label mapped to itself", give: "@bazel_tools//tools:f", wantCanon: "bazel_tools", wantMappedFrom: "bazel_tools"},
+		{name: "unmapped apparent label", give: "@unknown//pkg:file"},
+		{name: "apparent label with empty mapping", give: "@empty//pkg:file"},
+		{name: "internal target", give: "//src/pkg:lib"},
+		{name: "no double slash", give: "@apparent"},
+		{name: "empty apparent name", give: "@//pkg:file"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
