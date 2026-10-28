@@ -81,10 +81,20 @@ func TestCompute_BzlmodCollapsesExternalTargets(t *testing.T) {
 		[]byte(markerHash+"\n"),
 		0o644,
 	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(markerDir, "@+ext+canonical.marker"),
+		[]byte(markerHash+"\n"),
+		0o644,
+	))
 
-	// Create a fake bazel script that prints the output base.
+	// Create a fake bazel script that prints the output base for `info` and the
+	// apparent-to-canonical repo mapping for `mod dump_repo_mapping`.
 	fakeBazel := filepath.Join(t.TempDir(), "fake-bazel")
-	require.NoError(t, os.WriteFile(fakeBazel, []byte("#!/bin/sh\necho "+outputBase+"\n"), 0o755))
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = info ]; then echo " + outputBase + "; exit 0; fi\n" +
+		"if [ \"$1\" = mod ]; then echo '{\"apparent\":\"+ext+canonical\"}'; exit 0; fi\n" +
+		"exit 1\n"
+	require.NoError(t, os.WriteFile(fakeBazel, []byte(script), 0o755))
 
 	ctrl := gomock.NewController(t)
 	bazelMock := bazelmock.NewMockBazel(ctrl)
@@ -92,6 +102,7 @@ func TestCompute_BzlmodCollapsesExternalTargets(t *testing.T) {
 	gitMock.EXPECT().FileHashes(gomock.Any(), gomock.Any()).Return(map[string][]byte{}, nil)
 
 	srcName := "@@myrepo//pkg:file.go"
+	apparentSrcName := "@apparent//pkg:file.jar"
 	srcType := "source file"
 	ruleName := "//:a"
 	ruleClass := "go_library"
@@ -100,6 +111,12 @@ func TestCompute_BzlmodCollapsesExternalTargets(t *testing.T) {
 			Type: buildpb.Target_SOURCE_FILE.Enum(),
 			SourceFile: &buildpb.SourceFile{
 				Name: &srcName,
+			},
+		},
+		{
+			Type: buildpb.Target_SOURCE_FILE.Enum(),
+			SourceFile: &buildpb.SourceFile{
+				Name: &apparentSrcName,
 			},
 		},
 		{
@@ -133,6 +150,10 @@ func TestCompute_BzlmodCollapsesExternalTargets(t *testing.T) {
 	require.True(t, ok, "external target %q should be in results", srcName)
 	assert.NotNil(t, extTarget.Hash, "collapsed external target should have a hash")
 	assert.Equal(t, srcType, extTarget.RuleType)
+
+	apparentTarget, ok := res.Targets[apparentSrcName]
+	require.True(t, ok, "external target %q should be in results", apparentSrcName)
+	assert.NotNil(t, apparentTarget.Hash, "apparent-name external target should have a hash")
 
 	// The internal rule target should also be present.
 	_, ok = res.Targets[ruleName]

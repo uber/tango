@@ -101,6 +101,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	// Read marker files for bzlmod repos so the collapse uses content-aware
 	// hashes instead of just the repo name string.
 	var repoMarkerHashes map[string][]byte
+	var repoMapping map[string]string
 	if bzlmodEnabled {
 		markerStart := time.Now()
 		repoMarkerHashes, err = targethasher.ReadRepoMarkerHashes(ctx, ws.Path(), g.config.BazelCommandPath)
@@ -111,6 +112,14 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		if len(repoMarkerHashes) == 0 {
 			return targethasher.EmptyResult(), fmt.Errorf("bzlmod enabled but no repo marker hashes found")
 		}
+
+		// Query labels use apparent repo names but marker files are keyed by canonical name.
+		mappingStart := time.Now()
+		repoMapping, err = bazel.RepoMapping(ctx, ws.Path(), g.config.BazelCommandPath)
+		g.emitter.DurationHistogram(_opCompute, "repo_mapping_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(mappingStart))
+		if err != nil {
+			return targethasher.EmptyResult(), fmt.Errorf("read repo mapping: %w", err)
+		}
 	}
 
 	hashConfig := targethasher.HashConfig{
@@ -120,6 +129,7 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 		UseBzlmod:         bzlmodEnabled,
 		AllTargetsFiles:   g.config.AllTargetsFiles,
 		RepoMarkerHashes:  repoMarkerHashes,
+		RepoMapping:       repoMapping,
 	}
 
 	hashStart := time.Now()
