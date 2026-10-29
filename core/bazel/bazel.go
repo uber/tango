@@ -39,31 +39,24 @@ const (
 )
 
 // _moduleValueFlags are the flags that take a value, as `--flag=value` or
-// `--flag value`, and are inherited by `bazel query`, `bazel mod` and `bazel info`,
-// so the query's copy can be reused as is. They either decide which canonical
-// repos module resolution produces (--registry, --override_module,
-// --inject_repository) or where `bazel mod` finds downloads and fetched repos
-// (--repository_cache, --repo_contents_cache, --distdir, --vendor_dir,
-// --downloader_config). The latter do not change the mapping, but without them
-// a query run against a pre-populated cache or an offline setup would make
-// `bazel mod` hit the network.
-// --config is deliberately absent: a config defined only for `query` makes
-// `bazel mod` fail, and rc-file flags under `common` apply to it anyway.
+// `--flag value`, and change the output of `bazel mod dump_repo_mapping`:
+// --registry and --override_module decide which modules, and in some Bazel
+// versions which canonical names, module resolution produces, and
+// --inject_repository adds a repo to the main repo's mapping.
+// Cache locations (--repository_cache, --distdir, ...) and --config are
+// deliberately absent: the former leave the mapping unchanged, and a config
+// defined only for `query` makes `bazel mod` fail.
 var _moduleValueFlags = map[string]struct{}{
-	"registry":            {},
-	"override_module":     {},
-	"inject_repository":   {},
-	"repository_cache":    {},
-	"repo_contents_cache": {},
-	"distdir":             {},
-	"vendor_dir":          {},
-	"downloader_config":   {},
+	"registry":          {},
+	"override_module":   {},
+	"inject_repository": {},
 }
 
-// _moduleBoolFlags are the inherited boolean flags that decide which module
-// system and which modules take part in resolution; the `--no` form is matched as well.
+// _moduleBoolFlags are the boolean flags that change the mapping: whether
+// WORKSPACE repos take part, and whether the root module's dev dependencies do;
+// the `--no` form is matched as well. --enable_bzlmod is absent because
+// `bazel mod` refuses to run without it.
 var _moduleBoolFlags = map[string]struct{}{
-	"enable_bzlmod":         {},
 	"enable_workspace":      {},
 	"ignore_dev_dependency": {},
 }
