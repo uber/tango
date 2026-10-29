@@ -39,13 +39,19 @@ const (
 )
 
 // _moduleValueFlags are the flags that take a value, as `--flag=value` or
-// `--flag value`, and decide which canonical repos Bazel's module resolution
-// produces: where modules come from and which versions are selected.
+// `--flag value`, and decide either which canonical repos Bazel's module
+// resolution produces (--registry, --override_module) or where `bazel mod`
+// finds already-downloaded files (--repository_cache, --distdir, --vendor_dir).
+// The latter do not change the mapping, but without them a query run against a
+// pre-populated cache or an offline setup would make `bazel mod` hit the network.
 // --config is deliberately absent: a config defined only for `query` makes
 // `bazel mod` fail, and rc-file flags under `common` apply to it anyway.
 var _moduleValueFlags = map[string]struct{}{
-	"registry":        {},
-	"override_module": {},
+	"registry":         {},
+	"override_module":  {},
+	"repository_cache": {},
+	"distdir":          {},
+	"vendor_dir":       {},
 }
 
 // _moduleBoolFlags are the boolean flags that decide which module system and

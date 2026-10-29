@@ -161,6 +161,7 @@ func TestModuleResolutionArgs(t *testing.T) {
 		{name: "keeps equals-form value flags", in: []string{"--registry=https://r", "--keep_going", "--override_module=m=/p"}, want: []string{"--registry=https://r", "--override_module=m=/p"}},
 		{name: "keeps space-form value with its value", in: []string{"--registry", "https://r", "--keep_going"}, want: []string{"--registry", "https://r"}},
 		{name: "does not treat a dropped flag's value as a flag", in: []string{"--unknown", "--registry=x"}, want: []string{"--registry=x"}},
+		{name: "keeps cache locations, including an empty repository_cache", in: []string{"--repository_cache=/c", "--repository_cache=", "--distdir", "/d", "--vendor_dir=/v"}, want: []string{"--repository_cache=/c", "--repository_cache=", "--distdir", "/d", "--vendor_dir=/v"}},
 		{name: "keeps boolean flags and their no form", in: []string{"--enable_bzlmod", "--noenable_workspace"}, want: []string{"--enable_bzlmod", "--noenable_workspace"}},
 		{name: "drops flags that do not change the mapping", in: []string{"--config=ci", "--lockfile_mode=error", "--repo_env=A=b"}, want: nil},
 	}
