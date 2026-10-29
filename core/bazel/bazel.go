@@ -41,18 +41,23 @@ const (
 // _moduleValueFlags are the flags that take a value, as `--flag=value` or
 // `--flag value`, that `bazel mod dump_repo_mapping` must see to match the query:
 // --registry and --override_module decide which modules, and in some Bazel
-// versions which canonical names, module resolution produces,
-// --inject_repository adds a repo to the main repo's mapping, and
-// --repository_cache moves the cache of downloaded files, which does not change
-// the mapping but lets `bazel mod` reuse the downloads the query used instead of
-// going to the network.
+// versions which canonical names, module resolution produces, and
+// --inject_repository adds a repo to the main repo's mapping.
+// --repository_cache, --repo_contents_cache, --distdir, --vendor_dir and
+// --downloader_config say where downloads and fetched repos come from. They do
+// not change the mapping, but let `bazel mod` reuse what the query used instead
+// of going to the network.
 // --config is deliberately absent: a config defined only for `query` makes
 // `bazel mod` fail.
 var _moduleValueFlags = map[string]struct{}{
-	"registry":          {},
-	"override_module":   {},
-	"inject_repository": {},
-	"repository_cache":  {},
+	"registry":            {},
+	"override_module":     {},
+	"inject_repository":   {},
+	"repository_cache":    {},
+	"repo_contents_cache": {},
+	"distdir":             {},
+	"vendor_dir":          {},
+	"downloader_config":   {},
 }
 
 // _moduleBoolFlags are the boolean flags that change the mapping: whether
