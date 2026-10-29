@@ -39,34 +39,42 @@ const (
 )
 
 // _moduleValueFlags are the flags that take a value, as `--flag=value` or
-// `--flag value`, that `bazel mod dump_repo_mapping` must see to match the query:
+// `--flag value`, that `bazel mod dump_repo_mapping` must see to match the query.
+// They are command options, so they belong in the query's extra args, not its
+// startup options.
 // --registry and --override_module decide which modules, and in some Bazel
 // versions which canonical names, module resolution produces, and
 // --inject_repository adds a repo to the main repo's mapping.
-// --repository_cache, --repo_contents_cache, --distdir, --vendor_dir and
-// --downloader_config say where downloads and fetched repos come from. They do
-// not change the mapping, but let `bazel mod` reuse what the query used instead
-// of going to the network.
+// --repository_cache, --repo_contents_cache, --distdir, --vendor_dir,
+// --downloader_config, --experimental_remote_downloader and --credential_helper
+// say where downloads come from and how they are authenticated. They do not
+// change the mapping, but without them `bazel mod` goes to the network for files
+// the query already had. A cold repository cache makes it download its registry
+// files again.
 // --config is deliberately absent: a config defined only for `query` makes
 // `bazel mod` fail.
 var _moduleValueFlags = map[string]struct{}{
-	"registry":            {},
-	"override_module":     {},
-	"inject_repository":   {},
-	"repository_cache":    {},
-	"repo_contents_cache": {},
-	"distdir":             {},
-	"vendor_dir":          {},
-	"downloader_config":   {},
+	"registry":                       {},
+	"override_module":                {},
+	"inject_repository":              {},
+	"repository_cache":               {},
+	"repo_contents_cache":            {},
+	"distdir":                        {},
+	"vendor_dir":                     {},
+	"downloader_config":              {},
+	"experimental_remote_downloader": {},
+	"credential_helper":              {},
 }
 
-// _moduleBoolFlags are the boolean flags that change the mapping: whether
-// WORKSPACE repos take part, and whether the root module's dev dependencies do;
-// the `--no` form is matched as well. --enable_bzlmod is absent because
-// `bazel mod` refuses to run without it.
+// _moduleBoolFlags are the boolean flags that change the mapping (whether
+// WORKSPACE repos and the root module's dev dependencies take part) or how a
+// remote downloader is used; the `--no` form is matched as well.
+// --enable_bzlmod is absent because `bazel mod` refuses to run without it.
 var _moduleBoolFlags = map[string]struct{}{
-	"enable_workspace":      {},
-	"ignore_dev_dependency": {},
+	"enable_workspace":                                     {},
+	"ignore_dev_dependency":                                {},
+	"experimental_remote_downloader_local_fallback":        {},
+	"experimental_remote_downloader_propagate_credentials": {},
 }
 
 // ErrNetwork indicates an operation failed due to a transient network
