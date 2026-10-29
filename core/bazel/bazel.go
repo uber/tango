@@ -51,6 +51,12 @@ const (
 // change the mapping, but without them `bazel mod` goes to the network for files
 // the query already had. A cold repository cache makes it download its registry
 // files again.
+// --override_repository, --module_mirrors and --repo_env are path, URL and
+// environment valued in the same way.
+// Their values are often derived from the environment. Bazelrc files do not
+// expand environment variables, so unlike a literal rc line these must be passed
+// with the values already resolved, which is why they are forwarded rather than
+// left to the rc file.
 // --config is deliberately absent: a config defined only for `query` makes
 // `bazel mod` fail.
 var _moduleValueFlags = map[string]struct{}{
@@ -64,6 +70,9 @@ var _moduleValueFlags = map[string]struct{}{
 	"downloader_config":              {},
 	"experimental_remote_downloader": {},
 	"credential_helper":              {},
+	"override_repository":            {},
+	"module_mirrors":                 {},
+	"repo_env":                       {},
 }
 
 // ErrNetwork indicates an operation failed due to a transient network

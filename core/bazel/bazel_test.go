@@ -165,9 +165,10 @@ func TestModuleResolutionArgs(t *testing.T) {
 		{name: "keeps repository_cache, including the empty form that disables it", in: []string{"--repository_cache=/c", "--repository_cache=", "--repository_cache", "/d"}, want: []string{"--repository_cache=/c", "--repository_cache=", "--repository_cache", "/d"}},
 		{name: "keeps other cache locations", in: []string{"--repo_contents_cache=/r", "--distdir", "/d", "--vendor_dir=/v", "--downloader_config=/f"}, want: []string{"--repo_contents_cache=/r", "--distdir", "/d", "--vendor_dir=/v", "--downloader_config=/f"}},
 		{name: "keeps remote downloader and credential flags", in: []string{"--experimental_remote_downloader=grpc://h:1", "--credential_helper=/bin/h"}, want: []string{"--experimental_remote_downloader=grpc://h:1", "--credential_helper=/bin/h"}},
+		{name: "keeps path, url and env valued flags", in: []string{"--override_repository=r=/p", "--module_mirrors=https://m", "--repo_env=A=b", "--repo_env=HOME"}, want: []string{"--override_repository=r=/p", "--module_mirrors=https://m", "--repo_env=A=b", "--repo_env=HOME"}},
 		{name: "drops config and lockfile_mode", in: []string{"--config=ci", "--lockfile_mode=error"}, want: nil},
 		{name: "drops boolean flags", in: []string{"--enable_workspace", "--noignore_dev_dependency", "--enable_bzlmod", "--experimental_remote_downloader_local_fallback"}, want: nil},
-		{name: "drops flags that do not change the mapping", in: []string{"--config=ci", "--lockfile_mode=error", "--repo_env=A=b"}, want: nil},
+		{name: "drops flags that are not forwarded", in: []string{"--config=ci", "--lockfile_mode=error", "--keep_going"}, want: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
