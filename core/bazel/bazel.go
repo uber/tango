@@ -66,17 +66,6 @@ var _moduleValueFlags = map[string]struct{}{
 	"credential_helper":              {},
 }
 
-// _moduleBoolFlags are the boolean flags that change the mapping (whether
-// WORKSPACE repos and the root module's dev dependencies take part) or how a
-// remote downloader is used; the `--no` form is matched as well.
-// --enable_bzlmod is absent because `bazel mod` refuses to run without it.
-var _moduleBoolFlags = map[string]struct{}{
-	"enable_workspace":                                     {},
-	"ignore_dev_dependency":                                {},
-	"experimental_remote_downloader_local_fallback":        {},
-	"experimental_remote_downloader_propagate_credentials": {},
-}
-
 // ErrNetwork indicates an operation failed due to a transient network
 // failure, as opposed to a permanent failure (e.g. a non-200 response).
 // Retrying is expected to succeed.
@@ -300,10 +289,6 @@ func ModuleResolutionArgs(args []string) []string {
 				i++
 				out = append(out, args[i])
 			}
-			continue
-		}
-		if _, ok := _moduleBoolFlags[strings.TrimPrefix(name, "no")]; ok && !hasValue {
-			out = append(out, args[i])
 		}
 	}
 	return out
