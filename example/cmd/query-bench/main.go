@@ -199,7 +199,7 @@ func loadBzlmodInputs(ctx context.Context, t *phaseTimer, opts options, hashConf
 	t.record("git file hashes", start, "files", len(fileHashes))
 
 	start = time.Now()
-	markerHashes, err := targethasher.ReadRepoMarkerHashes(ctx, opts.workspace, opts.bazelCmd)
+	markerHashes, err := targethasher.ReadRepoMarkerHashes(ctx, opts.workspace, opts.bazelCmd, nil)
 	if err != nil {
 		return fmt.Errorf("read repo marker hashes: %w", err)
 	}
@@ -207,7 +207,7 @@ func loadBzlmodInputs(ctx context.Context, t *phaseTimer, opts options, hashConf
 	t.record("marker read", start, "repos", len(markerHashes))
 
 	start = time.Now()
-	repoMapping, err := bazel.RepoMapping(ctx, opts.workspace, opts.bazelCmd)
+	repoMapping, err := bazel.RepoMapping(ctx, opts.workspace, opts.bazelCmd, nil, nil)
 	if err != nil {
 		return fmt.Errorf("read repo mapping: %w", err)
 	}

@@ -186,13 +186,17 @@ func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 }
 
 // OutputBase resolves the bazel executable and runs `bazel info output_base`,
-// returning the absolute path to the output base directory.
-func OutputBase(ctx context.Context, workspacePath, bazelCommand string) (string, error) {
+// returning the absolute path to the output base directory. startupOptions must
+// be the startup options the query ran with: --output_base and
+// --output_user_root change where Bazel keeps its output base, so omitting them
+// reports a directory the query never wrote to.
+func OutputBase(ctx context.Context, workspacePath, bazelCommand string, startupOptions []string) (string, error) {
 	resolved, err := detectBazelExecutable(ctx, bazelCommand)
 	if err != nil {
 		return "", fmt.Errorf("detect bazel: %w", err)
 	}
-	cmd := execcmd.CommandContext(ctx, resolved, "info", "output_base")
+	args := append(append([]string(nil), startupOptions...), "info", "output_base")
+	cmd := execcmd.CommandContext(ctx, resolved, args...)
 	cmd.Dir = workspacePath
 	out, err := cmd.Output()
 	if err != nil {
@@ -207,13 +211,20 @@ func OutputBase(ctx context.Context, workspacePath, bazelCommand string) (string
 
 // RepoMapping returns the main repository's mapping from apparent repo names (`@name//...`) to
 // canonical repo names (`@@canonical//...`), using `bazel mod dump_repo_mapping`.
-func RepoMapping(ctx context.Context, workspacePath, bazelCommand string) (map[string]string, error) {
+// startupOptions are the startup options the query ran with, so the command reuses
+// the same Bazel server. extraArgs are the query's extra arguments; only those that
+// affect module resolution (see ModuleResolutionArgs) are forwarded.
+func RepoMapping(ctx context.Context, workspacePath, bazelCommand string, startupOptions, extraArgs []string) (map[string]string, error) {
 	resolved, err := detectBazelExecutable(ctx, bazelCommand)
 	if err != nil {
 		return nil, fmt.Errorf("detect bazel: %w", err)
 	}
+	args := append([]string(nil), startupOptions...)
+	args = append(args, "mod")
+	args = append(args, ModuleResolutionArgs(extraArgs)...)
 	// The empty repo name selects the main repository.
-	cmd := execcmd.CommandContext(ctx, resolved, "mod", "dump_repo_mapping", "")
+	args = append(args, "dump_repo_mapping", "")
+	cmd := execcmd.CommandContext(ctx, resolved, args...)
 	cmd.Dir = workspacePath
 	out, err := cmd.Output()
 	if err != nil {
@@ -224,4 +235,53 @@ func RepoMapping(ctx context.Context, workspacePath, bazelCommand string) (map[s
 		return nil, fmt.Errorf("parse bazel mod dump_repo_mapping output: %w", err)
 	}
 	return mapping, nil
+}
+
+// _moduleValueFlags are flags that change Bazel module resolution and take a
+// value, either as `--flag=value` or `--flag value`.
+var _moduleValueFlags = map[string]struct{}{
+	"registry":                  {},
+	"override_module":           {},
+	"lockfile_mode":             {},
+	"check_direct_dependencies": {},
+	"check_bazel_compatibility": {},
+	"allow_yanked_versions":     {},
+	"module_mirrors":            {},
+	"override_repository":       {},
+	"repo_env":                  {},
+	"vendor_dir":                {},
+	"config":                    {},
+}
+
+// _moduleBoolFlags are boolean flags that change Bazel module resolution; the
+// `--no` form is matched as well.
+var _moduleBoolFlags = map[string]struct{}{
+	"enable_bzlmod":         {},
+	"enable_workspace":      {},
+	"ignore_dev_dependency": {},
+}
+
+// ModuleResolutionArgs returns the subset of args that influence Bazel module
+// resolution, in their original order. `bazel mod` rejects query-only flags, so
+// the query's extra arguments cannot be forwarded to it wholesale.
+func ModuleResolutionArgs(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		if !strings.HasPrefix(args[i], "--") {
+			continue
+		}
+		name, _, hasValue := strings.Cut(strings.TrimPrefix(args[i], "--"), "=")
+		if _, ok := _moduleValueFlags[name]; ok {
+			out = append(out, args[i])
+			if !hasValue && i+1 < len(args) {
+				i++
+				out = append(out, args[i])
+			}
+			continue
+		}
+		if _, ok := _moduleBoolFlags[strings.TrimPrefix(name, "no")]; ok && !hasValue {
+			out = append(out, args[i])
+		}
+	}
+	return out
 }

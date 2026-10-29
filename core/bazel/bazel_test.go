@@ -87,31 +87,86 @@ func TestNewBazelClient_WithNilExecCommand(t *testing.T) {
 	assert.Contains(t, execCmd.Env, "KEY=value")
 }
 
-func TestRepoMapping(t *testing.T) {
-	fakeBazel := func(t *testing.T, script string) string {
-		path := filepath.Join(t.TempDir(), "fake-bazel")
-		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o755))
-		return path
-	}
+func fakeBazel(t *testing.T, script string) string {
+	path := filepath.Join(t.TempDir(), "fake-bazel")
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o755))
+	return path
+}
 
+func TestOutputBase(t *testing.T) {
+	t.Run("passes startup options before the info command", func(t *testing.T) {
+		bazelCmd := fakeBazel(t, `[ "$1 $2 $3 $4" = "--output_base=/custom info output_base " ] || exit 1; echo /custom`)
+
+		got, err := OutputBase(context.Background(), t.TempDir(), bazelCmd, []string{"--output_base=/custom"})
+
+		require.NoError(t, err)
+		assert.Equal(t, "/custom", got)
+	})
+
+	t.Run("errors when bazel fails", func(t *testing.T) {
+		_, err := OutputBase(context.Background(), t.TempDir(), fakeBazel(t, "exit 1"), nil)
+
+		require.Error(t, err)
+	})
+
+	t.Run("errors on empty path", func(t *testing.T) {
+		_, err := OutputBase(context.Background(), t.TempDir(), fakeBazel(t, "echo"), nil)
+
+		require.Error(t, err)
+	})
+}
+
+func TestRepoMapping(t *testing.T) {
 	t.Run("parses the mapping", func(t *testing.T) {
 		bazelCmd := fakeBazel(t, `[ "$1 $2 $3" = "mod dump_repo_mapping " ] && echo '{"apparent":"+ext+canonical","bazel_tools":"bazel_tools"}'`)
 
-		got, err := RepoMapping(context.Background(), t.TempDir(), bazelCmd)
+		got, err := RepoMapping(context.Background(), t.TempDir(), bazelCmd, nil, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, map[string]string{"apparent": "+ext+canonical", "bazel_tools": "bazel_tools"}, got)
 	})
 
+	t.Run("forwards startup options and module resolution args only", func(t *testing.T) {
+		bazelCmd := fakeBazel(t, `[ "$*" = "--output_base=/custom mod --registry=https://r dump_repo_mapping " ] || exit 1; echo '{"a":"b"}'`)
+
+		got, err := RepoMapping(context.Background(), t.TempDir(), bazelCmd,
+			[]string{"--output_base=/custom"},
+			[]string{"--keep_going", "--registry=https://r", "--noimplicit_deps"})
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"a": "b"}, got)
+	})
+
 	t.Run("errors when bazel fails", func(t *testing.T) {
-		_, err := RepoMapping(context.Background(), t.TempDir(), fakeBazel(t, "exit 1"))
+		_, err := RepoMapping(context.Background(), t.TempDir(), fakeBazel(t, "exit 1"), nil, nil)
 
 		require.Error(t, err)
 	})
 
 	t.Run("errors on output that is not a JSON mapping", func(t *testing.T) {
-		_, err := RepoMapping(context.Background(), t.TempDir(), fakeBazel(t, "echo not-json"))
+		_, err := RepoMapping(context.Background(), t.TempDir(), fakeBazel(t, "echo not-json"), nil, nil)
 
 		require.Error(t, err)
 	})
+}
+
+func TestModuleResolutionArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{name: "empty", in: nil, want: nil},
+		{name: "drops query-only flags", in: []string{"--keep_going", "--noimplicit_deps", "--output=proto"}, want: nil},
+		{name: "keeps equals-form value flags", in: []string{"--registry=https://r", "--keep_going", "--lockfile_mode=error"}, want: []string{"--registry=https://r", "--lockfile_mode=error"}},
+		{name: "keeps space-form value with its value", in: []string{"--registry", "https://r", "--keep_going"}, want: []string{"--registry", "https://r"}},
+		{name: "does not treat a dropped flag's value as a flag", in: []string{"--unknown", "--registry=x"}, want: []string{"--registry=x"}},
+		{name: "keeps boolean flags and their no form", in: []string{"--enable_bzlmod", "--noenable_workspace"}, want: []string{"--enable_bzlmod", "--noenable_workspace"}},
+		{name: "keeps config", in: []string{"--config=ci"}, want: []string{"--config=ci"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ModuleResolutionArgs(tt.in))
+		})
+	}
 }
