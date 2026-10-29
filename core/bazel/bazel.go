@@ -39,23 +39,29 @@ const (
 )
 
 // _moduleValueFlags are the flags that take a value, as `--flag=value` or
-// `--flag value`, and decide either which canonical repos Bazel's module
-// resolution produces (--registry, --override_module) or where `bazel mod`
-// finds already-downloaded files (--repository_cache, --distdir, --vendor_dir).
-// The latter do not change the mapping, but without them a query run against a
-// pre-populated cache or an offline setup would make `bazel mod` hit the network.
+// `--flag value`, and are inherited by `bazel query`, `bazel mod` and `bazel info`,
+// so the query's copy can be reused as is. They either decide which canonical
+// repos module resolution produces (--registry, --override_module,
+// --inject_repository) or where `bazel mod` finds downloads and fetched repos
+// (--repository_cache, --repo_contents_cache, --distdir, --vendor_dir,
+// --downloader_config). The latter do not change the mapping, but without them
+// a query run against a pre-populated cache or an offline setup would make
+// `bazel mod` hit the network.
 // --config is deliberately absent: a config defined only for `query` makes
 // `bazel mod` fail, and rc-file flags under `common` apply to it anyway.
 var _moduleValueFlags = map[string]struct{}{
-	"registry":         {},
-	"override_module":  {},
-	"repository_cache": {},
-	"distdir":          {},
-	"vendor_dir":       {},
+	"registry":            {},
+	"override_module":     {},
+	"inject_repository":   {},
+	"repository_cache":    {},
+	"repo_contents_cache": {},
+	"distdir":             {},
+	"vendor_dir":          {},
+	"downloader_config":   {},
 }
 
-// _moduleBoolFlags are the boolean flags that decide which module system and
-// which modules take part in resolution; the `--no` form is matched as well.
+// _moduleBoolFlags are the inherited boolean flags that decide which module
+// system and which modules take part in resolution; the `--no` form is matched as well.
 var _moduleBoolFlags = map[string]struct{}{
 	"enable_bzlmod":         {},
 	"enable_workspace":      {},
