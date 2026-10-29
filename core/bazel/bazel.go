@@ -38,6 +38,30 @@ const (
 	_queryTimeout = 15 * time.Minute
 )
 
+// _moduleValueFlags are flags that change Bazel module resolution and take a
+// value, either as `--flag=value` or `--flag value`.
+var _moduleValueFlags = map[string]struct{}{
+	"registry":                  {},
+	"override_module":           {},
+	"lockfile_mode":             {},
+	"check_direct_dependencies": {},
+	"check_bazel_compatibility": {},
+	"allow_yanked_versions":     {},
+	"module_mirrors":            {},
+	"override_repository":       {},
+	"repo_env":                  {},
+	"vendor_dir":                {},
+	"config":                    {},
+}
+
+// _moduleBoolFlags are boolean flags that change Bazel module resolution; the
+// `--no` form is matched as well.
+var _moduleBoolFlags = map[string]struct{}{
+	"enable_bzlmod":         {},
+	"enable_workspace":      {},
+	"ignore_dev_dependency": {},
+}
+
 // ErrNetwork indicates an operation failed due to a transient network
 // failure, as opposed to a permanent failure (e.g. a non-200 response).
 // Retrying is expected to succeed.
@@ -190,7 +214,11 @@ func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 // be the startup options the query ran with: --output_base and
 // --output_user_root change where Bazel keeps its output base, so omitting them
 // reports a directory the query never wrote to.
-func OutputBase(ctx context.Context, workspacePath, bazelCommand string, startupOptions []string) (string, error) {
+func OutputBase(
+	ctx context.Context,
+	workspacePath, bazelCommand string,
+	startupOptions []string,
+) (string, error) {
 	resolved, err := detectBazelExecutable(ctx, bazelCommand)
 	if err != nil {
 		return "", fmt.Errorf("detect bazel: %w", err)
@@ -214,7 +242,11 @@ func OutputBase(ctx context.Context, workspacePath, bazelCommand string, startup
 // startupOptions are the startup options the query ran with, so the command reuses
 // the same Bazel server. extraArgs are the query's extra arguments; only those that
 // affect module resolution (see ModuleResolutionArgs) are forwarded.
-func RepoMapping(ctx context.Context, workspacePath, bazelCommand string, startupOptions, extraArgs []string) (map[string]string, error) {
+func RepoMapping(
+	ctx context.Context,
+	workspacePath, bazelCommand string,
+	startupOptions, extraArgs []string,
+) (map[string]string, error) {
 	resolved, err := detectBazelExecutable(ctx, bazelCommand)
 	if err != nil {
 		return nil, fmt.Errorf("detect bazel: %w", err)
@@ -235,30 +267,6 @@ func RepoMapping(ctx context.Context, workspacePath, bazelCommand string, startu
 		return nil, fmt.Errorf("parse bazel mod dump_repo_mapping output: %w", err)
 	}
 	return mapping, nil
-}
-
-// _moduleValueFlags are flags that change Bazel module resolution and take a
-// value, either as `--flag=value` or `--flag value`.
-var _moduleValueFlags = map[string]struct{}{
-	"registry":                  {},
-	"override_module":           {},
-	"lockfile_mode":             {},
-	"check_direct_dependencies": {},
-	"check_bazel_compatibility": {},
-	"allow_yanked_versions":     {},
-	"module_mirrors":            {},
-	"override_repository":       {},
-	"repo_env":                  {},
-	"vendor_dir":                {},
-	"config":                    {},
-}
-
-// _moduleBoolFlags are boolean flags that change Bazel module resolution; the
-// `--no` form is matched as well.
-var _moduleBoolFlags = map[string]struct{}{
-	"enable_bzlmod":         {},
-	"enable_workspace":      {},
-	"ignore_dev_dependency": {},
 }
 
 // ModuleResolutionArgs returns the subset of args that influence Bazel module
