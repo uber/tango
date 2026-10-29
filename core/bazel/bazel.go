@@ -38,24 +38,18 @@ const (
 	_queryTimeout = 15 * time.Minute
 )
 
-// _moduleValueFlags are flags that change Bazel module resolution and take a
-// value, either as `--flag=value` or `--flag value`.
+// _moduleValueFlags are the flags that take a value, as `--flag=value` or
+// `--flag value`, and decide which canonical repos Bazel's module resolution
+// produces: where modules come from and which versions are selected.
+// --config is deliberately absent: a config defined only for `query` makes
+// `bazel mod` fail, and rc-file flags under `common` apply to it anyway.
 var _moduleValueFlags = map[string]struct{}{
-	"registry":                  {},
-	"override_module":           {},
-	"lockfile_mode":             {},
-	"check_direct_dependencies": {},
-	"check_bazel_compatibility": {},
-	"allow_yanked_versions":     {},
-	"module_mirrors":            {},
-	"override_repository":       {},
-	"repo_env":                  {},
-	"vendor_dir":                {},
-	"config":                    {},
+	"registry":        {},
+	"override_module": {},
 }
 
-// _moduleBoolFlags are boolean flags that change Bazel module resolution; the
-// `--no` form is matched as well.
+// _moduleBoolFlags are the boolean flags that decide which module system and
+// which modules take part in resolution; the `--no` form is matched as well.
 var _moduleBoolFlags = map[string]struct{}{
 	"enable_bzlmod":         {},
 	"enable_workspace":      {},

@@ -158,11 +158,11 @@ func TestModuleResolutionArgs(t *testing.T) {
 	}{
 		{name: "empty", in: nil, want: nil},
 		{name: "drops query-only flags", in: []string{"--keep_going", "--noimplicit_deps", "--output=proto"}, want: nil},
-		{name: "keeps equals-form value flags", in: []string{"--registry=https://r", "--keep_going", "--lockfile_mode=error"}, want: []string{"--registry=https://r", "--lockfile_mode=error"}},
+		{name: "keeps equals-form value flags", in: []string{"--registry=https://r", "--keep_going", "--override_module=m=/p"}, want: []string{"--registry=https://r", "--override_module=m=/p"}},
 		{name: "keeps space-form value with its value", in: []string{"--registry", "https://r", "--keep_going"}, want: []string{"--registry", "https://r"}},
 		{name: "does not treat a dropped flag's value as a flag", in: []string{"--unknown", "--registry=x"}, want: []string{"--registry=x"}},
 		{name: "keeps boolean flags and their no form", in: []string{"--enable_bzlmod", "--noenable_workspace"}, want: []string{"--enable_bzlmod", "--noenable_workspace"}},
-		{name: "keeps config", in: []string{"--config=ci"}, want: []string{"--config=ci"}},
+		{name: "drops flags that do not change the mapping", in: []string{"--config=ci", "--lockfile_mode=error", "--repo_env=A=b"}, want: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
