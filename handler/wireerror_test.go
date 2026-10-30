@@ -22,9 +22,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/tango/controller"
+	mock_controller "github.com/uber/tango/controller/controllermock"
 	tangoerrors "github.com/uber/tango/core/errors"
-	"github.com/uber/tango/core/storage"
-	storagemock "github.com/uber/tango/core/storage/storagemock"
 	pb "github.com/uber/tango/tangopb"
 	tangomock "github.com/uber/tango/tangopb/tangopbmock"
 	"go.uber.org/mock/gomock"
@@ -88,12 +87,14 @@ func TestGetTargetGraph_ValidationError_WiresTangoError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 
-	c := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: controller.NewController(context.Background(), controller.Params{
-		Logger: zaptest.NewLogger(t),
-	})})
+	h := New(Params{
+		Logger:     zaptest.NewLogger(t),
+		Controller: mock_controller.NewMockController(ctrl),
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+	})
 
 	// Missing BaseSha triggers a validation error classified as ERROR_USER.
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := h.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Remote: "repo:go-code",
 		},
@@ -141,15 +142,17 @@ func TestGetTargetGraph_InfraError_WiresTangoError(t *testing.T) {
 	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(ctrl)
 	stream.EXPECT().Context().Return(context.Background())
 
-	store := storagemock.NewMockStorage(ctrl)
-	store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, errors.New("disk on fire"))
+	mockController := mock_controller.NewMockController(ctrl)
+	mockController.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, tangoerrors.NewInfra(errors.New("disk on fire")))
 
-	c := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: controller.NewController(context.Background(), controller.Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
-	})})
+	h := New(Params{
+		Logger:     zaptest.NewLogger(t),
+		Controller: mockController,
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+	})
 
-	err := c.GetTargetGraph(&pb.GetTargetGraphRequest{
+	err := h.GetTargetGraph(&pb.GetTargetGraphRequest{
 		BuildDescription: &pb.BuildDescription{
 			Remote:   "repo:go-code",
 			BaseSha:  "sha",
