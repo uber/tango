@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -57,8 +58,12 @@ const (
 // expand environment variables, so unlike a literal rc line these must be passed
 // with the values already resolved, which is why they are forwarded rather than
 // left to the rc file.
-// --config is deliberately absent: a config defined only for `query` makes
-// `bazel mod` fail.
+// --config is deliberately absent. Plain `common` rc lines reach `bazel mod` on
+// their own, but a named config only applies if --config=name is passed to it,
+// and `bazel mod` fails with "Config value is not defined" when the rc defines
+// name only for `query` or `build`. Tango cannot tell which, so it does not
+// forward it; flags that a config sets and that matter here must be passed
+// explicitly, or the config defined under `common:name`.
 var _moduleValueFlags = map[string]struct{}{
 	"registry":                       {},
 	"override_module":                {},
@@ -236,7 +241,7 @@ func OutputBase(
 	if err != nil {
 		return "", fmt.Errorf("detect bazel: %w", err)
 	}
-	args := append(append([]string(nil), startupOptions...), "info", "output_base")
+	args := slices.Concat(startupOptions, []string{"info", "output_base"})
 	cmd := execcmd.CommandContext(ctx, resolved, args...)
 	cmd.Dir = workspacePath
 	out, err := cmd.Output()
@@ -264,11 +269,13 @@ func RepoMapping(
 	if err != nil {
 		return nil, fmt.Errorf("detect bazel: %w", err)
 	}
-	args := append([]string(nil), startupOptions...)
-	args = append(args, "mod")
-	args = append(args, ModuleResolutionArgs(extraArgs)...)
 	// The empty repo name selects the main repository.
-	args = append(args, "dump_repo_mapping", "")
+	args := slices.Concat(
+		startupOptions,
+		[]string{"mod"},
+		ModuleResolutionArgs(extraArgs),
+		[]string{"dump_repo_mapping", ""},
+	)
 	cmd := execcmd.CommandContext(ctx, resolved, args...)
 	cmd.Dir = workspacePath
 	out, err := cmd.Output()
