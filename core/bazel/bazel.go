@@ -58,12 +58,6 @@ const (
 // expand environment variables, so unlike a literal rc line these must be passed
 // with the values already resolved, which is why they are forwarded rather than
 // left to the rc file.
-// --config is deliberately absent. Plain `common` rc lines reach `bazel mod` on
-// their own, but a named config only applies if --config=name is passed to it,
-// and `bazel mod` fails with "Config value is not defined" when the rc defines
-// name only for `query` or `build`. Tango cannot tell which, so it does not
-// forward it; flags that a config sets and that matter here must be passed
-// explicitly, or the config defined under `common:name`.
 var _moduleValueFlags = map[string]struct{}{
 	"registry":                       {},
 	"override_module":                {},
