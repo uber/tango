@@ -26,14 +26,12 @@ import (
 	"github.com/uber/tango/core/cachekey"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
-	"github.com/uber/tango/internal/mapper"
 	"github.com/uber/tango/internal/mapper/idmapper"
 	"github.com/uber/tango/internal/streaming"
 	"github.com/uber/tango/internal/targetdiff"
 	"github.com/uber/tango/internal/tgb"
 	"github.com/uber/tango/internal/tgbdiff"
 	"github.com/uber/tango/observability/metrics"
-	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/zap"
 )
 
@@ -78,45 +76,32 @@ type job struct {
 }
 
 // GetChangedTargets returns the changed targets between two revisions. If the
-// client disconnects, the stream's context is cancelled and the function
+// client disconnects, ctx is cancelled and the function
 // returns with context.Canceled.
-func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetChangedTargetsYARPCServer, repoCfg config.RepositoryConfig) error {
+func (c *controller) GetChangedTargets(ctx context.Context, entityReq entity.GetChangedTargetsRequest, repoCfg config.RepositoryConfig) ([]entity.GetChangedTargetsResponse, error) {
 	e := c.emitter.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID})
 	logger := c.logger.WithLazy(
 		zap.String("repository", repoCfg.RepositoryID),
 	)
-	ctx, cancelLink := c.linkRequestCtx(stream.Context())
+	ctx, cancelLink := c.linkRequestCtx(ctx)
 	defer cancelLink()
 	start := time.Now()
 
-	logger.Info("GetChangedTargets: Processing request")
-
-	// Default max_distance to -1 (no filtering) when the client omits OutputConfig
-	// entirely. When OutputConfig is supplied, take max_distance at face value —
-	// see proto/tango.proto OutputConfig.max_distance for the wire-default caveat.
-	maxDist := int32(-1)
-	if outputConfig != nil {
-		maxDist = outputConfig.GetMaxDistance()
-	}
-
-	// Fast path: stream a previously computed result straight from cache.
+	// Fast path: return a previously computed result straight from cache.
 	if !entityReq.BypassCache {
 		cached, found, err := c.comparedTargetsFromCache(ctx, e, logger, entityReq, repoCfg.RepositoryID, start)
 		if err != nil {
-			return fmt.Errorf("serve from cache: %w", err)
+			return nil, fmt.Errorf("serve from cache: %w", err)
 		}
 		if found {
-			if err := sendTrimmedChangedTargets(stream, cached, maxDist, outputConfig); err != nil {
-				return fmt.Errorf("send cached response: %w", err)
-			}
-			return nil
+			return cached, nil
 		}
 	}
 
 	// Fetch both revisions' target graphs concurrently.
 	firstGraph, secondGraph, err := c.fetchTargetGraphs(ctx, e, logger, entityReq, repoCfg.RepositoryID)
 	if err != nil {
-		return fmt.Errorf("fetch target graphs: %w", err)
+		return nil, fmt.Errorf("fetch target graphs: %w", err)
 	}
 
 	changedTargetsResponses, err := c.compareFetchedGraphs(ctx, e, logger, entityReq.First.Remote, firstGraph, secondGraph, seedAttributesFor(repoCfg))
@@ -127,24 +112,16 @@ func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest
 		if ctx.Err() != nil {
 			err = context.Cause(ctx)
 		}
-		return fmt.Errorf("compare target graphs: %w", err)
+		return nil, fmt.Errorf("compare target graphs: %w", err)
 	}
 
 	// Cache the computed result concurrently so it doesn't block the stream send.
 	c.cacheComparedTargets(logger, entityReq, repoCfg.RepositoryID, changedTargetsResponses)
 
-	sendStart := time.Now()
-	if err := sendTrimmedChangedTargets(stream, changedTargetsResponses, maxDist, outputConfig); err != nil {
-		return fmt.Errorf("send response: %w", err)
-	}
-	sendDuration := time.Since(sendStart)
-	e.DurationHistogram(opGetChangedTargets, "send_duration", metrics.FastDurationBuckets).RecordDuration(sendDuration)
-
 	logger.Info("GetChangedTargets: Successfully processed request",
-		zap.Duration("send_duration", sendDuration),
 		zap.Duration("total_duration", time.Since(start)),
 	)
-	return nil
+	return changedTargetsResponses, nil
 }
 
 // comparedTargetsFromCache attempts to load a previously computed
@@ -209,7 +186,7 @@ func (c *controller) comparedTargetsFromCache(ctx context.Context, e *metrics.Em
 	}
 
 	cacheReadDuration := time.Since(cacheStart)
-	logger.Info("GetChangedTargets: Cache hit, streaming from storage",
+	logger.Info("GetChangedTargets: Cache hit",
 		zap.Duration("cache_read_duration", cacheReadDuration),
 		zap.Duration("total_duration", time.Since(start)),
 	)
@@ -944,47 +921,6 @@ func toChangeType(ct targetdiff.ChangeType) entity.ChangeType {
 	default:
 		return entity.ChangeTypeInvalid
 	}
-}
-
-// sendTrimmedChangedTargets streams responses to the client, filtering changed targets to those
-// within maxDist from any distance-0 seed when maxDist >= 0, stripping per-target
-// hash/tags/attributes per outputConfig's include_* flags, and pruning metadata mappings
-// whose IDs are no longer referenced. Each entity response is converted to proto at the
-// stream.Send boundary.
-func sendTrimmedChangedTargets(stream pb.TangoServiceGetChangedTargetsYARPCServer, responses []entity.GetChangedTargetsResponse, maxDist int32, outputConfig *pb.OutputConfig) error {
-	stripFields := optimizedTargetNeedsStripping(outputConfig)
-	pruneMeta := metadataNeedsPruning(outputConfig)
-	for i := range responses {
-		protoResp := mapper.ChangedTargetsResponseToProto(&responses[i])
-		toSend := protoResp
-		switch item := protoResp.GetItem().(type) {
-		case *pb.GetChangedTargetsResponse_ChangedTargets:
-			if maxDist >= 0 || stripFields {
-				kept := item.ChangedTargets.GetChangedTargets()
-				if maxDist >= 0 {
-					kept = filterChangedTargetsByDistance(kept, maxDist)
-				}
-				kept = applyChangedTargetsOutputConfig(kept, outputConfig)
-				toSend = &pb.GetChangedTargetsResponse{
-					Item: &pb.GetChangedTargetsResponse_ChangedTargets{
-						ChangedTargets: &pb.ChangedTargets{ChangedTargets: kept},
-					},
-				}
-			}
-		case *pb.GetChangedTargetsResponse_Metadata:
-			if pruneMeta {
-				toSend = &pb.GetChangedTargetsResponse{
-					Item: &pb.GetChangedTargetsResponse_Metadata{
-						Metadata: applyMetadataOutputConfig(item.Metadata, outputConfig),
-					},
-				}
-			}
-		}
-		if err := stream.Send(toSend); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // readTreehashParallel fetches the treehashes for two build descriptions concurrently.
