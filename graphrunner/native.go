@@ -104,7 +104,8 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 	var repoMapping map[string]string
 	if bzlmodEnabled {
 		markerStart := time.Now()
-		repoMarkerHashes, err = targethasher.ReadRepoMarkerHashes(ctx, ws.Path(), g.config.BazelCommandPath)
+		repoMarkerHashes, err = targethasher.ReadRepoMarkerHashes(
+			ctx, ws.Path(), g.config.BazelCommandPath, g.config.BazelStartupOptions)
 		g.emitter.DurationHistogram(_opCompute, "marker_read_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(markerStart))
 		if err != nil {
 			return targethasher.EmptyResult(), fmt.Errorf("read repo marker hashes: %w", err)
@@ -115,7 +116,9 @@ func (g *nativeGraphRunner) Compute(ctx context.Context, ws workspace.Workspace)
 
 		// Query labels use apparent repo names but marker files are keyed by canonical name.
 		mappingStart := time.Now()
-		repoMapping, err = bazel.RepoMapping(ctx, ws.Path(), g.config.BazelCommandPath)
+		repoMapping, err = bazel.RepoMapping(
+			ctx, ws.Path(), g.config.BazelCommandPath,
+			g.config.BazelStartupOptions, g.config.BazelExtraArgs)
 		g.emitter.DurationHistogram(_opCompute, "repo_mapping_duration", metrics.FastDurationBuckets).RecordDuration(time.Since(mappingStart))
 		if err != nil {
 			return targethasher.EmptyResult(), fmt.Errorf("read repo mapping: %w", err)

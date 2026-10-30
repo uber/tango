@@ -30,9 +30,14 @@ import (
 // to a hash derived from the stable lines of each marker file.
 // This hash changes whenever the repo's version, URL, or patch file
 // contents change. See readMarkerHash for the lines that are excluded for
-// cross-environment and cross-workspace stability.
-func ReadRepoMarkerHashes(ctx context.Context, workspacePath, bazelCommand string) (map[string][]byte, error) {
-	outputBase, err := bazel.OutputBase(ctx, workspacePath, bazelCommand)
+// cross-environment and cross-workspace stability. startupOptions must match
+// the query's, since they can relocate the output base.
+func ReadRepoMarkerHashes(
+	ctx context.Context,
+	workspacePath, bazelCommand string,
+	startupOptions []string,
+) (map[string][]byte, error) {
+	outputBase, err := bazel.OutputBase(ctx, workspacePath, bazelCommand, startupOptions)
 	if err != nil {
 		return nil, fmt.Errorf("bazel output base: %w", err)
 	}

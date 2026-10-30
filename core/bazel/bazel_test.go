@@ -87,31 +87,92 @@ func TestNewBazelClient_WithNilExecCommand(t *testing.T) {
 	assert.Contains(t, execCmd.Env, "KEY=value")
 }
 
-func TestRepoMapping(t *testing.T) {
-	fakeBazel := func(t *testing.T, script string) string {
-		path := filepath.Join(t.TempDir(), "fake-bazel")
-		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o755))
-		return path
-	}
+func fakeBazel(t *testing.T, script string) string {
+	path := filepath.Join(t.TempDir(), "fake-bazel")
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o755))
+	return path
+}
 
+func TestOutputBase(t *testing.T) {
+	t.Run("passes startup options before the info command", func(t *testing.T) {
+		bazelCmd := fakeBazel(t, `[ "$1 $2 $3 $4" = "--output_base=/custom info output_base " ] || exit 1; echo /custom`)
+
+		got, err := OutputBase(context.Background(), t.TempDir(), bazelCmd, []string{"--output_base=/custom"})
+
+		require.NoError(t, err)
+		assert.Equal(t, "/custom", got)
+	})
+
+	t.Run("errors when bazel fails", func(t *testing.T) {
+		_, err := OutputBase(context.Background(), t.TempDir(), fakeBazel(t, "exit 1"), nil)
+
+		require.Error(t, err)
+	})
+
+	t.Run("errors on empty path", func(t *testing.T) {
+		_, err := OutputBase(context.Background(), t.TempDir(), fakeBazel(t, "echo"), nil)
+
+		require.Error(t, err)
+	})
+}
+
+func TestRepoMapping(t *testing.T) {
 	t.Run("parses the mapping", func(t *testing.T) {
 		bazelCmd := fakeBazel(t, `[ "$1 $2 $3" = "mod dump_repo_mapping " ] && echo '{"apparent":"+ext+canonical","bazel_tools":"bazel_tools"}'`)
 
-		got, err := RepoMapping(context.Background(), t.TempDir(), bazelCmd)
+		got, err := RepoMapping(context.Background(), t.TempDir(), bazelCmd, nil, nil)
 
 		require.NoError(t, err)
 		assert.Equal(t, map[string]string{"apparent": "+ext+canonical", "bazel_tools": "bazel_tools"}, got)
 	})
 
+	t.Run("forwards startup options and module resolution args only", func(t *testing.T) {
+		bazelCmd := fakeBazel(t, `[ "$*" = "--output_base=/custom mod --registry=https://r dump_repo_mapping " ] || exit 1; echo '{"a":"b"}'`)
+
+		got, err := RepoMapping(context.Background(), t.TempDir(), bazelCmd,
+			[]string{"--output_base=/custom"},
+			[]string{"--keep_going", "--registry=https://r", "--noimplicit_deps"})
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"a": "b"}, got)
+	})
+
 	t.Run("errors when bazel fails", func(t *testing.T) {
-		_, err := RepoMapping(context.Background(), t.TempDir(), fakeBazel(t, "exit 1"))
+		_, err := RepoMapping(context.Background(), t.TempDir(), fakeBazel(t, "exit 1"), nil, nil)
 
 		require.Error(t, err)
 	})
 
 	t.Run("errors on output that is not a JSON mapping", func(t *testing.T) {
-		_, err := RepoMapping(context.Background(), t.TempDir(), fakeBazel(t, "echo not-json"))
+		_, err := RepoMapping(context.Background(), t.TempDir(), fakeBazel(t, "echo not-json"), nil, nil)
 
 		require.Error(t, err)
 	})
+}
+
+func TestModuleResolutionArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{name: "empty", in: nil, want: nil},
+		{name: "drops query-only flags", in: []string{"--keep_going", "--noimplicit_deps", "--output=proto"}, want: nil},
+		{name: "keeps equals-form value flags", in: []string{"--registry=https://r", "--keep_going", "--override_module=m=/p"}, want: []string{"--registry=https://r", "--override_module=m=/p"}},
+		{name: "keeps space-form value with its value", in: []string{"--registry", "https://r", "--keep_going"}, want: []string{"--registry", "https://r"}},
+		{name: "does not treat a dropped flag's value as a flag", in: []string{"--unknown", "--registry=x"}, want: []string{"--registry=x"}},
+		{name: "keeps inject_repository", in: []string{"--inject_repository=n=/p"}, want: []string{"--inject_repository=n=/p"}},
+		{name: "keeps repository_cache, including the empty form that disables it", in: []string{"--repository_cache=/c", "--repository_cache=", "--repository_cache", "/d"}, want: []string{"--repository_cache=/c", "--repository_cache=", "--repository_cache", "/d"}},
+		{name: "keeps other cache locations", in: []string{"--repo_contents_cache=/r", "--distdir", "/d", "--vendor_dir=/v", "--downloader_config=/f"}, want: []string{"--repo_contents_cache=/r", "--distdir", "/d", "--vendor_dir=/v", "--downloader_config=/f"}},
+		{name: "keeps remote downloader and credential flags", in: []string{"--experimental_remote_downloader=grpc://h:1", "--credential_helper=/bin/h"}, want: []string{"--experimental_remote_downloader=grpc://h:1", "--credential_helper=/bin/h"}},
+		{name: "keeps path, url and env valued flags", in: []string{"--override_repository=r=/p", "--module_mirrors=https://m", "--repo_env=A=b", "--repo_env=HOME"}, want: []string{"--override_repository=r=/p", "--module_mirrors=https://m", "--repo_env=A=b", "--repo_env=HOME"}},
+		{name: "drops config and lockfile_mode", in: []string{"--config=ci", "--lockfile_mode=error"}, want: nil},
+		{name: "drops boolean flags", in: []string{"--enable_workspace", "--noignore_dev_dependency", "--enable_bzlmod", "--experimental_remote_downloader_local_fallback"}, want: nil},
+		{name: "drops flags that are not forwarded", in: []string{"--config=ci", "--lockfile_mode=error", "--keep_going"}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ModuleResolutionArgs(tt.in))
+		})
+	}
 }

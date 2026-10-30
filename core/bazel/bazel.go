@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -37,6 +38,41 @@ const (
 	// default query timeout if not provided in config
 	_queryTimeout = 15 * time.Minute
 )
+
+// _moduleValueFlags are the flags that take a value, as `--flag=value` or
+// `--flag value`, that `bazel mod dump_repo_mapping` must see to match the query.
+// They are command options, so they belong in the query's extra args, not its
+// startup options.
+// --registry and --override_module decide which modules, and in some Bazel
+// versions which canonical names, module resolution produces, and
+// --inject_repository adds a repo to the main repo's mapping.
+// --repository_cache, --repo_contents_cache, --distdir, --vendor_dir,
+// --downloader_config, --experimental_remote_downloader and --credential_helper
+// say where downloads come from and how they are authenticated. They do not
+// change the mapping, but without them `bazel mod` goes to the network for files
+// the query already had. A cold repository cache makes it download its registry
+// files again.
+// --override_repository, --module_mirrors and --repo_env are path, URL and
+// environment valued in the same way.
+// Their values are often derived from the environment. Bazelrc files do not
+// expand environment variables, so unlike a literal rc line these must be passed
+// with the values already resolved, which is why they are forwarded rather than
+// left to the rc file.
+var _moduleValueFlags = map[string]struct{}{
+	"registry":                       {},
+	"override_module":                {},
+	"inject_repository":              {},
+	"repository_cache":               {},
+	"repo_contents_cache":            {},
+	"distdir":                        {},
+	"vendor_dir":                     {},
+	"downloader_config":              {},
+	"experimental_remote_downloader": {},
+	"credential_helper":              {},
+	"override_repository":            {},
+	"module_mirrors":                 {},
+	"repo_env":                       {},
+}
 
 // ErrNetwork indicates an operation failed due to a transient network
 // failure, as opposed to a permanent failure (e.g. a non-200 response).
@@ -186,13 +222,21 @@ func ensureBazelisk(ctx context.Context) (_ string, retErr error) {
 }
 
 // OutputBase resolves the bazel executable and runs `bazel info output_base`,
-// returning the absolute path to the output base directory.
-func OutputBase(ctx context.Context, workspacePath, bazelCommand string) (string, error) {
+// returning the absolute path to the output base directory. startupOptions must
+// be the startup options the query ran with: --output_base and
+// --output_user_root change where Bazel keeps its output base, so omitting them
+// reports a directory the query never wrote to.
+func OutputBase(
+	ctx context.Context,
+	workspacePath, bazelCommand string,
+	startupOptions []string,
+) (string, error) {
 	resolved, err := detectBazelExecutable(ctx, bazelCommand)
 	if err != nil {
 		return "", fmt.Errorf("detect bazel: %w", err)
 	}
-	cmd := execcmd.CommandContext(ctx, resolved, "info", "output_base")
+	args := slices.Concat(startupOptions, []string{"info", "output_base"})
+	cmd := execcmd.CommandContext(ctx, resolved, args...)
 	cmd.Dir = workspacePath
 	out, err := cmd.Output()
 	if err != nil {
@@ -207,13 +251,26 @@ func OutputBase(ctx context.Context, workspacePath, bazelCommand string) (string
 
 // RepoMapping returns the main repository's mapping from apparent repo names (`@name//...`) to
 // canonical repo names (`@@canonical//...`), using `bazel mod dump_repo_mapping`.
-func RepoMapping(ctx context.Context, workspacePath, bazelCommand string) (map[string]string, error) {
+// startupOptions are the startup options the query ran with, so the command reuses
+// the same Bazel server. extraArgs are the query's extra arguments; only those that
+// affect module resolution (see ModuleResolutionArgs) are forwarded.
+func RepoMapping(
+	ctx context.Context,
+	workspacePath, bazelCommand string,
+	startupOptions, extraArgs []string,
+) (map[string]string, error) {
 	resolved, err := detectBazelExecutable(ctx, bazelCommand)
 	if err != nil {
 		return nil, fmt.Errorf("detect bazel: %w", err)
 	}
 	// The empty repo name selects the main repository.
-	cmd := execcmd.CommandContext(ctx, resolved, "mod", "dump_repo_mapping", "")
+	args := slices.Concat(
+		startupOptions,
+		[]string{"mod"},
+		ModuleResolutionArgs(extraArgs),
+		[]string{"dump_repo_mapping", ""},
+	)
+	cmd := execcmd.CommandContext(ctx, resolved, args...)
 	cmd.Dir = workspacePath
 	out, err := cmd.Output()
 	if err != nil {
@@ -224,4 +281,25 @@ func RepoMapping(ctx context.Context, workspacePath, bazelCommand string) (map[s
 		return nil, fmt.Errorf("parse bazel mod dump_repo_mapping output: %w", err)
 	}
 	return mapping, nil
+}
+
+// ModuleResolutionArgs returns the subset of args that influence Bazel module
+// resolution, in their original order. `bazel mod` rejects query-only flags, so
+// the query's extra arguments cannot be forwarded to it wholesale.
+func ModuleResolutionArgs(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		if !strings.HasPrefix(args[i], "--") {
+			continue
+		}
+		name, _, hasValue := strings.Cut(strings.TrimPrefix(args[i], "--"), "=")
+		if _, ok := _moduleValueFlags[name]; ok {
+			out = append(out, args[i])
+			if !hasValue && i+1 < len(args) {
+				i++
+				out = append(out, args[i])
+			}
+		}
+	}
+	return out
 }
