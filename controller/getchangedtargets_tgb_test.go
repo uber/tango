@@ -29,8 +29,6 @@ import (
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
 	orchestratormock "github.com/uber/tango/orchestrator/orchestratormock"
-	pb "github.com/uber/tango/tangopb"
-	tangomock "github.com/uber/tango/tangopb/tangopbmock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 )
@@ -66,18 +64,15 @@ func seedTreehash(t *testing.T, st storage.Storage, baseSha, treehash string) {
 	require.NoError(t, st.Put(t.Context(), storage.UploadRequest{Key: key, Reader: bytes.NewReader([]byte(treehash))}))
 }
 
-// changedTargetsSent collects the changed targets and merged metadata out of
-// a captured response stream.
-func changedTargetsSent(t *testing.T, sent []*pb.GetChangedTargetsResponse) ([]*pb.ChangedTarget, map[int32]string) {
-	t.Helper()
-	var changed []*pb.ChangedTarget
+// changedTargetsFromChunks collects the changed targets and merged metadata
+// out of the chunks a GetChangedTargets call returned.
+func changedTargetsFromChunks(chunks []entity.GetChangedTargetsResponse) ([]entity.ChangedTarget, map[int32]string) {
+	var changed []entity.ChangedTarget
 	idToName := map[int32]string{}
-	for _, resp := range sent {
-		if ct := resp.GetChangedTargets(); ct != nil {
-			changed = append(changed, ct.GetChangedTargets()...)
-		}
-		if m := resp.GetMetadata(); m != nil {
-			for id, name := range m.GetTargetIdMapping() {
+	for _, resp := range chunks {
+		changed = append(changed, resp.ChangedTargets...)
+		if resp.Metadata != nil {
+			for id, name := range resp.Metadata.TargetIDMapping {
 				idToName[id] = name
 			}
 		}
@@ -104,13 +99,6 @@ func counterValue(scope tally.TestScope, substring string) int64 {
 // reports a match.
 func TestGetChangedTargets_TGBNativePath(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(t.Context())
-	var sent []*pb.GetChangedTargetsResponse
-	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, _ ...interface{}) error {
-		sent = append(sent, resp)
-		return nil
-	}).AnyTimes()
 
 	st := storage.NewMemoryStorage()
 	seedTreehash(t, st, "sha1", "treehash1")
@@ -131,16 +119,15 @@ func TestGetChangedTargets_TGBNativePath(t *testing.T) {
 		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB, ShadowCompare: true}),
 	})
 
-	request := changedTargetsRequest()
-	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true, IncludeTags: true, IncludeAttributes: true}
-	require.NoError(t, c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")}))
+	responses, err := c.GetChangedTargets(t.Context(), changedTargetsRequest(), testRepositoryConfig)
+	require.NoError(t, err)
 
-	changed, idToName := changedTargetsSent(t, sent)
+	changed, idToName := changedTargetsFromChunks(responses)
 	require.Len(t, changed, 1, "should detect exactly the hash-flipped target")
-	assert.Equal(t, tgbHash2Old, changed[0].GetOldTarget().GetHash())
-	assert.Equal(t, tgbHash2New, changed[0].GetNewTarget().GetHash())
-	assert.Equal(t, int32(0), changed[0].GetDistance())
-	assert.Equal(t, "//app:target2", idToName[changed[0].GetNewTarget().GetId()])
+	assert.Equal(t, tgbHash2Old, changed[0].OldTarget.Hash)
+	assert.Equal(t, tgbHash2New, changed[0].NewTarget.Hash)
+	assert.Equal(t, int32(0), changed[0].Distance)
+	assert.Equal(t, "//app:target2", idToName[changed[0].NewTarget.ID])
 
 	assert.EqualValues(t, 1, counterValue(scope, "tgb_native_compare"), "comparison must take the TGB-native path")
 
@@ -213,13 +200,6 @@ func tgbAllTargetsClassificationAfter(atfh map[string]string) []entity.GetTarget
 // reports every target in the second graph as changed with distance 0.
 func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(t.Context())
-	var sent []*pb.GetChangedTargetsResponse
-	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, _ ...interface{}) error {
-		sent = append(sent, resp)
-		return nil
-	}).AnyTimes()
 
 	st := storage.NewMemoryStorage()
 	seedTreehash(t, st, "sha1", "treehash1")
@@ -240,16 +220,15 @@ func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB}),
 	})
 
-	request := changedTargetsRequest()
-	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
-	require.NoError(t, c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")}))
+	responses, err := c.GetChangedTargets(t.Context(), changedTargetsRequest(), testRepositoryConfig)
+	require.NoError(t, err)
 
-	changed, _ := changedTargetsSent(t, sent)
+	changed, _ := changedTargetsFromChunks(responses)
 	require.Len(t, changed, 4, "all targets from second graph should be reported as changed")
 	for _, ct := range changed {
-		assert.Equal(t, pb.CHANGE_TYPE_CHANGED, ct.GetChangeType())
-		assert.Equal(t, int32(0), ct.GetDistance())
-		assert.NotNil(t, ct.GetNewTarget())
+		assert.Equal(t, entity.ChangeTypeChanged, ct.ChangeType)
+		assert.Equal(t, int32(0), ct.Distance)
+		assert.NotNil(t, ct.NewTarget)
 	}
 	assert.EqualValues(t, 1, counterValue(scope, "all_targets_triggered"))
 	assert.EqualValues(t, 0, counterValue(scope, "tgb_native_compare"), "trigger should skip the normal TGB diff")
@@ -257,13 +236,6 @@ func TestGetChangedTargets_TGBAllTargetsTrigger(t *testing.T) {
 
 func TestGetChangedTargets_TGBAllTargetsTriggerPreservesMembershipChanges(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(t.Context())
-	var sent []*pb.GetChangedTargetsResponse
-	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, _ ...interface{}) error {
-		sent = append(sent, resp)
-		return nil
-	}).AnyTimes()
 
 	st := storage.NewMemoryStorage()
 	seedTreehash(t, st, "sha1", "treehash1")
@@ -284,47 +256,46 @@ func TestGetChangedTargets_TGBAllTargetsTriggerPreservesMembershipChanges(t *tes
 		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB}),
 	})
 
-	request := changedTargetsRequest()
-	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
-	require.NoError(t, c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")}))
+	responses, err := c.GetChangedTargets(t.Context(), changedTargetsRequest(), testRepositoryConfig)
+	require.NoError(t, err)
 
-	changed, idToName := changedTargetsSent(t, sent)
+	changed, idToName := changedTargetsFromChunks(responses)
 	require.Len(t, changed, 4)
-	byName := make(map[string]*pb.ChangedTarget, len(changed))
+	byName := make(map[string]entity.ChangedTarget, len(changed))
 	for _, target := range changed {
-		optimized := target.GetNewTarget()
+		optimized := target.NewTarget
 		if optimized == nil {
-			optimized = target.GetOldTarget()
+			optimized = target.OldTarget
 		}
 		require.NotNil(t, optimized)
-		name := idToName[optimized.GetId()]
+		name := idToName[optimized.ID]
 		require.NotEmpty(t, name)
 		byName[name] = target
 	}
 
-	assertChange := func(name string, wantType pb.ChangeType, wantOld, wantNew bool) {
+	assertChange := func(name string, wantType entity.ChangeType, wantOld, wantNew bool) {
 		t.Helper()
-		target := byName[name]
-		require.NotNil(t, target, name)
-		assert.Equal(t, wantType, target.GetChangeType(), name)
-		assert.Equal(t, int32(0), target.GetDistance(), name)
+		target, ok := byName[name]
+		require.True(t, ok, name)
+		assert.Equal(t, wantType, target.ChangeType, name)
+		assert.Equal(t, int32(0), target.Distance, name)
 		if wantOld {
-			require.NotNil(t, target.GetOldTarget(), name)
-			assert.Equal(t, name, idToName[target.GetOldTarget().GetId()])
+			require.NotNil(t, target.OldTarget, name)
+			assert.Equal(t, name, idToName[target.OldTarget.ID])
 		} else {
-			assert.Nil(t, target.GetOldTarget(), name)
+			assert.Nil(t, target.OldTarget, name)
 		}
 		if wantNew {
-			require.NotNil(t, target.GetNewTarget(), name)
-			assert.Equal(t, name, idToName[target.GetNewTarget().GetId()])
+			require.NotNil(t, target.NewTarget, name)
+			assert.Equal(t, name, idToName[target.NewTarget.ID])
 		} else {
-			assert.Nil(t, target.GetNewTarget(), name)
+			assert.Nil(t, target.NewTarget, name)
 		}
 	}
-	assertChange("//app:stable", pb.CHANGE_TYPE_CHANGED, true, true)
-	assertChange("//app:changed", pb.CHANGE_TYPE_CHANGED, true, true)
-	assertChange("//app:new", pb.CHANGE_TYPE_NEW, false, true)
-	assertChange("//legacy:deleted", pb.CHANGE_TYPE_DELETED, true, false)
+	assertChange("//app:stable", entity.ChangeTypeChanged, true, true)
+	assertChange("//app:changed", entity.ChangeTypeChanged, true, true)
+	assertChange("//app:new", entity.ChangeTypeNew, false, true)
+	assertChange("//legacy:deleted", entity.ChangeTypeDeleted, true, false)
 
 	assert.EqualValues(t, 1, counterValue(scope, "all_targets_triggered"))
 	assert.EqualValues(t, 0, counterValue(scope, "tgb_native_compare"), "trigger should skip the normal TGB diff")
@@ -334,13 +305,6 @@ func TestGetChangedTargets_TGBAllTargetsTriggerPreservesMembershipChanges(t *tes
 // proceeds with normal comparison when AllTargetsFileHashes match.
 func TestGetChangedTargets_TGBAllTargetsNoTrigger(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(t.Context())
-	var sent []*pb.GetChangedTargetsResponse
-	stream.EXPECT().Send(gomock.Any()).DoAndReturn(func(resp *pb.GetChangedTargetsResponse, _ ...interface{}) error {
-		sent = append(sent, resp)
-		return nil
-	}).AnyTimes()
 
 	st := storage.NewMemoryStorage()
 	seedTreehash(t, st, "sha1", "treehash1")
@@ -361,11 +325,10 @@ func TestGetChangedTargets_TGBAllTargetsNoTrigger(t *testing.T) {
 		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB}),
 	})
 
-	request := changedTargetsRequest()
-	outputConfig := &pb.OutputConfig{MaxDistance: -1, IncludeHashes: true}
-	require.NoError(t, c.GetChangedTargets(request, outputConfig, stream, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")}))
+	responses, err := c.GetChangedTargets(t.Context(), changedTargetsRequest(), testRepositoryConfig)
+	require.NoError(t, err)
 
-	changed, _ := changedTargetsSent(t, sent)
+	changed, _ := changedTargetsFromChunks(responses)
 	require.Len(t, changed, 1, "only the hash-flipped target should be changed")
 	assert.EqualValues(t, 0, counterValue(scope, "all_targets_triggered"))
 	assert.EqualValues(t, 1, counterValue(scope, "tgb_native_compare"), "should use normal TGB diff")

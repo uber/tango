@@ -18,7 +18,6 @@ import (
 	pb "github.com/uber/tango/tangopb"
 )
 
-// Duplicate of controller/output_filter.go. Temporary.
 // optimizedTargetNeedsStripping reports whether any per-target field would be
 // removed by applyOptimizedTargetOutputConfig under cfg. Used to skip the
 // shallow-copy when nothing would change.
@@ -60,6 +59,31 @@ func applyOptimizedTargetsOutputConfig(src []*pb.OptimizedTarget, cfg *pb.Output
 	out := make([]*pb.OptimizedTarget, len(src))
 	for i, t := range src {
 		out[i] = applyOptimizedTargetOutputConfig(t, cfg)
+	}
+	return out
+}
+
+// applyChangedTargetOutputConfig returns a copy of src with OldTarget and
+// NewTarget filtered per cfg. Returns src unchanged when no stripping is needed.
+func applyChangedTargetOutputConfig(src *pb.ChangedTarget, cfg *pb.OutputConfig) *pb.ChangedTarget {
+	if src == nil || !optimizedTargetNeedsStripping(cfg) {
+		return src
+	}
+	dst := *src
+	dst.OldTarget = applyOptimizedTargetOutputConfig(src.GetOldTarget(), cfg)
+	dst.NewTarget = applyOptimizedTargetOutputConfig(src.GetNewTarget(), cfg)
+	return &dst
+}
+
+// applyChangedTargetsOutputConfig returns a slice with each element filtered
+// per cfg. Returns the original slice unchanged when no stripping is needed.
+func applyChangedTargetsOutputConfig(src []*pb.ChangedTarget, cfg *pb.OutputConfig) []*pb.ChangedTarget {
+	if !optimizedTargetNeedsStripping(cfg) || len(src) == 0 {
+		return src
+	}
+	out := make([]*pb.ChangedTarget, len(src))
+	for i, ct := range src {
+		out[i] = applyChangedTargetOutputConfig(ct, cfg)
 	}
 	return out
 }
