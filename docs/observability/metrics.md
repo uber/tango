@@ -206,6 +206,8 @@ if err == nil {
 
 ### Querying
 
+The handler publishes the `start` and `finish` lifecycle metrics of each RPC under `handler.<operation>`. The controller publishes its phase metrics, such as cache lookups, durations, and `target_count`, under `controller.<operation>`.
+
 ```
 # operation rate
 fetch service:tango name:handler.get_changed_targets.start
