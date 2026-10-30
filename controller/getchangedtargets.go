@@ -101,11 +101,14 @@ func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest
 
 	// Fast path: stream a previously computed result straight from cache.
 	if !entityReq.BypassCache {
-		served, err := c.serveChangedTargetsFromCache(ctx, e, logger, entityReq, outputConfig, stream, repoCfg.RepositoryID, maxDist, start)
+		cached, found, err := c.comparedTargetsFromCache(ctx, e, logger, entityReq, repoCfg.RepositoryID, start)
 		if err != nil {
 			return fmt.Errorf("serve from cache: %w", err)
 		}
-		if served {
+		if found {
+			if err := sendTrimmedChangedTargets(stream, cached, maxDist, outputConfig); err != nil {
+				return fmt.Errorf("send cached response: %w", err)
+			}
 			return nil
 		}
 	}
@@ -144,35 +147,35 @@ func (c *controller) GetChangedTargets(entityReq entity.GetChangedTargetsRequest
 	return nil
 }
 
-// serveChangedTargetsFromCache attempts to stream a previously computed
+// comparedTargetsFromCache attempts to load a previously computed
 // compared-targets result straight from storage. It returns:
-//   - (true, nil)  when a cached result was found and fully sent to the client;
-//   - (false, nil) on a cache miss or a corrupt blob — the caller should recompute;
-//   - (false, err) on an infra failure or a client disconnect that aborts the request.
+//   - (chunks, true, nil) when a cached result was found;
+//   - (nil, false, nil)   on a cache miss or a corrupt blob — the caller should recompute;
+//   - (nil, false, err)   on an infra failure or a client disconnect that aborts the request.
 //
 // readTreehash returns ("", nil) on a cache miss (skip cache, recompute) but any
 // real storage error surfaces here so an infra failure that disables the cache
 // (e.g. a missing-deadline "missing TTL" reject) becomes a visible request failure
 // rather than silent degradation.
-func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request entity.GetChangedTargetsRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetChangedTargetsYARPCServer, repositoryID string, maxDist int32, start time.Time) (bool, error) {
+func (c *controller) comparedTargetsFromCache(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request entity.GetChangedTargetsRequest, repositoryID string, start time.Time) ([]entity.GetChangedTargetsResponse, bool, error) {
 	cacheStart := time.Now()
 	treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.First, request.Second, repositoryID, e, opGetChangedTargets)
 	if err != nil {
-		return false, fmt.Errorf("read revision treehash: %w", err)
+		return nil, false, fmt.Errorf("read revision treehash: %w", err)
 	}
 	if treehash1 == "" || treehash2 == "" {
-		return false, nil
+		return nil, false, nil
 	}
 
 	cacheKey := cachekey.GetComparedTargetsCachePath(repositoryID, treehash1, treehash2, request.ExcludeFilesRegex)
 	cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
 	if cacheErr != nil && !storage.IsNotFound(cacheErr) {
 		logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
-		return false, nil
+		return nil, false, nil
 	}
 	if cachedReader == nil {
 		metrics.RecordCacheLookup(e, opGetChangedTargets, metrics.ComparedTargetsCacheLookup, cacheErr)
-		return false, nil
+		return nil, false, nil
 	}
 
 	// Buffer all responses before sending any. A concurrent goroutine write may have
@@ -184,7 +187,7 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 		if err := ctx.Err(); err != nil {
 			_ = cachedReader.Close()
 			// Client gave up while we were draining the cache. Surface as a user-cancelled error.
-			return false, fmt.Errorf("cache reader: %w", context.Cause(ctx))
+			return nil, false, fmt.Errorf("cache reader: %w", context.Cause(ctx))
 		}
 		var resp entity.GetChangedTargetsResponse
 		resp, readErr = cachedReader.Read()
@@ -202,22 +205,17 @@ func (c *controller) serveChangedTargetsFromCache(ctx context.Context, e *metric
 	if readErr != nil {
 		// Blob is corrupt (likely an incomplete write); recompute.
 		logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
-		return false, nil
+		return nil, false, nil
 	}
 
 	cacheReadDuration := time.Since(cacheStart)
 	logger.Info("GetChangedTargets: Cache hit, streaming from storage",
 		zap.Duration("cache_read_duration", cacheReadDuration),
+		zap.Duration("total_duration", time.Since(start)),
 	)
 	metrics.RecordCacheLookup(e, opGetChangedTargets, metrics.ComparedTargetsCacheLookup, nil)
 	e.DurationHistogram(opGetChangedTargets, "cache_read_duration", metrics.FastDurationBuckets).RecordDuration(cacheReadDuration)
-	if sendErr := sendTrimmedChangedTargets(stream, cached, maxDist, outputConfig); sendErr != nil {
-		return false, fmt.Errorf("send cached response: %w", sendErr)
-	}
-	logger.Info("GetChangedTargets: Successfully streamed from cache",
-		zap.Duration("total_duration", time.Since(start)),
-	)
-	return true, nil
+	return cached, true, nil
 }
 
 // fetchTargetGraphs fetches both revisions' target graphs concurrently. Each
