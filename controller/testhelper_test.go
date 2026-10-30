@@ -26,6 +26,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var testRepositoryConfig = config.RepositoryConfig{RepositoryID: "test-repository"}
+
 func testRepositoryID(string) string {
 	return "test-repository"
 }
