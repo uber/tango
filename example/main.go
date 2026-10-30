@@ -98,8 +98,8 @@ func run() error {
 		return fmt.Errorf("failed to setup orchestrator: %w", err)
 	}
 
-	// Controller (YARPC server implementation). appCtx is forwarded so the
-	// controller's background goroutines are tied to process lifetime.
+	// Controller (business logic). appCtx is forwarded so the controller's
+	// background goroutines are tied to process lifetime.
 	ctrl := controller.NewController(appCtx, controller.Params{
 		Logger:          logger,
 		Storage:         store,

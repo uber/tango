@@ -21,7 +21,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/uber/tango/controller"
 	mock_controller "github.com/uber/tango/controller/controllermock"
 	tangoerrors "github.com/uber/tango/core/errors"
 	pb "github.com/uber/tango/tangopb"
@@ -115,14 +114,15 @@ func TestGetTargetGraph_ValidationError_WiresTangoError(t *testing.T) {
 func TestGetChangedTargets_ValidationError_WiresTangoError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-	stream.EXPECT().Context().Return(context.Background()).AnyTimes()
 
-	c := New(Params{Logger: zaptest.NewLogger(t), RepoConfig: allowAnyRepositoryConfigProvider{}, Controller: controller.NewController(context.Background(), controller.Params{
-		Logger: zaptest.NewLogger(t),
-	})})
+	h := New(Params{
+		Logger:     zaptest.NewLogger(t),
+		Controller: mock_controller.NewMockController(ctrl),
+		RepoConfig: allowAnyRepositoryConfigProvider{},
+	})
 
 	// Missing first revision triggers validation error classified as ERROR_USER.
-	err := c.GetChangedTargets(&pb.GetChangedTargetsRequest{
+	err := h.GetChangedTargets(&pb.GetChangedTargetsRequest{
 		SecondRevision: &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha2"},
 	}, stream)
 	require.Error(t, err)

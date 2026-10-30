@@ -9,7 +9,6 @@ go_library(
         "//config",
         "//core/storage",
         "//entity",
-        "//tangopb",
         "@org_uber_go_mock//gomock",
     ],
 )
