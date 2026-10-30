@@ -31,6 +31,7 @@ import (
 	"log"
 	"os"
 	"runtime/pprof"
+	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/jsonpb"
@@ -44,15 +45,23 @@ import (
 	"go.uber.org/zap"
 )
 
+// stringList is a repeatable string flag.
+type stringList []string
+
+func (l *stringList) String() string     { return strings.Join(*l, " ") }
+func (l *stringList) Set(v string) error { *l = append(*l, v); return nil }
+
 type options struct {
-	bazelCmd   string
-	workspace  string
-	query      string
-	bzlmod     bool
-	cpuProfile string
-	dump       bool
-	runs       int
-	timeout    time.Duration
+	startupOpts stringList
+	bazelArgs   stringList
+	bazelCmd    string
+	workspace   string
+	query       string
+	bzlmod      bool
+	cpuProfile  string
+	dump        bool
+	runs        int
+	timeout     time.Duration
 }
 
 func main() {
@@ -91,7 +100,8 @@ func run(logger *zap.Logger) error {
 
 	req := &bazel.QueryRequest{
 		Query:          opts.query,
-		AdditionalArgs: []string{"--order_output=no", "--proto:locations", "--noproto:default_values"},
+		StartupOptions: opts.startupOpts,
+		AdditionalArgs: append([]string{"--order_output=no", "--proto:locations", "--noproto:default_values"}, opts.bazelArgs...),
 	}
 
 	logger.Info("starting benchmark",
@@ -124,6 +134,8 @@ func parseOptions() options {
 	flag.StringVar(&opts.query, "query", "", "bazel query expression (default: the standard nativeGraphRunner query)")
 	flag.BoolVar(&excludeExternal, "exclude-external", false, "use deps(//...:all-targets) instead of including //external:all-targets")
 	flag.BoolVar(&opts.bzlmod, "bzlmod", true, "mirror nativeGraphRunner for a Bzlmod repo: drop //external from the query, read repo marker hashes, hash with UseBzlmod")
+	flag.Var(&opts.startupOpts, "startup-opt", "bazel startup option, e.g. --output_base=/tmp/ob (repeatable); also used for the marker and repo mapping commands")
+	flag.Var(&opts.bazelArgs, "bazel-arg", "extra bazel query argument, e.g. --repository_cache=/tmp/rc (repeatable); module-resolution flags are also used for the repo mapping command")
 	flag.StringVar(&opts.cpuProfile, "cpuprofile", "", "write a CPU profile of the targethasher phase to this file")
 	flag.BoolVar(&opts.dump, "dump", false, "write the resulting graph chunks to stdout as JSON")
 	flag.IntVar(&opts.runs, "runs", 1, "number of times to run the query (for benchmarking)")
@@ -199,7 +211,7 @@ func loadBzlmodInputs(ctx context.Context, t *phaseTimer, opts options, hashConf
 	t.record("git file hashes", start, "files", len(fileHashes))
 
 	start = time.Now()
-	markerHashes, err := targethasher.ReadRepoMarkerHashes(ctx, opts.workspace, opts.bazelCmd, nil)
+	markerHashes, err := targethasher.ReadRepoMarkerHashes(ctx, opts.workspace, opts.bazelCmd, opts.startupOpts)
 	if err != nil {
 		return fmt.Errorf("read repo marker hashes: %w", err)
 	}
@@ -207,7 +219,7 @@ func loadBzlmodInputs(ctx context.Context, t *phaseTimer, opts options, hashConf
 	t.record("marker read", start, "repos", len(markerHashes))
 
 	start = time.Now()
-	repoMapping, err := bazel.RepoMapping(ctx, opts.workspace, opts.bazelCmd, nil, nil)
+	repoMapping, err := bazel.RepoMapping(ctx, opts.workspace, opts.bazelCmd, opts.startupOpts, opts.bazelArgs)
 	if err != nil {
 		return fmt.Errorf("read repo mapping: %w", err)
 	}
