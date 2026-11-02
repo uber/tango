@@ -22,18 +22,22 @@ import (
 	"github.com/uber-go/tally"
 	mock_controller "github.com/uber/tango/controller/controllermock"
 	pb "github.com/uber/tango/tangopb"
+	tangomock "github.com/uber/tango/tangopb/tangopbmock"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
 
 func TestGetTargetGraphMetrics(t *testing.T) {
 	ts := tally.NewTestScope("", nil)
-	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	ctrl.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	gc := gomock.NewController(t)
+	ctrl := mock_controller.NewMockController(gc)
+	ctrl.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
 	h := New(Params{Logger: zap.NewNop(), Controller: ctrl, RepoConfig: allowAnyRepositoryConfigProvider{}, Scope: ts})
+	stream := tangomock.NewMockTangoServiceGetTargetGraphYARPCServer(gc)
+	stream.EXPECT().Context().Return(t.Context())
 
 	build := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha", Strategy: pb.COMPUTATION_STRATEGY_UNSET}
-	require.NoError(t, h.GetTargetGraph(&pb.GetTargetGraphRequest{BuildDescription: build}, nil))
+	require.NoError(t, h.GetTargetGraph(&pb.GetTargetGraphRequest{BuildDescription: build}, stream))
 
 	snap := ts.Snapshot()
 	assert.Contains(t, snap.Counters(), "handler.get_target_graph.start+repo=test-repository")
