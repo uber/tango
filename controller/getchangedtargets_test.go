@@ -1312,8 +1312,8 @@ func changedTargetsRequest() entity.GetChangedTargetsRequest {
 	}
 }
 
-func TestServeChangedTargetsFromCache(t *testing.T) {
-	t.Run("cache miss returns not-served, no error", func(t *testing.T) {
+func TestComparedTargetsFromCache(t *testing.T) {
+	t.Run("cache miss returns not-found, no error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		st := storagemock.NewMockStorage(ctrl)
 		// Both treehash reads miss, so the cache path is skipped entirely.
@@ -1322,11 +1322,10 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.storage = st
-		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		cached, err := c.comparedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), testRepositoryID("repo:go-code"), time.Now())
 		require.NoError(t, err)
-		assert.False(t, served, "a cache miss must not be served")
+		assert.Nil(t, cached)
 	})
 
 	t.Run("corrupt cached blob falls through to recompute", func(t *testing.T) {
@@ -1335,7 +1334,7 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 		// A two-message gob blob with the second message truncated — mimics an
 		// incomplete concurrent write. The reader returns the first message fine
 		// but errors on the second, and the caller must fall through
-		// (served=false) without sending anything.
+		// without returning anything.
 		var buf bytes.Buffer
 		enc := gob.NewEncoder(&buf)
 		enc.Encode(entity.GetChangedTargetsResponse{ChangedTargets: []entity.ChangedTarget{}})
@@ -1360,15 +1359,13 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.storage = st
-		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-		// No Send expectation: a corrupt blob must not send anything to the client.
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		cached, err := c.comparedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), testRepositoryID("repo:go-code"), time.Now())
 		require.NoError(t, err)
-		assert.False(t, served, "a corrupt blob must trigger recompute, not a partial send")
+		assert.Nil(t, cached)
 	})
 
-	t.Run("clean hit is served", func(t *testing.T) {
+	t.Run("clean hit is returned", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 
 		var buf bytes.Buffer
@@ -1394,12 +1391,10 @@ func TestServeChangedTargetsFromCache(t *testing.T) {
 
 		c := newTestController(zaptest.NewLogger(t))
 		c.storage = st
-		stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(ctrl)
-		stream.EXPECT().Send(gomock.Any()).Return(nil).Times(2)
 
-		served, err := c.serveChangedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), &pb.OutputConfig{MaxDistance: -1}, stream, testRepositoryID("repo:go-code"), -1, time.Now())
+		got, err := c.comparedTargetsFromCache(t.Context(), c.emitter, c.logger, changedTargetsRequest(), testRepositoryID("repo:go-code"), time.Now())
 		require.NoError(t, err)
-		assert.True(t, served, "a clean cache hit must be served")
+		assert.Len(t, got, 2)
 	})
 }
 
