@@ -24,7 +24,6 @@ import (
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/observability/metrics"
 	"github.com/uber/tango/orchestrator"
-	pb "github.com/uber/tango/tangopb"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
@@ -58,7 +57,7 @@ type controller struct {
 // configured repository that the handler resolved for the request.
 type Controller interface {
 	GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest, repo config.RepositoryConfig) (storage.GraphReader, error)
-	GetChangedTargets(request entity.GetChangedTargetsRequest, outputConfig *pb.OutputConfig, stream pb.TangoServiceGetChangedTargetsYARPCServer, repo config.RepositoryConfig) error
+	GetChangedTargets(ctx context.Context, req entity.GetChangedTargetsRequest, repo config.RepositoryConfig) ([]entity.GetChangedTargetsResponse, error)
 }
 
 // NewController creates a new controller. appCtx is cancelled on process
@@ -81,7 +80,7 @@ func NewController(appCtx context.Context, p Params) Controller {
 }
 
 // linkRequestCtx returns a context derived from reqCtx that is also cancelled
-// when c.appCtx is cancelled. Use it at the top of every streaming handler
+// when c.appCtx is cancelled. Use it at the top of every Controller method
 // (and pass the returned context to all downstream calls) so a request is
 // aborted both by the client disconnecting (reqCtx) and by the server
 // beginning to shut down (appCtx).

@@ -46,12 +46,15 @@ func TestGetTargetGraphMetrics(t *testing.T) {
 
 func TestGetChangedTargetsMetrics(t *testing.T) {
 	ts := tally.NewTestScope("", nil)
-	ctrl := mock_controller.NewMockController(gomock.NewController(t))
-	ctrl.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	gc := gomock.NewController(t)
+	ctrl := mock_controller.NewMockController(gc)
+	ctrl.EXPECT().GetChangedTargets(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
 	h := New(Params{Logger: zap.NewNop(), Controller: ctrl, RepoConfig: allowAnyRepositoryConfigProvider{}, Scope: ts})
+	stream := tangomock.NewMockTangoServiceGetChangedTargetsYARPCServer(gc)
+	stream.EXPECT().Context().Return(t.Context())
 
 	build := &pb.BuildDescription{Remote: "repo:go-code", BaseSha: "sha", Strategy: pb.COMPUTATION_STRATEGY_UNSET}
-	require.NoError(t, h.GetChangedTargets(&pb.GetChangedTargetsRequest{FirstRevision: build, SecondRevision: build}, nil))
+	require.NoError(t, h.GetChangedTargets(&pb.GetChangedTargetsRequest{FirstRevision: build, SecondRevision: build}, stream))
 
 	snap := ts.Snapshot()
 	assert.Contains(t, snap.Counters(), "handler.get_changed_targets.start+repo=test-repository")
