@@ -308,7 +308,7 @@ service:
 		cfg, err := ParseBytes(base(`
 graph:
   default:
-    format: gob
+    format: tgb
   uber/go-code:
     format: tgb
     shadow_compare: true
@@ -322,7 +322,7 @@ graph:
 
 		gc, err = cfg.GetGraphConfig("git@github:uber/other-repo")
 		require.NoError(t, err)
-		assert.Equal(t, GraphFormatGob, gc.Format)
+		assert.Equal(t, GraphFormatTGB, gc.Format)
 		assert.False(t, gc.ShadowCompare)
 	})
 
@@ -338,12 +338,14 @@ graph:
 		require.ErrorContains(t, err, "no graph config")
 	})
 
-	t.Run("rejects unknown format", func(t *testing.T) {
-		_, err := ParseBytes(base(`
+	for _, format := range []string{"gob", "msgpack"} {
+		t.Run("rejects format "+format, func(t *testing.T) {
+			_, err := ParseBytes(base(`
 graph:
   default:
-    format: msgpack
+    format: ` + format + `
 `))
-		require.ErrorContains(t, err, "format")
-	})
+			require.Error(t, err)
+		})
+	}
 }
