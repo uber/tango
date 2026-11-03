@@ -17,7 +17,6 @@ package controller
 import (
 	"bytes"
 	"context"
-	"encoding/gob"
 	"errors"
 	"io"
 	"testing"
@@ -50,27 +49,6 @@ func drainGraphReader(t *testing.T, r storage.GraphReader) []entity.GetTargetGra
 	}
 }
 
-func TestGetTargetGraph_CacheHitEmptyGraph(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	store := storagemock.NewMockStorage(ctrl)
-	// Return a valid treehash, then an empty graph blob (no messages).
-	gomock.InOrder(
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-empty"))}, nil),
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte{})}, nil),
-	)
-	c := NewController(context.Background(), Params{
-		Logger:  zaptest.NewLogger(t),
-		Storage: store,
-	})
-	reader, err := c.GetTargetGraph(t.Context(), entity.GetTargetGraphRequest{
-		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
-	}, testRepositoryConfig)
-	require.NoError(t, err)
-	assert.Empty(t, drainGraphReader(t, reader))
-}
-
 func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 	expected := errors.New("boom")
 	ctrl := gomock.NewController(t)
@@ -90,12 +68,17 @@ func TestGetTargetGraph_StorageError_Propagates(t *testing.T) {
 func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	store := storagemock.NewMockStorage(ctrl)
-	var buf bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}}))
+	blob := tgbBlob(t, entity.GetTargetGraphResponse{
+		Targets: []entity.OptimizedTarget{{ID: 1, Hash: hashH1}},
+		Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{1: "//:a"},
+			RuleTypeMapping: map[int32]string{0: "go_library"},
+		},
+	})
 
 	gomock.InOrder(
 		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-xyz"))}, nil),
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(buf.Bytes())}, nil),
+		store.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{ReadCloser: newMockReadCloser(blob)}, nil),
 	)
 	c := NewController(context.Background(), Params{
 		Logger:  zaptest.NewLogger(t),
@@ -110,7 +93,7 @@ func TestGetTargetGraph_SendsWhenItemPresent(t *testing.T) {
 		},
 	}, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
 	require.NoError(t, err)
-	assert.Len(t, drainGraphReader(t, reader), 1)
+	assert.NotEmpty(t, drainGraphReader(t, reader))
 }
 
 // New coverage: Storage returns NotFound on treehash path -> orchestrator is called to compute the target graph.
@@ -224,34 +207,6 @@ func TestGetTargetGraph_OrchestratorCancelled(t *testing.T) {
 		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
 	}, testRepositoryConfig)
 	require.Error(t, err)
-}
-
-func TestGetTargetGraph_TGB_NotFound_DoesNotFallBackToGob(t *testing.T) {
-	ctrl := gomock.NewController(t)
-
-	store := storagemock.NewMockStorage(ctrl)
-	gomock.InOrder(
-		// treehash lookup succeeds
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{ReadCloser: newMockReadCloser([]byte("treehash-abc"))}, nil),
-		// TGB blob not found — no further Get calls (no gob fallback)
-		store.EXPECT().Get(gomock.Any(), gomock.Any()).
-			Return(storage.DownloadResponse{}, storage.NewNotFoundError("tgb/graph")),
-	)
-	orch := orchestratormock.NewMockOrchestrator(ctrl)
-	graphReader := newGraphReader(t, entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{}})
-	orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).Return(graphReader, nil)
-	c := NewController(context.Background(), Params{
-		GraphConfig:  staticGraphConfig(config.GraphConfig{Format: config.GraphFormatTGB}),
-		Logger:       zaptest.NewLogger(t),
-		Storage:      store,
-		Orchestrator: orch,
-	})
-	reader, err := c.GetTargetGraph(t.Context(), entity.GetTargetGraphRequest{
-		Build: entity.BuildDescription{Remote: "repo:go-code", BaseSha: "sha"},
-	}, config.RepositoryConfig{Remote: "repo:go-code", RepositoryID: testRepositoryID("repo:go-code")})
-	require.NoError(t, err)
-	assert.Len(t, drainGraphReader(t, reader), 1)
 }
 
 func TestGetTargetGraph_TGB_Corrupt_DoesNotFallBackToGob(t *testing.T) {

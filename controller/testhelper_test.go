@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
+	"github.com/uber/tango/internal/tgbdiff"
 	"github.com/uber/tango/observability/metrics"
 	"go.uber.org/zap"
 )
@@ -58,4 +60,12 @@ func newGraphReader(t *testing.T, chunks ...entity.GetTargetGraphResponse) stora
 	reader, err := storage.NewGraphReader(t.Context(), st, "test-graph")
 	require.NoError(t, err)
 	return reader
+}
+
+// tgbBlob encodes entity chunks as a TGB blob.
+func tgbBlob(t *testing.T, chunks ...entity.GetTargetGraphResponse) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	require.NoError(t, tgbdiff.EncodeChunks(chunks, &buf))
+	return buf.Bytes()
 }

@@ -102,10 +102,10 @@ func (c *controller) linkRequestCtx(reqCtx context.Context) (context.Context, co
 }
 
 // graphFormatFor returns the configured graph format for the given remote,
-// defaulting to gob when no GraphConfigProvider is set.
+// defaulting to tgb when no GraphConfigProvider is set.
 func (c *controller) graphFormatFor(remote string) (string, error) {
 	if c.graphConfig == nil {
-		return config.GraphFormatGob, nil
+		return config.GraphFormatTGB, nil
 	}
 	gc, err := c.graphConfig.GetGraphConfig(remote)
 	if err != nil {

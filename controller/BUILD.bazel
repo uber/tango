@@ -46,6 +46,7 @@ go_test(
         "//core/storage",
         "//core/storage/storagemock",
         "//entity",
+        "//internal/tgbdiff",
         "//observability/metrics",
         "//orchestrator/orchestratormock",
         "@com_github_stretchr_testify//assert",
