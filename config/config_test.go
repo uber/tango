@@ -295,12 +295,12 @@ service:
 ` + extra)
 	}
 
-	t.Run("defaults to gob when graph section omitted", func(t *testing.T) {
+	t.Run("defaults to tgb when graph section omitted", func(t *testing.T) {
 		cfg, err := ParseBytes(base(""))
 		require.NoError(t, err)
 		gc, err := cfg.GetGraphConfig("git@github:uber/tango")
 		require.NoError(t, err)
-		assert.Equal(t, GraphFormatGob, gc.Format)
+		assert.Equal(t, GraphFormatTGB, gc.Format)
 		assert.False(t, gc.ShadowCompare)
 	})
 

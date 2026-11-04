@@ -39,5 +39,5 @@ service:
 # explicit entry. Each entry's format must be "gob" or "tgb".
 graph:
   default:
-    format: "gob"
+    format: "tgb"
     shadow_compare: false

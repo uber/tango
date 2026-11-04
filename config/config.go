@@ -114,7 +114,7 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 	// --- graph config validation and defaults ---
 	if len(config.Graph) == 0 {
 		config.Graph = map[string]GraphConfig{
-			"default": {Format: GraphFormatGob},
+			"default": {Format: GraphFormatTGB},
 		}
 	}
 	for name, gc := range config.Graph {

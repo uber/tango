@@ -20,9 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
-
-	"encoding/gob"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,20 +38,34 @@ import (
 	workspacemock "github.com/uber/tango/core/workspace/workspacemock"
 	"github.com/uber/tango/entity"
 	graphmock "github.com/uber/tango/graphrunner/mock"
+	"github.com/uber/tango/internal/tgbdiff"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap/zaptest"
 )
+
+// tgbGraphBlob returns a TGB blob that holds a single target.
+func tgbGraphBlob(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	require.NoError(t, tgbdiff.EncodeChunks([]entity.GetTargetGraphResponse{{
+		Targets: []entity.OptimizedTarget{{ID: 1, Hash: strings.Repeat("ab", 20)}},
+		Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{1: "//:a"},
+			RuleTypeMapping: map[int32]string{0: "go_library"},
+		},
+	}}, &buf))
+	return buf.Bytes()
+}
 
 func TestNative_GetTargetGraph_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	st := storagemock.NewMockStorage(ctrl)
-	var buf bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{{ID: 1}}}))
+	blob := tgbGraphBlob(t)
 	// Single fetch by remote/treehash for the graph
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
-		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
+		ReadCloser: io.NopCloser(bytes.NewReader(blob)),
 	}, nil)
 
 	// Inject git and workspace
@@ -83,7 +96,9 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	chunk, rerr := reader.Read()
 	require.NoError(t, rerr)
 	require.NotNil(t, chunk.Targets)
-	_, rerr = reader.Read()
+	for rerr == nil {
+		_, rerr = reader.Read()
+	}
 	assert.Equal(t, io.EOF, rerr)
 }
 
@@ -95,16 +110,17 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	st := storagemock.NewMockStorage(ctrl)
 	// First attempt returns NotFound to trigger compute path.
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
+	// The gob fallback read also misses.
+	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
 	// Expect writes (graph stream and background treehash-mapping upload).
 	st.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.UploadRequest) error {
 		_, err := io.Copy(io.Discard, req.Reader)
 		return err
 	}).MinTimes(1).MaxTimes(3)
 	// After compute, second read returns a valid delimited stream with one message
-	var buf bytes.Buffer
-	_ = gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{{ID: 1}}})
+	blob := tgbGraphBlob(t)
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
-		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
+		ReadCloser: io.NopCloser(bytes.NewReader(blob)),
 	}, nil)
 	g := gitmock.NewMockInterface(ctrl)
 	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th", nil)
@@ -211,8 +227,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	st := storagemock.NewMockStorage(ctrl)
-	var buf bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{{ID: 1}}}))
+	blob := tgbGraphBlob(t)
 
 	// git mock must handle Apply sequence from workspace.NewRequest for PR 123
 	g := gitmock.NewMockInterface(ctrl)
@@ -220,7 +235,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("treehash", nil)
 	// Single storage fetch for graph by remote/treehash
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
-		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
+		ReadCloser: io.NopCloser(bytes.NewReader(blob)),
 	}, nil)
 	ws := workspacemock.NewMockWorkspace(ctrl)
 	ws.EXPECT().Path().Return("/tmp/ws")
