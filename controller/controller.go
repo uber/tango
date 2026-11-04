@@ -101,19 +101,6 @@ func (c *controller) linkRequestCtx(reqCtx context.Context) (context.Context, co
 	}
 }
 
-// graphFormatFor returns the configured graph format for the given remote,
-// defaulting to tgb when no GraphConfigProvider is set.
-func (c *controller) graphFormatFor(remote string) (string, error) {
-	if c.graphConfig == nil {
-		return config.GraphFormatTGB, nil
-	}
-	gc, err := c.graphConfig.GetGraphConfig(remote)
-	if err != nil {
-		return "", err
-	}
-	return gc.Format, nil
-}
-
 // shadowCompareFor returns whether shadow comparison is enabled for the given
 // remote. Returns false when no GraphConfigProvider is set or the remote has
 // no config entry.
