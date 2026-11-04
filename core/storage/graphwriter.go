@@ -23,12 +23,6 @@ import (
 	"github.com/uber/tango/entity"
 )
 
-// WriteGraphStream writes entity.GetTargetGraphResponse values to storage
-// as a gob-encoded stream, allowing streaming reads via NewGraphReader.
-func WriteGraphStream(ctx context.Context, st Storage, key string, chunks []entity.GetTargetGraphResponse) error {
-	return writeStream(ctx, st, key, chunks)
-}
-
 // WriteChangedTargetsStream writes entity.GetChangedTargetsResponse values to storage
 // as a gob-encoded stream, allowing streaming reads via NewChangedTargetsReader.
 func WriteChangedTargetsStream(ctx context.Context, st Storage, key string, responses []entity.GetChangedTargetsResponse) error {

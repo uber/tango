@@ -107,7 +107,7 @@ func ResultToTargetGraph(ctx context.Context, result targethasher.Result) ([]ent
 //
 // Callers that need to interleave or size chunks differently can use
 // ResultToTargetGraph directly; this is the convenience path for the common
-// "map, split, hand to WriteGraphStream" flow.
+// "map, split, hand to WriteTGBGraph" flow.
 func ResultToGraphChunks(ctx context.Context, result targethasher.Result, maxBytes int) ([]entity.GetTargetGraphResponse, error) {
 	targets, meta, err := ResultToTargetGraph(ctx, result)
 	if err != nil {

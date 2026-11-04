@@ -1117,8 +1117,8 @@ func TestFetchTargetGraphs(t *testing.T) {
 
 		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
 		require.NoError(t, err)
-		require.Len(t, first.chunks, 1)
-		require.Len(t, second.chunks, 1)
+		require.NotNil(t, first.tgb)
+		require.NotNil(t, second.tgb)
 	})
 
 	t.Run("first revision failure names graph #1", func(t *testing.T) {
@@ -1149,12 +1149,12 @@ func TestFetchTargetGraphs(t *testing.T) {
 		assert.NotErrorIs(t, cause, context.Canceled, "sibling cancellation should carry a distinct cause, not the generic context.Canceled")
 	})
 
-	t.Run("empty reader yields no-chunks error", func(t *testing.T) {
+	t.Run("nil reader yields no-chunks error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, _ entity.GetTargetGraphRequest) (storage.GraphReader, error) {
-				return newGraphReader(t), nil
+				return nil, nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))

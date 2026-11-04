@@ -33,11 +33,11 @@ import (
 var ErrCorruptTGB = errors.New("corrupt TGB graph blob")
 
 // WriteTGBGraph merges a chunked target graph stream and writes it to storage
-// under key as a single TGB blob (see internal/tgb for the format). Unlike
-// WriteGraphStream, the payload cannot be produced incrementally — the
-// encoder needs the whole graph — but the chunks are already fully
-// materialized at every call site, and the encoded blob still streams to
-// storage through a pipe rather than being buffered in full.
+// under key as a single TGB blob (see internal/tgb for the format). The
+// payload cannot be produced incrementally — the encoder needs the whole
+// graph — but the chunks are already fully materialized at every call site,
+// and the encoded blob still streams to storage through a pipe rather than
+// being buffered in full.
 func WriteTGBGraph(ctx context.Context, st Storage, key string, chunks []entity.GetTargetGraphResponse) error {
 	pr, pw := io.Pipe()
 	writerErr := make(chan error, 1)
@@ -77,8 +77,7 @@ var _ GraphReader = (*TGBGraphReader)(nil)
 // NewTGBGraphReader opens the TGB blob at key. A missing blob returns the
 // storage backend's not-found error (check with IsNotFound); a blob that
 // exists but fails TGB validation returns an error wrapping ErrCorruptTGB.
-// maxBytes bounds each decoded chunk's serialized size, mirroring the chunk
-// sizing of the gob write path.
+// maxBytes bounds each decoded chunk's serialized size.
 func NewTGBGraphReader(ctx context.Context, st Storage, key string, maxBytes int) (*TGBGraphReader, error) {
 	resp, err := st.Get(ctx, DownloadRequest{Key: key})
 	if err != nil {
