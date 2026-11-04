@@ -110,8 +110,6 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	st := storagemock.NewMockStorage(ctrl)
 	// First attempt returns NotFound to trigger compute path.
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
-	// The gob fallback read also misses.
-	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{}, storage.NewNotFoundError("missing"))
 	// Expect writes (graph stream and background treehash-mapping upload).
 	st.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, req storage.UploadRequest) error {
 		_, err := io.Copy(io.Discard, req.Reader)
@@ -365,10 +363,9 @@ func TestNative_GetTargetGraph_LeaseGenericError_Infra(t *testing.T) {
 	assert.Equal(t, tangoerrors.ErrorInfra, tangoerrors.GetErrorCode(err))
 }
 
-// TestNative_GetTargetGraph_TGBFormat: with graph_format=tgb, a cache miss
-// computes the graph, writes it as a TGB blob under the tgb key (never under
-// the gob key), and returns a TGB-backed reader whose chunk stream carries
-// the computed target.
+// TestNative_GetTargetGraph_TGBFormat: a cache miss computes the graph,
+// writes it as a TGB blob under the tgb key, and returns a TGB-backed reader
+// whose chunk stream carries the computed target.
 func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -398,9 +395,6 @@ func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	}, nil)
 
 	cfg := testConfig(t)
-	cfg.Graph = map[string]config.GraphConfig{
-		"default": {Format: config.GraphFormatTGB},
-	}
 
 	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
@@ -437,12 +431,8 @@ func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	}
 	assert.True(t, sawTarget, "chunk stream should carry the computed target")
 
-	// The blob landed under the tgb key only; nothing was written to the gob key.
+	// The blob landed under the tgb key.
 	tgbKey := cachekey.GetTGBGraphByTreeHash("tango", "th", build.Strategy, nil)
 	_, err = storage.NewTGBGraphReader(context.Background(), st, tgbKey, config.DefaultMaxMessageBytes)
 	require.NoError(t, err)
-	gobKey := cachekey.GetGraphByTreeHash("tango", "th", build.Strategy, nil)
-	_, err = storage.NewGraphReader(context.Background(), st, gobKey)
-	require.Error(t, err)
-	assert.True(t, storage.IsNotFound(err), "gob key must stay empty under graph_format=tgb")
 }
