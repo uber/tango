@@ -119,9 +119,9 @@ func ParseBytes(yamlBytes []byte) (*Config, error) {
 	}
 	for name, gc := range config.Graph {
 		switch gc.Format {
-		case GraphFormatGob, GraphFormatTGB:
+		case GraphFormatTGB:
 		default:
-			return nil, fmt.Errorf("unsupported graph.%s.format: %q (supported: %q, %q)", name, gc.Format, GraphFormatGob, GraphFormatTGB)
+			return nil, fmt.Errorf("unsupported graph.%s.format: %q (supported: %q)", name, gc.Format, GraphFormatTGB)
 		}
 	}
 

@@ -16,8 +16,6 @@ package config
 
 // Supported GraphConfig.Format values.
 const (
-	// GraphFormatGob is the legacy gob-encoded chunk stream format.
-	GraphFormatGob = "gob"
 	// GraphFormatTGB is the columnar TGB blob format (internal/tgb).
 	GraphFormatTGB = "tgb"
 )
@@ -25,18 +23,15 @@ const (
 // GraphConfig holds graph storage settings for a single repository or the
 // "default" fallback. Each entry in the top-level graph map is one of these.
 type GraphConfig struct {
-	// Format selects the storage format for cached target-graph blobs:
-	// GraphFormatGob or GraphFormatTGB. The two formats live under different
-	// cache keys, so flipping the value never reinterprets existing blobs —
-	// a flip means cache misses that recompute, nothing more. With
-	// GraphFormatTGB, reads still fall back to gob entries written before
-	// the flip.
+	// Format selects the storage format for cached target-graph blobs.
+	// GraphFormatTGB is the only supported value. Each format has its own
+	// cache key, so a new format never reinterprets existing blobs.
 	Format string `yaml:"format"`
-	// ShadowCompare, with GraphFormatTGB, additionally runs the incumbent
-	// targetdiff comparison over the same two graphs in a background
-	// goroutine on every GetChangedTargets request and emits a mismatch
-	// metric (plus a detailed log) when the TGB path's result diverges.
-	// It has no effect on what is served. Meaningless under GraphFormatGob.
+	// ShadowCompare additionally runs the incumbent targetdiff comparison
+	// over the same two graphs in a background goroutine on every
+	// GetChangedTargets request and emits a mismatch metric (plus a detailed
+	// log) when the TGB path's result diverges. It has no effect on what is
+	// served.
 	ShadowCompare bool `yaml:"shadow_compare"`
 }
 
