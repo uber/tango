@@ -1,6 +1,6 @@
 module github.com/uber/tango
 
-go 1.27.0
+go 1.27.3
 
 require (
 	github.com/bazelbuild/buildtools v0.0.0-20250930140053-2eb4fccefb52
