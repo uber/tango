@@ -40,7 +40,7 @@ import (
 	graphmock "github.com/uber/tango/graphrunner/mock"
 	"github.com/uber/tango/internal/tgbdiff"
 	"go.uber.org/mock/gomock"
-	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap"
 )
 
 // tgbGraphBlob returns a TGB blob that holds a single target.
@@ -82,7 +82,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -139,7 +139,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		GraphRunner: graphRunner,
 		Config:      testConfig(t),
@@ -176,7 +176,7 @@ func TestNative_GetTargetGraph_UnknownStrategy_UserError(t *testing.T) {
 	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -211,7 +211,7 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -245,7 +245,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -279,7 +279,7 @@ func TestNative_GetTargetGraph_InvalidChangeURI_UserError(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -332,7 +332,7 @@ func TestNative_GetTargetGraph_LeasePoolTimeout_InfraRetryable(t *testing.T) {
 
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
@@ -352,7 +352,7 @@ func TestNative_GetTargetGraph_LeaseGenericError_Infra(t *testing.T) {
 
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
@@ -399,7 +399,7 @@ func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		GraphRunner: graphRunner,
 		Config:      cfg,
