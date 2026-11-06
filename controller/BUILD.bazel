@@ -13,7 +13,6 @@ go_library(
     deps = [
         "//config",
         "//core/cachekey",
-        "//core/errors",
         "//core/storage",
         "//entity",
         "//internal/mapper/idmapper",

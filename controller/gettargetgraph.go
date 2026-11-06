@@ -23,7 +23,6 @@ import (
 
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/cachekey"
-	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/observability/metrics"
 
@@ -52,10 +51,6 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 		zap.String("base_sha", req.Build.BaseSha),
 		zap.Stringer("strategy", req.Build.Strategy),
 	)
-	graphFormat, err := c.graphFormatFor(req.Build.Remote)
-	if err != nil {
-		return nil, tangoerrors.NewUser(fmt.Errorf("resolve graph config: %w", err))
-	}
 	if !req.BypassCache {
 		// Look up the the git treehash based on cache path
 		treehashCachePath := cachekey.GetTreehashCachePath(repositoryID, req.Build)
@@ -78,7 +73,7 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 			logger.Info("getGraph: treehash found")
 			// Download the target graph based on treehash.
 			storageStart := time.Now()
-			graphReader, err := c.readCachedGraph(ctx, logger, graphFormat, repositoryID, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
+			graphReader, err := c.readCachedGraph(ctx, logger, repositoryID, string(treehashBytes), req.Build.Strategy, req.ExcludeFilesRegex)
 			if ctx.Err() != nil {
 				err = context.Cause(ctx)
 			}
@@ -115,19 +110,14 @@ func (c *controller) getGraph(ctx context.Context, e *metrics.Emitter, req entit
 	return graphReader, nil
 }
 
-// readCachedGraph opens the cached graph for a resolved treehash.
-// TGB-configured repos read only TGB; corrupt or missing TGB propagates
-// — the recovery is to recompute (which overwrites), not to serve a stale
-// gob blob from an earlier format era.
-func (c *controller) readCachedGraph(ctx context.Context, logger *zap.Logger, graphFormat, repositoryID, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) (storage.GraphReader, error) {
-	if graphFormat == config.GraphFormatTGB {
-		tgbPath := cachekey.GetTGBGraphByTreeHash(repositoryID, treehash, strategy, excludeFilesRegex)
-		graphReader, err := storage.NewTGBGraphReader(ctx, c.storage, tgbPath, c.maxMessageBytes)
-		if err != nil && errors.Is(err, storage.ErrCorruptTGB) {
-			logger.Warn("readCachedGraph: corrupt TGB blob", zap.String("path", tgbPath), zap.Error(err))
-		}
-		return graphReader, err
+// readCachedGraph opens the cached graph for a resolved treehash. A corrupt
+// or missing blob propagates; the recovery is to recompute, which overwrites
+// the entry.
+func (c *controller) readCachedGraph(ctx context.Context, logger *zap.Logger, repositoryID, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) (storage.GraphReader, error) {
+	tgbPath := cachekey.GetTGBGraphByTreeHash(repositoryID, treehash, strategy, excludeFilesRegex)
+	graphReader, err := storage.NewTGBGraphReader(ctx, c.storage, tgbPath, c.maxMessageBytes)
+	if err != nil && errors.Is(err, storage.ErrCorruptTGB) {
+		logger.Warn("readCachedGraph: corrupt TGB blob", zap.String("path", tgbPath), zap.Error(err))
 	}
-	gobPath := cachekey.GetGraphByTreeHash(repositoryID, treehash, strategy, excludeFilesRegex)
-	return storage.NewGraphReader(ctx, c.storage, gobPath)
+	return graphReader, err
 }

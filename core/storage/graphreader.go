@@ -14,25 +14,11 @@
 
 package storage
 
-import (
-	"context"
-
-	"github.com/uber/tango/entity"
-)
+import "github.com/uber/tango/entity"
 
 // GraphReader streams entity.GetTargetGraphResponse values from a stored
 // target graph.
 type GraphReader interface {
 	Read() (entity.GetTargetGraphResponse, error)
 	Close() error
-}
-
-// NewGraphReader opens the stored target graph at key and returns a
-// GraphReader that yields entity.GetTargetGraphResponse values.
-func NewGraphReader(ctx context.Context, st Storage, key string) (GraphReader, error) {
-	r, err := newReader[entity.GetTargetGraphResponse](ctx, st, key)
-	if err != nil {
-		return nil, err
-	}
-	return r, nil
 }

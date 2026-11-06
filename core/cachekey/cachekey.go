@@ -28,27 +28,12 @@ import (
 	"github.com/uber/tango/internal/url"
 )
 
-// GetGraphByTreeHash returns the cache path for the target graph by treehash.
-// strategy is part of the key because different computation strategies (e.g.
-// SHELL vs NATIVE) can produce different graphs from the same tree state.
-// excludeFilesRegex is folded into the key when non-empty (it affects
-// computation). Empty ⇒ legacy path unchanged.
-func GetGraphByTreeHash(repositoryID, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) string {
-	path := filepath.Join(repositoryID, "graphs", treehash, strategy.String())
-	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
-		path += "_requests-options-" + hash
-	}
-	return path
-}
-
 // GetTGBGraphByTreeHash returns the cache path for the TGB-format target
-// graph blob. It is the GetGraphByTreeHash key with a "-tgb" suffix on the
-// strategy segment, so the two formats never share a key: binaries that
-// predate TGB never construct this path and therefore never see a TGB blob,
-// and a GraphFormat flip changes which keys are consulted, never how an
-// existing blob is interpreted. The suffix keeps the key a sibling of the
-// gob key rather than a child — on the disk backend a key is a file, and a
-// child key would need the gob file to be a directory.
+// graph blob. strategy is part of the key because different computation
+// strategies (e.g. SHELL vs NATIVE) can produce different graphs from the
+// same tree state. excludeFilesRegex is folded into the key when non-empty
+// (it affects computation). The "-tgb" suffix keeps the key distinct from the
+// legacy gob blobs stored under the bare strategy segment.
 func GetTGBGraphByTreeHash(repositoryID, treehash string, strategy entity.ComputationStrategy, excludeFilesRegex []string) string {
 	path := filepath.Join(repositoryID, "graphs", treehash, strategy.String()+"-tgb")
 	if hash := hashExcludeFilesRegex(excludeFilesRegex); hash != "" {
