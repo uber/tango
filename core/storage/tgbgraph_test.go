@@ -16,6 +16,7 @@ package storage_test
 
 import (
 	"bytes"
+	"encoding/gob"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -168,7 +169,12 @@ func TestTGBGraphReaderCorruptBlobs(t *testing.T) {
 	}
 	put("truncated", blob[:len(blob)/2])
 	put("zero-length", nil)
-	require.NoError(t, storage.WriteGraphStream(t.Context(), st, "gob-under-tgb-key", tgbTestChunks()))
+	var gobBlob bytes.Buffer
+	enc := gob.NewEncoder(&gobBlob)
+	for _, chunk := range tgbTestChunks() {
+		require.NoError(t, enc.Encode(chunk))
+	}
+	put("gob-under-tgb-key", gobBlob.Bytes())
 
 	for _, key := range []string{"truncated", "zero-length", "gob-under-tgb-key"} {
 		_, err := storage.NewTGBGraphReader(t.Context(), st, key, 1<<20)

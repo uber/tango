@@ -52,12 +52,12 @@ func staticGraphConfig(gc config.GraphConfig) config.GraphConfigProvider {
 }
 
 // newGraphReader builds a storage.GraphReader from entity chunks
-// by writing JSON to in-memory storage and reading back.
+// by writing a TGB blob to in-memory storage and reading it back.
 func newGraphReader(t *testing.T, chunks ...entity.GetTargetGraphResponse) storage.GraphReader {
 	t.Helper()
 	st := storage.NewMemoryStorage()
-	require.NoError(t, storage.WriteGraphStream(t.Context(), st, "test-graph", chunks))
-	reader, err := storage.NewGraphReader(t.Context(), st, "test-graph")
+	require.NoError(t, storage.WriteTGBGraph(t.Context(), st, "test-graph", chunks))
+	reader, err := storage.NewTGBGraphReader(t.Context(), st, "test-graph", config.DefaultMaxMessageBytes)
 	require.NoError(t, err)
 	return reader
 }
