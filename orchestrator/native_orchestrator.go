@@ -171,16 +171,10 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	if err != nil {
 		return nil, classifyGitError(fmt.Errorf("compute treehash for repository %s at %s: %w", repoCfg.RepositoryID, build.BaseSha, err))
 	}
-	treehashPath := cachekey.GetGraphByTreeHash(repoCfg.RepositoryID, treehash, build.Strategy, req.ExcludeFilesRegex)
-	graphCfg, err := b.config.GetGraphConfig(build.Remote)
-	if err != nil {
-		return nil, tangoerrors.NewUser(fmt.Errorf("resolve graph config: %w", err))
-	}
-	useTGB := graphCfg.Format == config.GraphFormatTGB
 	tgbPath := cachekey.GetTGBGraphByTreeHash(repoCfg.RepositoryID, treehash, build.Strategy, req.ExcludeFilesRegex)
 	if !req.BypassCache {
 		cacheReadStart := time.Now()
-		graphReader, err := b.readCachedGraph(ctx, logger, useTGB, tgbPath, treehashPath)
+		graphReader, err := b.readCachedGraph(ctx, logger, tgbPath)
 		recordStep(e, "cache_read_duration", cacheReadStart, metrics.FastDurationBuckets)
 		metrics.RecordCacheLookup(e, _opGetTargetGraph, metrics.GraphCacheLookup, err)
 		if err == nil {
@@ -253,49 +247,31 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		return nil, fmt.Errorf("convert target graph: %w", err)
 	}
 	cacheWriteStart := time.Now()
-	if useTGB {
-		if err := storage.WriteTGBGraph(ctx, b.storage, tgbPath, chunks); err != nil {
-			return nil, fmt.Errorf("write TGB graph to storage at %s: %w", tgbPath, err)
-		}
-		recordStep(e, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
-		graphReader, err := storage.NewTGBGraphReader(ctx, b.storage, tgbPath, b.config.Service.MaxMessageBytes)
-		if err != nil {
-			return nil, fmt.Errorf("create TGB graph reader at %s: %w", tgbPath, err)
-		}
-		logger.Info("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
-		return graphReader, nil
-	}
-	err = storage.WriteGraphStream(ctx, b.storage, treehashPath, chunks)
-	if err != nil {
-		return nil, fmt.Errorf("write graph to storage at %s: %w", treehashPath, err)
+	if err := storage.WriteTGBGraph(ctx, b.storage, tgbPath, chunks); err != nil {
+		return nil, fmt.Errorf("write TGB graph to storage at %s: %w", tgbPath, err)
 	}
 	recordStep(e, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
-	graphReader, err := storage.NewGraphReader(ctx, b.storage, treehashPath)
+	graphReader, err := storage.NewTGBGraphReader(ctx, b.storage, tgbPath, b.config.Service.MaxMessageBytes)
 	if err != nil {
-		return nil, fmt.Errorf("create graph reader at %s: %w", treehashPath, err)
+		return nil, fmt.Errorf("create TGB graph reader at %s: %w", tgbPath, err)
 	}
 	logger.Info("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
 	return graphReader, nil
 }
 
-// readCachedGraph opens the cached graph for a treehash, preferring the TGB
-// blob when the service is configured for it and falling back to the gob
-// stream for entries written before the format flip. A TGB blob that exists
-// but fails validation is treated as a miss (recompute overwrites it), not an
-// infra failure. Returns a not-found error when neither format is present.
-func (b *nativeOrchestrator) readCachedGraph(ctx context.Context, logger *zap.Logger, useTGB bool, tgbPath, gobPath string) (storage.GraphReader, error) {
-	if useTGB {
-		graphReader, err := storage.NewTGBGraphReader(ctx, b.storage, tgbPath, b.config.Service.MaxMessageBytes)
-		if err == nil {
-			return graphReader, nil
-		}
-		if errors.Is(err, storage.ErrCorruptTGB) {
-			logger.Warn("GetTargetGraph: corrupt TGB blob, recomputing", zap.String("path", tgbPath), zap.Error(err))
-		} else if !storage.IsNotFound(err) {
-			return nil, err
-		}
+// readCachedGraph opens the cached TGB graph for a treehash. A TGB blob that
+// exists but fails validation is treated as a miss (recompute overwrites it),
+// not an infra failure, so it returns a not-found error in that case.
+func (b *nativeOrchestrator) readCachedGraph(ctx context.Context, logger *zap.Logger, tgbPath string) (storage.GraphReader, error) {
+	graphReader, err := storage.NewTGBGraphReader(ctx, b.storage, tgbPath, b.config.Service.MaxMessageBytes)
+	if err == nil {
+		return graphReader, nil
 	}
-	return storage.NewGraphReader(ctx, b.storage, gobPath)
+	if errors.Is(err, storage.ErrCorruptTGB) {
+		logger.Warn("GetTargetGraph: corrupt TGB blob, recomputing", zap.String("path", tgbPath), zap.Error(err))
+		return nil, fmt.Errorf("%w: %w", storage.ErrNotFound, err)
+	}
+	return nil, err
 }
 
 // recordStep records a pipeline step's duration under the get_target_graph op.
