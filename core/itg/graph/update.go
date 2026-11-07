@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -38,6 +39,7 @@ type UpdateGraphInput struct {
 	WorkspaceRoot   string
 	FullHashRepos   StringSet
 	UseBzlmod       bool
+	ExcludedRegex   []*regexp.Regexp
 }
 
 // UpdateGraph updates the dependency relationships and hashes of targets in the graph.
@@ -90,7 +92,7 @@ func (g *OptimizedGraph) UpdateGraph(
 		}
 	}
 	// compute hashes for source file, package group, and rule common targets
-	if err := computeAvailableHashes(ctx, sourceHasher, targets); err != nil {
+	if err := computeAvailableHashes(ctx, sourceHasher, targets, input.ExcludedRegex); err != nil {
 		return err
 	}
 
@@ -99,19 +101,19 @@ func (g *OptimizedGraph) UpdateGraph(
 		return err
 	}
 
-	return g.computeInvalidatedHashes(ctx, allInvalidated)
+	return g.computeInvalidatedHashes(ctx, allInvalidated, input.ExcludedRegex)
 }
 
 // computeInvalidatedHashes computes invalidated target hashes in the same
 // deterministic traversal order used by full graph hashing.
-func (g *OptimizedGraph) computeInvalidatedHashes(ctx context.Context, invalidated IntSet) error {
+func (g *OptimizedGraph) computeInvalidatedHashes(ctx context.Context, invalidated IntSet, excludedRegex []*regexp.Regexp) error {
 	// Prioritize configured targets that could create cycles.
 	for _, target := range sequentialHashTargets {
 		id, ok := g.TargetNameToID[target]
 		if !ok || !invalidated.Contains(id) {
 			continue
 		}
-		if _, err := g.computeHashes(ctx, id); err != nil {
+		if _, err := g.computeHashes(ctx, id, excludedRegex); err != nil {
 			return err
 		}
 	}
@@ -128,7 +130,7 @@ func (g *OptimizedGraph) computeInvalidatedHashes(ctx context.Context, invalidat
 		if !ok || len(target.ReverseDeps) != 0 {
 			continue
 		}
-		if _, err := g.computeHashes(ctx, id); err != nil {
+		if _, err := g.computeHashes(ctx, id, excludedRegex); err != nil {
 			return err
 		}
 	}
@@ -137,7 +139,7 @@ func (g *OptimizedGraph) computeInvalidatedHashes(ctx context.Context, invalidat
 	// root-unreachable cycles. The first lexicographic member is their canonical
 	// cycle breaker, matching full graph hashing's cyclic-target fallback.
 	for _, id := range ids {
-		if _, err := g.computeHashes(ctx, id); err != nil {
+		if _, err := g.computeHashes(ctx, id, excludedRegex); err != nil {
 			return err
 		}
 	}
@@ -180,8 +182,14 @@ func computeAvailableHashes(
 	ctx context.Context,
 	hasher targethasher.SourceHasher,
 	targets map[string]*targethasher.Target,
+	excludedRegex []*regexp.Regexp,
 ) error {
 	for name, target := range targets {
+		if isExcludedTarget(name, excludedRegex) {
+			target.Hash = []byte{}
+			target.HashWithoutDeps = []byte{}
+			continue
+		}
 		var hash []byte
 		var hashWithoutDeps []byte
 		switch target.RuleType {
@@ -215,7 +223,7 @@ func computeAvailableHashes(
 }
 
 // computeHashes computes hashes recursively for the given target ID.
-func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, error) {
+func (g *OptimizedGraph) computeHashes(ctx context.Context, id int, excludedRegex []*regexp.Regexp) ([]byte, error) {
 	if ctx.Err() != nil {
 		return nil, context.Cause(ctx)
 	}
@@ -232,6 +240,12 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 		return target.Hash, nil
 	}
 
+	if isExcludedTarget(g.TargetIDToString[id], excludedRegex) {
+		target.Hash = []byte{}
+		target.HashWithoutDeps = []byte{}
+		return target.Hash, nil
+	}
+
 	// mark as visiting to handle cycles
 	target.Hash = []byte{}
 	var hash []byte
@@ -244,7 +258,7 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 			singleDep = dep
 			break
 		}
-		dephash, err := g.computeHashes(ctx, singleDep)
+		dephash, err := g.computeHashes(ctx, singleDep, excludedRegex)
 		if err != nil {
 			return nil, err
 		}
@@ -260,7 +274,7 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 			return strings.Compare(g.TargetIDToString[i], g.TargetIDToString[j])
 		})
 		for _, dep := range depIDs {
-			dephash, err := g.computeHashes(ctx, dep)
+			dephash, err := g.computeHashes(ctx, dep, excludedRegex)
 			if err != nil {
 				return nil, err
 			}
@@ -272,4 +286,13 @@ func (g *OptimizedGraph) computeHashes(ctx context.Context, id int) ([]byte, err
 		target.Hash = hash
 	}
 	return hash, nil
+}
+
+func isExcludedTarget(name string, excludedRegex []*regexp.Regexp) bool {
+	for _, re := range excludedRegex {
+		if re.MatchString(name) {
+			return true
+		}
+	}
+	return false
 }
