@@ -38,6 +38,9 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
+// hashH1 is a full 40-char hex SHA-1 value, as the TGB codec requires.
+const hashH1 = "1111111111111111111111111111111111111111"
+
 func TestCompareTargetGraphs(t *testing.T) {
 	c := newTestController(zap.NewNop())
 
@@ -336,100 +339,6 @@ func TestReadTreehash(t *testing.T) {
 	})
 }
 
-func TestGetChangedTargets_streamChunks(t *testing.T) {
-	ctrl := gomock.NewController(t)
-
-	storagemock := storagemock.NewMockStorage(ctrl)
-
-	// Build first revision graph (2 chunks: Targets + Metadata)
-	var buf1 bytes.Buffer
-	enc1 := gob.NewEncoder(&buf1)
-	enc1.Encode(entity.GetTargetGraphResponse{
-		Targets: []entity.OptimizedTarget{
-			{ID: 1, Hash: "h1", RuleType: 100},
-			{ID: 2, Hash: "h2-old", RuleType: 300},
-		},
-	})
-	enc1.Encode(entity.GetTargetGraphResponse{
-		Metadata: &entity.Metadata{
-			TargetIDMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
-			RuleTypeMapping: map[int32]string{100: "go_library", 300: "source file"},
-		},
-	})
-	graph1Bytes := buf1.Bytes()
-
-	// Build second revision graph - target2 has different hash
-	var buf2 bytes.Buffer
-	enc2 := gob.NewEncoder(&buf2)
-	enc2.Encode(entity.GetTargetGraphResponse{
-		Targets: []entity.OptimizedTarget{
-			{ID: 1, Hash: "h1", RuleType: 100},
-			{ID: 2, Hash: "h2-new", RuleType: 300}, // changed hash
-		},
-	})
-	enc2.Encode(entity.GetTargetGraphResponse{
-		Metadata: &entity.Metadata{
-			TargetIDMapping: map[int32]string{1: "//app:target1", 2: "//app:target2"},
-			RuleTypeMapping: map[int32]string{100: "go_library", 300: "source file"},
-		},
-	})
-	graph2Bytes := buf2.Bytes()
-
-	// Each revision needs: treehash lookup + graph lookup. Plus one initial cache miss.
-	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
-			switch {
-			case strings.Contains(req.Key, "compared-targets"):
-				return storage.DownloadResponse{}, storage.NewNotFoundError(req.Key)
-			case strings.Contains(req.Key, "sha1"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash1")))}, nil
-			case strings.Contains(req.Key, "sha2"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader([]byte("treehash2")))}, nil
-			case strings.Contains(req.Key, "treehash1"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph1Bytes))}, nil
-			case strings.Contains(req.Key, "treehash2"):
-				return storage.DownloadResponse{ReadCloser: io.NopCloser(bytes.NewReader(graph2Bytes))}, nil
-			default:
-				return storage.DownloadResponse{}, fmt.Errorf("unexpected key: %s", req.Key)
-			}
-			// readTreehash (×2 pre) + comparison cache miss (×1) + graph computation (×4) + readTreehash (×2 post) = 9
-		}).Times(9)
-	// Put is launched in a goroutine — use a channel to wait for it before the test ends.
-	putDone := make(chan struct{}, 1)
-	storagemock.EXPECT().Put(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, _ storage.UploadRequest) error {
-		putDone <- struct{}{}
-		return nil
-	})
-
-	c := NewController(context.Background(), Params{
-		Logger:       zaptest.NewLogger(t),
-		Storage:      storagemock,
-		Orchestrator: orchestratormock.NewMockOrchestrator(ctrl),
-	})
-
-	got, err := c.GetChangedTargets(t.Context(), changedTargetsRequest(), testRepositoryConfig)
-	require.NoError(t, err)
-
-	select {
-	case <-putDone:
-	case <-time.After(time.Second):
-		assert.Fail(t, "cache write goroutine did not complete in time")
-	}
-
-	require.Len(t, got, 2)
-	changedTargets := got[0].ChangedTargets
-	metadata := got[1].Metadata
-
-	// Verify target2 is detected as changed (hash changed from h2-old to h2-new)
-	require.Len(t, changedTargets, 1, "should detect 1 changed target")
-	changed := changedTargets[0]
-	assert.Equal(t, "h2-old", changed.OldTarget.Hash)
-	assert.Equal(t, "h2-new", changed.NewTarget.Hash)
-
-	targetID := changed.NewTarget.ID
-	assert.Equal(t, "//app:target2", metadata.TargetIDMapping[targetID])
-}
-
 // TestGetChangedTargets_CacheWriteUsesAppCtx verifies the cache-write
 // goroutine passes c.appCtx to storage (so a client disconnect does not abort
 // the write, but server shutdown does). Drives a successful GetChangedTargets
@@ -445,18 +354,17 @@ func TestGetChangedTargets_CacheWriteUsesAppCtx(t *testing.T) {
 	// Minimal single-chunk graph so the comparison succeeds and the cache
 	// goroutine runs. Both revisions share the same target so there are no
 	// diffs to send beyond the metadata chunk.
-	var graphBuf bytes.Buffer
-	enc := gob.NewEncoder(&graphBuf)
-	enc.Encode(entity.GetTargetGraphResponse{
-		Targets: []entity.OptimizedTarget{{ID: 1, Hash: "h1", RuleType: 100}},
-	})
-	enc.Encode(entity.GetTargetGraphResponse{
-		Metadata: &entity.Metadata{
-			TargetIDMapping: map[int32]string{1: "//app:t1"},
-			RuleTypeMapping: map[int32]string{100: "go_library"},
+	graphBytes := tgbBlob(t,
+		entity.GetTargetGraphResponse{
+			Targets: []entity.OptimizedTarget{{ID: 1, Hash: hashH1, RuleType: 100}},
 		},
-	})
-	graphBytes := graphBuf.Bytes()
+		entity.GetTargetGraphResponse{
+			Metadata: &entity.Metadata{
+				TargetIDMapping: map[int32]string{1: "//app:t1"},
+				RuleTypeMapping: map[int32]string{100: "go_library"},
+			},
+		},
+	)
 
 	storagemock.EXPECT().Get(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, req storage.DownloadRequest) (storage.DownloadResponse, error) {
@@ -1209,8 +1117,8 @@ func TestFetchTargetGraphs(t *testing.T) {
 
 		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
 		require.NoError(t, err)
-		require.Len(t, first.chunks, 1)
-		require.Len(t, second.chunks, 1)
+		require.NotNil(t, first.tgb)
+		require.NotNil(t, second.tgb)
 	})
 
 	t.Run("first revision failure names graph #1", func(t *testing.T) {
@@ -1241,12 +1149,12 @@ func TestFetchTargetGraphs(t *testing.T) {
 		assert.NotErrorIs(t, cause, context.Canceled, "sibling cancellation should carry a distinct cause, not the generic context.Canceled")
 	})
 
-	t.Run("empty reader yields no-chunks error", func(t *testing.T) {
+	t.Run("nil reader yields no-chunks error", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		orch := orchestratormock.NewMockOrchestrator(ctrl)
 		orch.EXPECT().GetTargetGraph(gomock.Any(), gomock.Any()).DoAndReturn(
 			func(_ context.Context, _ entity.GetTargetGraphRequest) (storage.GraphReader, error) {
-				return newGraphReader(t), nil
+				return nil, nil
 			}).Times(2)
 
 		c := newTestController(zaptest.NewLogger(t))

@@ -20,9 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
-
-	"encoding/gob"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,20 +38,34 @@ import (
 	workspacemock "github.com/uber/tango/core/workspace/workspacemock"
 	"github.com/uber/tango/entity"
 	graphmock "github.com/uber/tango/graphrunner/mock"
+	"github.com/uber/tango/internal/tgbdiff"
 	"go.uber.org/mock/gomock"
-	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap"
 )
+
+// tgbGraphBlob returns a TGB blob that holds a single target.
+func tgbGraphBlob(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	require.NoError(t, tgbdiff.EncodeChunks([]entity.GetTargetGraphResponse{{
+		Targets: []entity.OptimizedTarget{{ID: 1, Hash: strings.Repeat("ab", 20)}},
+		Metadata: &entity.Metadata{
+			TargetIDMapping: map[int32]string{1: "//:a"},
+			RuleTypeMapping: map[int32]string{0: "go_library"},
+		},
+	}}, &buf))
+	return buf.Bytes()
+}
 
 func TestNative_GetTargetGraph_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	st := storagemock.NewMockStorage(ctrl)
-	var buf bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{{ID: 1}}}))
+	blob := tgbGraphBlob(t)
 	// Single fetch by remote/treehash for the graph
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
-		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
+		ReadCloser: io.NopCloser(bytes.NewReader(blob)),
 	}, nil)
 
 	// Inject git and workspace
@@ -69,7 +82,7 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -83,7 +96,9 @@ func TestNative_GetTargetGraph_Success(t *testing.T) {
 	chunk, rerr := reader.Read()
 	require.NoError(t, rerr)
 	require.NotNil(t, chunk.Targets)
-	_, rerr = reader.Read()
+	for rerr == nil {
+		_, rerr = reader.Read()
+	}
 	assert.Equal(t, io.EOF, rerr)
 }
 
@@ -101,10 +116,9 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 		return err
 	}).MinTimes(1).MaxTimes(3)
 	// After compute, second read returns a valid delimited stream with one message
-	var buf bytes.Buffer
-	_ = gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{{ID: 1}}})
+	blob := tgbGraphBlob(t)
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
-		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
+		ReadCloser: io.NopCloser(bytes.NewReader(blob)),
 	}, nil)
 	g := gitmock.NewMockInterface(ctrl)
 	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th", nil)
@@ -125,7 +139,7 @@ func TestNative_GetTargetGraph_TreehashNotFound_NoError(t *testing.T) {
 	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		GraphRunner: graphRunner,
 		Config:      testConfig(t),
@@ -162,7 +176,7 @@ func TestNative_GetTargetGraph_UnknownStrategy_UserError(t *testing.T) {
 	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -197,7 +211,7 @@ func TestNative_GetTargetGraph_RevParseError_Propagates(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -211,8 +225,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	st := storagemock.NewMockStorage(ctrl)
-	var buf bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&buf).Encode(entity.GetTargetGraphResponse{Targets: []entity.OptimizedTarget{{ID: 1}}}))
+	blob := tgbGraphBlob(t)
 
 	// git mock must handle Apply sequence from workspace.NewRequest for PR 123
 	g := gitmock.NewMockInterface(ctrl)
@@ -220,7 +233,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("treehash", nil)
 	// Single storage fetch for graph by remote/treehash
 	st.EXPECT().Get(gomock.Any(), gomock.Any()).Return(storage.DownloadResponse{
-		ReadCloser: io.NopCloser(bytes.NewReader(buf.Bytes())),
+		ReadCloser: io.NopCloser(bytes.NewReader(blob)),
 	}, nil)
 	ws := workspacemock.NewMockWorkspace(ctrl)
 	ws.EXPECT().Path().Return("/tmp/ws")
@@ -232,7 +245,7 @@ func TestNative_GetTargetGraph_AppliesGitHubPR(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -266,7 +279,7 @@ func TestNative_GetTargetGraph_InvalidChangeURI_UserError(t *testing.T) {
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		Config:      testConfig(t),
 	})
@@ -319,7 +332,7 @@ func TestNative_GetTargetGraph_LeasePoolTimeout_InfraRetryable(t *testing.T) {
 
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
@@ -339,7 +352,7 @@ func TestNative_GetTargetGraph_LeaseGenericError_Infra(t *testing.T) {
 
 	o, err := NewNativeOrchestrator(context.Background(), Params{
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		Config:      testConfig(t),
 	})
 	require.NoError(t, err)
@@ -350,10 +363,9 @@ func TestNative_GetTargetGraph_LeaseGenericError_Infra(t *testing.T) {
 	assert.Equal(t, tangoerrors.ErrorInfra, tangoerrors.GetErrorCode(err))
 }
 
-// TestNative_GetTargetGraph_TGBFormat: with graph_format=tgb, a cache miss
-// computes the graph, writes it as a TGB blob under the tgb key (never under
-// the gob key), and returns a TGB-backed reader whose chunk stream carries
-// the computed target.
+// TestNative_GetTargetGraph_TGBFormat: a cache miss computes the graph,
+// writes it as a TGB blob under the tgb key, and returns a TGB-backed reader
+// whose chunk stream carries the computed target.
 func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -383,14 +395,11 @@ func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	}, nil)
 
 	cfg := testConfig(t)
-	cfg.Graph = map[string]config.GraphConfig{
-		"default": {Format: config.GraphFormatTGB},
-	}
 
 	o, err := NewNativeOrchestrator(appCtx, Params{
 		Storage:     st,
 		RepoManager: rm,
-		Logger:      zaptest.NewLogger(t),
+		Logger:      zap.NewNop(),
 		GitFactory:  func(dir string) git.Interface { return g },
 		GraphRunner: graphRunner,
 		Config:      cfg,
@@ -422,12 +431,8 @@ func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	}
 	assert.True(t, sawTarget, "chunk stream should carry the computed target")
 
-	// The blob landed under the tgb key only; nothing was written to the gob key.
+	// The blob landed under the tgb key.
 	tgbKey := cachekey.GetTGBGraphByTreeHash("tango", "th", build.Strategy, nil)
 	_, err = storage.NewTGBGraphReader(context.Background(), st, tgbKey, config.DefaultMaxMessageBytes)
 	require.NoError(t, err)
-	gobKey := cachekey.GetGraphByTreeHash("tango", "th", build.Strategy, nil)
-	_, err = storage.NewGraphReader(context.Background(), st, gobKey)
-	require.Error(t, err)
-	assert.True(t, storage.IsNotFound(err), "gob key must stay empty under graph_format=tgb")
 }

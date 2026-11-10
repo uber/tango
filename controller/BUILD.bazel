@@ -13,7 +13,6 @@ go_library(
     deps = [
         "//config",
         "//core/cachekey",
-        "//core/errors",
         "//core/storage",
         "//entity",
         "//internal/mapper/idmapper",
@@ -46,6 +45,7 @@ go_test(
         "//core/storage",
         "//core/storage/storagemock",
         "//entity",
+        "//internal/tgbdiff",
         "//observability/metrics",
         "//orchestrator/orchestratormock",
         "@com_github_stretchr_testify//assert",

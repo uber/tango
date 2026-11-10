@@ -37,7 +37,7 @@ import (
 
 // fetchedGraph is one revision's fetched target graph: either an undrained
 // TGB reader (preferred — the comparison path uses its random-access form
-// without a full decode) or the drained chunk stream from a gob-era blob.
+// without a full decode) or the drained chunk stream from any other reader.
 // Exactly one of the fields is set.
 type fetchedGraph struct {
 	tgb    *storage.TGBGraphReader
@@ -200,8 +200,8 @@ func (c *controller) comparedTargetsFromCache(ctx context.Context, e *metrics.Em
 // sibling is cancelled to avoid wasting work on a result that will be discarded.
 // Errors caused solely by that induced cancellation are dropped; only the
 // original failure is returned. A client disconnect surfaces as a user-cancelled
-// error. A graph stored as a TGB blob comes back as its undrained reader; a
-// gob-era graph is drained into chunks here, inside the concurrent fetch.
+// error. A graph stored as a TGB blob comes back as its undrained reader; any
+// other graph is drained into chunks here, inside the concurrent fetch.
 func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request entity.GetChangedTargetsRequest, repositoryID string) (fetchedGraph, fetchedGraph, error) {
 	jobs := make([]*job, 2)
 	for i := 0; i < 2; i++ {
@@ -365,8 +365,7 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request entity.Get
 
 // compareFetchedGraphs picks the comparison path for a pair of fetched
 // graphs: TGB-native when both revisions came back as TGB blobs, otherwise
-// the incumbent chunk pipeline (gob blobs, or the transitional mixed case
-// where exactly one revision's blob predates a format flip).
+// the incumbent chunk pipeline.
 func (c *controller) compareFetchedGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, remote string, first, second fetchedGraph, seedAttrs map[string]bool) ([]entity.GetChangedTargetsResponse, error) {
 	if first.tgb != nil && second.tgb != nil {
 		firstATFH, err := first.tgb.TGB().AllTargetsFileHashes()

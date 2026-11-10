@@ -39,8 +39,8 @@ The server reads [`tango-config.yaml`](tango-config.yaml). Unknown fields are re
 | `service.max_worker_pool_size` | Required; must be greater than `0` | Maximum concurrent requests per repository. |
 | `service.workspaces_root_path` | Required | Root directory for origin clones and worker checkouts. The example server creates it at startup and removes it on clean shutdown. |
 | `service.max_message_bytes` | Optional; defaults to `4250000` for omitted or non-positive values | Maximum serialized bytes per streamed gRPC message. |
-| `service.graph_format` | Optional; defaults to `gob` | Cached target-graph format. Accepted values are `gob` and `tgb`. |
-| `service.shadow_compare` | Optional; defaults to `false` | With `graph_format: tgb`, also runs the incumbent comparison in the background and reports mismatches without changing the served result. |
+| `graph.<repo>.format` | Required in each entry; the `graph` section defaults to `default: {format: tgb}` when omitted | Cached target-graph format for the repository with that short remote (for example `uber/tango`). The `default` entry applies to repositories without an entry. The only accepted value is `tgb`. |
+| `graph.<repo>.shadow_compare` | Optional; defaults to `false` | Also runs the incumbent comparison in the background and reports mismatches without changing the served result. |
 
 ## Running
 

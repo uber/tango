@@ -1,4 +1,4 @@
-.PHONY: build cover test test-integration test-integration-tgb test-integration-gob test-integration-atf test-integration-bzlmod bench lint proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets version help
+.PHONY: build cover test test-integration test-integration-tgb test-integration-atf test-integration-bzlmod bench lint proto gazelle clean clean-proto run-server run-client-get-graph run-client-changed-targets version help
 
 # Bazel wrapper
 BAZEL = ./tools/bazel
@@ -54,19 +54,13 @@ BZLMOD_ENV = \
 	--test_env=TANGO_BZLMOD_PR_URL=$(BZLMOD_PR_URL)
 
 # Run all integration test suites
-test-integration: test-integration-tgb test-integration-gob test-integration-atf test-integration-bzlmod
+test-integration: test-integration-tgb test-integration-atf test-integration-bzlmod
 
 test-integration-tgb:
 	@echo "Running integration tests (tgb)..."
 	@$(BAZEL) test //integration:integration_test --test_output=errors \
 		$(INTEGRATION_ENV) --test_env=TANGO_GRAPH_FORMAT=tgb
 	@echo "Integration tests (tgb) passed!"
-
-test-integration-gob:
-	@echo "Running integration tests (gob)..."
-	@$(BAZEL) test //integration:integration_test --test_output=errors \
-		$(INTEGRATION_ENV) --test_env=TANGO_GRAPH_FORMAT=gob
-	@echo "Integration tests (gob) passed!"
 
 test-integration-atf:
 	@echo "Running AllTargetsFiles integration tests (tgb)..."
@@ -180,7 +174,6 @@ help:
 	@echo "  make test             - Run all tests"
 	@echo "  make test-integration     - Run all integration test suites (needs network, slow)"
 	@echo "  make test-integration-tgb - Run integration tests with TGB format"
-	@echo "  make test-integration-gob - Run integration tests with gob format"
 	@echo "  make test-integration-atf - Run AllTargetsFiles integration tests (TGB only)"
 	@echo "  make test-integration-bzlmod - Run Bzlmod upgrade integration tests (TGB only)"
 	@echo "  make bench            - Run GetChangedTargets benchs (measurement only, not in CI)"

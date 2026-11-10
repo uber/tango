@@ -51,9 +51,10 @@ go_test(
         "//core/workspace/workspacemock",
         "//entity",
         "//graphrunner/mock",
+        "//internal/tgbdiff",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@org_uber_go_mock//gomock",
-        "@org_uber_go_zap//zaptest",
+        "@org_uber_go_zap//:zap",
     ],
 )

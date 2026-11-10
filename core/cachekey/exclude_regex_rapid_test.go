@@ -35,14 +35,14 @@ func TestExcludeFilesRegex_keyProperties(t *testing.T) {
 		rightPermuted := []string{right[1], right[0]}
 		repositoryID := "test-repository"
 
-		leftGraph := GetGraphByTreeHash(repositoryID, "tree", entity.ComputationStrategyNative, left)
-		rightGraph := GetGraphByTreeHash(repositoryID, "tree", entity.ComputationStrategyNative, right)
-		require.Equal(t, leftGraph, GetGraphByTreeHash(repositoryID, "tree", entity.ComputationStrategyNative, leftPermuted))
+		leftGraph := GetTGBGraphByTreeHash(repositoryID, "tree", entity.ComputationStrategyNative, left)
+		rightGraph := GetTGBGraphByTreeHash(repositoryID, "tree", entity.ComputationStrategyNative, right)
+		require.Equal(t, leftGraph, GetTGBGraphByTreeHash(repositoryID, "tree", entity.ComputationStrategyNative, leftPermuted))
 
 		leftCompared := GetComparedTargetsCachePath(repositoryID, "before", "after", left)
 		rightCompared := GetComparedTargetsCachePath(repositoryID, "before", "after", right)
 		require.Equal(t, leftCompared, GetComparedTargetsCachePath(repositoryID, "before", "after", leftPermuted))
-		require.Equal(t, rightGraph, GetGraphByTreeHash(repositoryID, "tree", entity.ComputationStrategyNative, rightPermuted))
+		require.Equal(t, rightGraph, GetTGBGraphByTreeHash(repositoryID, "tree", entity.ComputationStrategyNative, rightPermuted))
 		require.Equal(t, rightCompared, GetComparedTargetsCachePath(repositoryID, "before", "after", rightPermuted))
 		require.Equal(t, leftBefore, left)
 		require.Equal(t, rightBefore, right)
