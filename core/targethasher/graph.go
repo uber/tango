@@ -189,16 +189,17 @@ func FromProtoNoHash(ctx context.Context, r *buildpb.QueryResult) (Result, error
 	return fromProto(ctx, r, &noOpHasher{}, "", set.NewSet[string](), set.NewSet[string](), nil, false, nil, nil)
 }
 
-// for external targets, url and urls attributes could cause non-deterministic hash values,
-// depending on if port number is present or not
-// as a short term solution, remove these two attributes only if attribute sha256 exists on the external target
+// External rule attributes that vary between runs without changing the fetched
+// content: url/urls (port number may differ) and npm_import credentials, which
+// rules_js fills from env vars in .npmrc (e.g. a short-lived token). Dropped only
+// when sha256 or integrity pins the content.
 var (
-	urlAttrs      = set.NewSet("url", "urls")
+	volatileAttrs = set.NewSet("url", "urls", "npm_auth", "npm_auth_basic", "npm_auth_username", "npm_auth_password")
 	sha256Attr    = "sha256"
 	integrityAttr = "integrity"
 )
 
-func removeURLAttrs(rule *buildpb.Rule) *buildpb.Rule {
+func removeVolatileAttrs(rule *buildpb.Rule) *buildpb.Rule {
 	if rule == nil {
 		return nil
 	}
@@ -212,14 +213,14 @@ func removeURLAttrs(rule *buildpb.Rule) *buildpb.Rule {
 			break
 		}
 	}
-	// no-op if sha256 is not present
+	// no-op if neither sha256 nor integrity is present
 	if !willCheckContent {
 		return rule
 	}
 
 	newAttrs := make([]*buildpb.Attribute, 0, len(oldAttrs))
 	for _, attr := range oldAttrs {
-		if !urlAttrs.Contains(attr.GetName()) {
+		if !volatileAttrs.Contains(attr.GetName()) {
 			newAttrs = append(newAttrs, attr)
 		}
 	}
@@ -248,7 +249,7 @@ func toTarget(t *buildpb.Target) (*Target, error) {
 		// TODO: remove this and handle external targets in the same way as internal targets
 		if strings.HasPrefix(targetName, externalWorkspaceRulePrefix) {
 			// if this is an external target, remove unwanted attributes from the rule, e.g. url and urls
-			rule := removeURLAttrs(t.Rule)
+			rule := removeVolatileAttrs(t.Rule)
 			// Workspace rule usually representing external repository or an HTTP file.
 			// It is only used to hash external source files, so store it in a separate map.
 			HashRuleCommon(rule, h)
