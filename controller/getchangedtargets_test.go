@@ -1115,7 +1115,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
+		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), getGraphFetch(c))
 		require.NoError(t, err)
 		require.NotNil(t, first.tgb)
 		require.NotNil(t, second.tgb)
@@ -1139,7 +1139,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
+		first, second, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), getGraphFetch(c))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, injected)
 		assert.Zero(t, first)
@@ -1160,7 +1160,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
+		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), getGraphFetch(c))
 		require.Error(t, err)
 	})
 
@@ -1175,7 +1175,7 @@ func TestFetchTargetGraphs(t *testing.T) {
 		c := newTestController(zaptest.NewLogger(t))
 		c.orchestrator = orch
 
-		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), testRepositoryID("repo:go-code"))
+		_, _, err := c.fetchTargetGraphs(t.Context(), c.emitter, c.logger, bypassRequest(), getGraphFetch(c))
 		require.Error(t, err)
 	})
 }
@@ -1283,4 +1283,10 @@ func TestSeedAttributesFor(t *testing.T) {
 			SeedAttributes: []string{"size", "timeout"},
 		}))
 	})
+}
+
+func getGraphFetch(c *controller) graphFetchFunc {
+	return func(ctx context.Context, request entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+		return c.getGraph(ctx, c.emitter, request, testRepositoryID("repo:go-code"))
+	}
 }
