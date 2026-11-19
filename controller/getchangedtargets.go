@@ -99,7 +99,9 @@ func (c *controller) GetChangedTargets(ctx context.Context, entityReq entity.Get
 	}
 
 	// Fetch both revisions' target graphs concurrently.
-	firstGraph, secondGraph, err := c.fetchTargetGraphs(ctx, e, logger, entityReq, repoCfg.RepositoryID)
+	firstGraph, secondGraph, err := c.fetchTargetGraphs(ctx, e, logger, entityReq, func(ctx context.Context, graphRequest entity.GetTargetGraphRequest) (storage.GraphReader, error) {
+		return c.getGraph(ctx, e, graphRequest, repoCfg.RepositoryID)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("fetch target graphs: %w", err)
 	}
@@ -136,15 +138,40 @@ func (c *controller) GetChangedTargets(ctx context.Context, entityReq entity.Get
 // rather than silent degradation.
 func (c *controller) comparedTargetsFromCache(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request entity.GetChangedTargetsRequest, repositoryID string, start time.Time) ([]entity.GetChangedTargetsResponse, error) {
 	cacheStart := time.Now()
-	treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.First, request.Second, repositoryID, e, opGetChangedTargets)
-	if err != nil {
-		return nil, fmt.Errorf("read revision treehash: %w", err)
-	}
-	if treehash1 == "" || treehash2 == "" {
+	cacheKey, err := c.comparedTargetsKey(ctx, e, request, repositoryID)
+	if storage.IsNotFound(err) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	cached, err := c.readComparedTargetsAt(ctx, e, logger, cacheKey)
+	if err != nil || len(cached) == 0 {
+		return nil, err
+	}
 
-	cacheKey := cachekey.GetComparedTargetsCachePath(repositoryID, treehash1, treehash2, request.ExcludeFilesRegex)
+	cacheReadDuration := time.Since(cacheStart)
+	logger.Info("GetChangedTargets: Cache hit",
+		zap.Duration("cache_read_duration", cacheReadDuration),
+		zap.Duration("total_duration", time.Since(start)),
+	)
+	metrics.RecordCacheLookup(e, opGetChangedTargets, metrics.ComparedTargetsCacheLookup, nil)
+	e.DurationHistogram(opGetChangedTargets, "cache_read_duration", metrics.FastDurationBuckets).RecordDuration(cacheReadDuration)
+	return cached, nil
+}
+
+func (c *controller) comparedTargetsKey(ctx context.Context, e *metrics.Emitter, request entity.GetChangedTargetsRequest, repositoryID string) (string, error) {
+	treehash1, treehash2, err := readTreehashParallel(ctx, c.storage, request.First, request.Second, repositoryID, e, opGetChangedTargets)
+	if err != nil {
+		return "", fmt.Errorf("read revision treehash: %w", err)
+	}
+	if treehash1 == "" || treehash2 == "" {
+		return "", fmt.Errorf("missing revision treehash: %w", storage.ErrNotFound)
+	}
+	return cachekey.GetComparedTargetsCachePath(repositoryID, treehash1, treehash2, request.ExcludeFilesRegex), nil
+}
+
+func (c *controller) readComparedTargetsAt(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, cacheKey string) ([]entity.GetChangedTargetsResponse, error) {
 	cachedReader, cacheErr := storage.NewChangedTargetsReader(ctx, c.storage, cacheKey)
 	if cacheErr != nil && !storage.IsNotFound(cacheErr) {
 		logger.Warn("GetChangedTargets: Failed to read from cache, proceeding to compute", zap.Error(cacheErr))
@@ -184,25 +211,19 @@ func (c *controller) comparedTargetsFromCache(ctx context.Context, e *metrics.Em
 		logger.Warn("GetChangedTargets: Cached result is incomplete, recomputing", zap.Error(readErr))
 		return nil, nil
 	}
-
-	cacheReadDuration := time.Since(cacheStart)
-	logger.Info("GetChangedTargets: Cache hit",
-		zap.Duration("cache_read_duration", cacheReadDuration),
-		zap.Duration("total_duration", time.Since(start)),
-	)
-	metrics.RecordCacheLookup(e, opGetChangedTargets, metrics.ComparedTargetsCacheLookup, nil)
-	e.DurationHistogram(opGetChangedTargets, "cache_read_duration", metrics.FastDurationBuckets).RecordDuration(cacheReadDuration)
 	return cached, nil
 }
 
-// fetchTargetGraphs fetches both revisions' target graphs concurrently. Each
+type graphFetchFunc func(context.Context, entity.GetTargetGraphRequest) (storage.GraphReader, error)
+
+// fetchTargetGraphs fetches both revisions' target graphs concurrently with fetch. Each
 // fetch runs under its own cancellable context so that, when one fails, the
 // sibling is cancelled to avoid wasting work on a result that will be discarded.
 // Errors caused solely by that induced cancellation are dropped; only the
 // original failure is returned. A client disconnect surfaces as a user-cancelled
 // error. A graph stored as a TGB blob comes back as its undrained reader; any
 // other graph is drained into chunks here, inside the concurrent fetch.
-func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request entity.GetChangedTargetsRequest, repositoryID string) (fetchedGraph, fetchedGraph, error) {
+func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, logger *zap.Logger, request entity.GetChangedTargetsRequest, fetch graphFetchFunc) (fetchedGraph, fetchedGraph, error) {
 	jobs := make([]*job, 2)
 	for i := 0; i < 2; i++ {
 		// create independent contexts for each job; if one of the jobs fails, the other one should be cancelled to save resources and improve latency
@@ -238,7 +259,7 @@ func (c *controller) fetchTargetGraphs(ctx context.Context, e *metrics.Emitter, 
 				ExcludeFilesRegex: request.ExcludeFilesRegex,
 				BypassCache:       request.BypassCache,
 			}
-			graphReader, err := c.getGraph(jobs[idx].ctx, e, entityReq, repositoryID)
+			graphReader, err := fetch(jobs[idx].ctx, entityReq)
 			if err != nil || graphReader == nil {
 				results <- graphResult{order: idx, err: err}
 				return
@@ -339,28 +360,18 @@ func (c *controller) cacheComparedTargets(logger *zap.Logger, request entity.Get
 		// is cancelled on shutdown. Per-operation deadlines are the storage
 		// backend's responsibility — the controller is backend-agnostic and
 		// must not encode any one implementation's I/O budget.
-		// The treehash reads here are for building the write key, not a cache
-		// serve attempt, so they pass a no-op emitter to avoid skewing the
-		// treehash cache hit rate.
-		treehash1, treehash2, err := readTreehashParallel(c.appCtx, c.storage, request.First, request.Second, repositoryID, metrics.Nop(), opGetChangedTargets)
-		if err != nil {
-			// Goroutine outlives the handler so we can't return; log loudly and
-			// abandon the cache write. Surfacing infra failures matters more than
-			// a missed cache opportunity.
-			logger.Warn("GetChangedTargets: skipping cache write, failed to read revision treehash", zap.Error(err))
-			return
-		}
-		if treehash1 != "" && treehash2 != "" {
-			cacheKey := cachekey.GetComparedTargetsCachePath(repositoryID, treehash1, treehash2, request.ExcludeFilesRegex)
-			if writeErr := storage.WriteChangedTargetsStream(c.appCtx, c.storage, cacheKey, responses); writeErr != nil {
-				logger.Warn("GetChangedTargets: Failed to cache result", zap.Error(writeErr))
-			}
-		} else {
-			logger.Warn("GetChangedTargets: skipping compared-targets cache write, missing treehash",
-				zap.Bool("treehash1_empty", treehash1 == ""),
-				zap.Bool("treehash2_empty", treehash2 == ""))
+		if _, err := c.writeComparedTargets(c.appCtx, request, repositoryID, responses); err != nil {
+			logger.Warn("GetChangedTargets: Failed to cache compared-targets result", zap.Error(err))
 		}
 	}()
+}
+
+func (c *controller) writeComparedTargets(ctx context.Context, request entity.GetChangedTargetsRequest, repositoryID string, responses []entity.GetChangedTargetsResponse) (string, error) {
+	cacheKey, err := c.comparedTargetsKey(ctx, metrics.Nop(), request, repositoryID)
+	if err != nil {
+		return "", err
+	}
+	return cacheKey, storage.WriteChangedTargetsStream(ctx, c.storage, cacheKey, responses)
 }
 
 // compareFetchedGraphs picks the comparison path for a pair of fetched
