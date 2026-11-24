@@ -155,6 +155,16 @@ func TestBeginComplete(t *testing.T) {
 	}
 }
 
+func TestBeginAt(t *testing.T) {
+	ts := tally.NewTestScope("pfx", nil)
+	buckets := tally.MustMakeLinearDurationBuckets(0, time.Minute, 10)
+
+	BeginAt(New(ts), "my_op", buckets, time.Now().Add(-90*time.Second)).Complete(nil)
+
+	durations := ts.Snapshot().Histograms()["pfx.my_op.finish+result="+ResultSuccess].Durations()
+	assert.Equal(t, int64(1), durations[2*time.Minute], "the duration must count from start")
+}
+
 func TestOutcome(t *testing.T) {
 	tests := []struct {
 		name string
