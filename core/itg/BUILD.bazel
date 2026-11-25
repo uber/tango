@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "itg",
+    srcs = ["itg.go"],
+    importpath = "github.com/uber/tango/core/itg",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//config",
+        "//core/bazel",
+        "//core/git",
+        "//core/itg/cache",
+        "//core/itg/changeanalyzer",
+        "//core/itg/graph",
+        "//core/itg/workspaceutils",
+        "//core/targethasher",
+        "@com_github_bazelbuild_buildtools//build_proto",
+    ],
+)
+
+go_test(
+    name = "itg_test",
+    srcs = ["itg_test.go"],
+    embed = [":itg"],
+    deps = [
+        "//config",
+        "//core/bazel",
+        "//core/bazel/bazelmock",
+        "//core/git",
+        "//core/git/gitmock",
+        "//core/itg/cache",
+        "//core/itg/graph",
+        "//core/targethasher",
+        "@com_github_bazelbuild_buildtools//build_proto",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@org_uber_go_mock//gomock",
+    ],
+)
