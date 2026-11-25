@@ -20,11 +20,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/core/cachekey"
 	tangoerrors "github.com/uber/tango/core/errors"
@@ -435,4 +439,84 @@ func TestNative_GetTargetGraph_TGBFormat(t *testing.T) {
 	tgbKey := cachekey.GetTGBGraphByTreeHash("tango", "th", build.Strategy, nil)
 	_, err = storage.NewTGBGraphReader(context.Background(), st, tgbKey, config.DefaultMaxMessageBytes)
 	require.NoError(t, err)
+}
+
+func TestNative_GetTargetGraph_ITGEnabled_ColdCacheFallsBackAndSeeds(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+repository:
+  - remote: "git@github:uber/tango"
+    repository_id: "tango"
+    bazel_command_path: "bazel"
+    itg_enabled: true
+service:
+  max_worker_pool_size: 3
+  workspaces_root_path: "/tmp/tango-repo-manager"
+`), 0o644))
+	cfg, err := config.Parse(cfgPath)
+	require.NoError(t, err)
+
+	st := storage.NewMemoryStorage()
+	scope := tally.NewTestScope("", nil)
+	g := gitmock.NewMockInterface(ctrl)
+	g.EXPECT().RevParse(gomock.Any(), "HEAD^{tree}").Return("th", nil)
+	g.EXPECT().RevParse(gomock.Any(), "1234567890^{commit}").Return("1234567890", nil).AnyTimes()
+	g.EXPECT().GetCommitTimeSecond(gomock.Any(), "1234567890").Return(int64(1000), nil).AnyTimes()
+	ws := workspacemock.NewMockWorkspace(ctrl)
+	ws.EXPECT().Path().Return("/tmp/ws").AnyTimes()
+	ws.EXPECT().Checkout(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().ApplyRequests(gomock.Any(), gomock.Any()).Return(nil)
+	ws.EXPECT().Release().Return(nil)
+	rm := repomanagermock.NewMockRepoManager(ctrl)
+	rm.EXPECT().Lease(gomock.Any(), gomock.Any()).Return(ws, nil)
+	// The ITG cache is cold, so the full-query runner must still be used.
+	graphRunner := graphmock.NewMockGraphRunner(ctrl)
+	graphRunner.EXPECT().Compute(gomock.Any(), gomock.Any()).Return(targethasher.Result{
+		Targets:     map[string]*targethasher.Target{"//:a": {Name: "//:a", RuleType: "go_library"}},
+		TargetNames: []string{"//:a"},
+	}, nil)
+
+	o, err := NewNativeOrchestrator(appCtx, Params{
+		Storage:     st,
+		RepoManager: rm,
+		Logger:      zap.NewNop(),
+		GitFactory:  func(dir string) git.Interface { return g },
+		GraphRunner: graphRunner,
+		Config:      cfg,
+		Scope:       scope,
+	})
+	require.NoError(t, err)
+
+	reader, err := o.GetTargetGraph(context.Background(), entity.GetTargetGraphRequest{
+		Build: entity.BuildDescription{Remote: "git@github:uber/tango", BaseSha: "1234567890"},
+	})
+	require.NoError(t, err)
+	defer reader.Close()
+
+	counters := scope.Snapshot().Counters()
+	var applicable int64
+	for _, c := range counters {
+		if c.Name() == "orchestrator.get_target_graph.itg_applicable" && c.Tags()["repo"] == "tango" {
+			applicable = c.Value()
+		}
+	}
+	assert.Equal(t, int64(1), applicable)
+	var fallbackDurations int
+	for _, h := range scope.Snapshot().Histograms() {
+		if h.Name() == "orchestrator.get_target_graph.itg_compute_duration" && h.Tags()["result"] == "fallback" {
+			fallbackDurations++
+		}
+	}
+	assert.Equal(t, 1, fallbackDurations)
+
+	// The full-query result is seeded in the background as the ITG base graph.
+	require.Eventually(t, func() bool {
+		keys, err := st.List(context.Background(), "itg/")
+		return err == nil && len(keys) == 1
+	}, 5*time.Second, time.Millisecond)
 }

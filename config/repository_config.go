@@ -84,6 +84,11 @@ type RepositoryConfig struct {
 	// invisible to the target graph (toolchain definitions, CI config,
 	// Bazel wrapper scripts). Matching is by exact path. Empty disables.
 	AllTargetsFiles []string `yaml:"all_targets_files"`
+	// ITGEnabled turns on the incremental target graph for this repository:
+	// the native strategy derives a graph from the nearest cached base graph
+	// plus the changed packages instead of querying the whole repository, and
+	// falls back to the full query when that is not possible. Defaults to false.
+	ITGEnabled bool `yaml:"itg_enabled"`
 }
 
 // RepositoryConfigProvider looks up per-repository configuration by remote.

@@ -19,3 +19,17 @@ const _opGetTargetGraph = "get_target_graph"
 
 // _opTreehashCacheWrite tracks treehash mapping upload that runs before graph computation.
 const _opTreehashCacheWrite = "treehash_cache_write"
+
+const (
+	// _metricITGApplicable counts requests for which the incremental target
+	// graph was attempted: the repository enables it and the request is eligible.
+	_metricITGApplicable = "itg_applicable"
+
+	// _metricITGComputeDuration is how long the incremental attempt took,
+	// tagged result=success, or result=fallback when the full query ran instead.
+	_metricITGComputeDuration = "itg_compute_duration"
+
+	// _resultFallback is the result tag value for an ITG attempt that did not
+	// produce a graph.
+	_resultFallback = "fallback"
+)
