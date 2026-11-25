@@ -16,12 +16,48 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	tangoerrors "github.com/uber/tango/core/errors"
+	"github.com/uber/tango/mapper/proto"
+	"github.com/uber/tango/observability/metrics"
 	pb "github.com/uber/tango/tangopb"
-	"go.uber.org/yarpc/yarpcerrors"
+	"go.uber.org/zap"
 )
 
 func (h *handler) PollChangedTargetsJob(ctx context.Context, request *pb.PollJobRequest) (*pb.PollChangedTargetsJobResponse, error) {
-	return nil, tangoerrors.NewInfra(yarpcerrors.Newf(yarpcerrors.CodeUnimplemented, "PollChangedTargetsJob is not yet implemented"))
+	start := time.Now()
+	status, chunks, err := h.controller.PollChangedTargetsJob(ctx, request.GetToken())
+	repo := status.RepositoryID
+	if repo == "" {
+		repo = unknownRepositoryMetricLabel
+	}
+	e := h.emitter.Tagged(map[string]string{metrics.TagRepo: repo})
+	metrics.BeginAt(e, opPollChangedTargetsJob, metrics.SlowDurationBuckets, start).Complete(err)
+	if err != nil {
+		h.logger.Error("PollChangedTargetsJob failed", append(tangoerrors.Fields(err), zap.String("repository", repo), zap.String("job_token", request.GetToken()))...)
+		return nil, toWireError(err)
+	}
+
+	resp := &pb.PollChangedTargetsJobResponse{Status: proto.JobStatusToProto(status)}
+	maxDist := int32(-1)
+	if request.GetOutputConfig() != nil {
+		maxDist = request.GetOutputConfig().GetMaxDistance()
+	}
+	for i := range chunks {
+		mergeChangedTargetsChunk(resp, trimChangedTargetsResponse(&chunks[i], maxDist, request.GetOutputConfig()))
+	}
+	return resp, nil
+}
+
+func mergeChangedTargetsChunk(dst *pb.PollChangedTargetsJobResponse, r *pb.GetChangedTargetsResponse) {
+	switch item := r.GetItem().(type) {
+	case *pb.GetChangedTargetsResponse_ChangedTargets:
+		if dst.ChangedTargets == nil {
+			dst.ChangedTargets = &pb.ChangedTargets{}
+		}
+		dst.ChangedTargets.ChangedTargets = append(dst.ChangedTargets.ChangedTargets, item.ChangedTargets.GetChangedTargets()...)
+	case *pb.GetChangedTargetsResponse_Metadata:
+		dst.Metadata = mergeMetadata(dst.Metadata, item.Metadata)
+	}
 }

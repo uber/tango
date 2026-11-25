@@ -17,7 +17,11 @@ package handler
 // Duplicates the operation names in the controller, which uses them for its
 // phase metrics.
 const (
-	opGetTargetGraph        = "get_target_graph"
-	opGetChangedTargets     = "get_changed_targets"
-	opGetChangedTargetGraph = "get_changed_target_graph"
+	opGetTargetGraph          = "get_target_graph"
+	opGetChangedTargets       = "get_changed_targets"
+	opGetChangedTargetGraph   = "get_changed_target_graph"
+	opSubmitTargetGraphJob    = "submit_target_graph_job"
+	opPollTargetGraphJob      = "poll_target_graph_job"
+	opSubmitChangedTargetsJob = "submit_changed_targets_job"
+	opPollChangedTargetsJob   = "poll_changed_targets_job"
 )
