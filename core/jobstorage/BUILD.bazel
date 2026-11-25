@@ -1,0 +1,27 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "jobstorage",
+    srcs = [
+        "jobstorage.go",
+        "memory.go",
+    ],
+    importpath = "github.com/uber/tango/core/jobstorage",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core/storage",
+        "//entity",
+    ],
+)
+
+go_test(
+    name = "jobstorage_test",
+    srcs = ["memory_test.go"],
+    embed = [":jobstorage"],
+    deps = [
+        "//core/storage",
+        "//entity",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)
