@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Uber Technologies, Inc.
+// Copyright (c) 2026 Uber Technologies, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,8 +29,11 @@ import (
 	"github.com/uber/tango/core/cachekey"
 	tangoerrors "github.com/uber/tango/core/errors"
 	"github.com/uber/tango/core/git"
+	"github.com/uber/tango/core/itg"
+	"github.com/uber/tango/core/itg/cache"
 	"github.com/uber/tango/core/repomanager"
 	"github.com/uber/tango/core/storage"
+	"github.com/uber/tango/core/targethasher"
 	"github.com/uber/tango/core/workspace"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/graphrunner"
@@ -209,38 +212,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 	}()
 
 	// Compute the target graph and store it in storage.
-	runner := b.graphRunner
-	if runner == nil {
-		switch build.Strategy {
-		case entity.ComputationStrategyShell:
-			runner = graphrunner.NewShellGraphRunner(graphrunner.ShellGraphRunnerParams{})
-		case entity.ComputationStrategyUnset, entity.ComputationStrategyNative:
-			client, err := bazel.NewBazelClient(ctx, bazel.Params{
-				WorkspacePath: ws.Path(),
-				Logger:        b.logger,
-				BazelCommand:  repoCfg.BazelCommandPath,
-				QueryTimeout:  time.Duration(repoCfg.QueryTimeoutSeconds) * time.Second,
-				StreamLogs:    repoCfg.StreamBazelLogs,
-			})
-			if err != nil {
-				return nil, classifyBazelClientError(err)
-			}
-			runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
-				BazelClient:        client,
-				GitClient:          gitModule,
-				Config:             repoCfg,
-				ExtraExcludedFiles: req.ExcludeFilesRegex,
-				Scope:              b.scope.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID}),
-			})
-		default:
-			return nil, tangoerrors.NewUser(fmt.Errorf("unknown computation strategy: %d", build.Strategy))
-		}
-	}
-	computeStart := time.Now()
-	result, err := runner.Compute(ctx, ws)
-	recordStep(e, "compute_duration", computeStart, metrics.SlowDurationBuckets)
+	result, itgProvider, err := b.computeResult(ctx, logger, e, ws, gitModule, repoCfg, req)
 	if err != nil {
-		return nil, fmt.Errorf("compute target graph: %w", err)
+		return nil, err
 	}
 	chunks, err := mapper.ResultToGraphChunks(ctx, result, b.config.Service.MaxMessageBytes)
 	if err != nil {
@@ -251,12 +225,159 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 		return nil, fmt.Errorf("write TGB graph to storage at %s: %w", tgbPath, err)
 	}
 	recordStep(e, "cache_write_duration", cacheWriteStart, metrics.FastDurationBuckets)
+	if itgProvider != nil && len(build.ChangeRequests) == 0 {
+		b.seedITGCache(logger, itgProvider, build, result)
+	}
 	graphReader, err := storage.NewTGBGraphReader(ctx, b.storage, tgbPath, b.config.Service.MaxMessageBytes)
 	if err != nil {
 		return nil, fmt.Errorf("create TGB graph reader at %s: %w", tgbPath, err)
 	}
 	logger.Info("GetTargetGraph: Done computing and storing target graph", zap.String("treehash", treehash))
 	return graphReader, nil
+}
+
+// computeResult computes the target graph of the prepared workspace. When the
+// repository enables ITG and the request has no per-request exclusions, it
+// first tries the incremental path and falls back to the graph runner when that
+// does not apply. It also returns the ITG provider, or nil when ITG is not in
+// use, so the caller can seed the ITG cache.
+func (b *nativeOrchestrator) computeResult(
+	ctx context.Context,
+	logger *zap.Logger,
+	e *metrics.Emitter,
+	ws workspace.Workspace,
+	gitModule git.Interface,
+	repoCfg config.RepositoryConfig,
+	req entity.GetTargetGraphRequest,
+) (targethasher.Result, itg.Provider, error) {
+	build := req.Build
+	native := build.Strategy == entity.ComputationStrategyUnset || build.Strategy == entity.ComputationStrategyNative
+	// Per-request exclusions change hashes in a way a cached base graph does
+	// not reflect, so those requests always use the full query.
+	useITG := native && repoCfg.ITGEnabled && len(req.ExcludeFilesRegex) == 0
+
+	var bazelClient bazel.Bazel
+	if native && (b.graphRunner == nil || useITG) {
+		client, err := bazel.NewBazelClient(ctx, bazel.Params{
+			WorkspacePath: ws.Path(),
+			Logger:        b.logger,
+			BazelCommand:  repoCfg.BazelCommandPath,
+			QueryTimeout:  time.Duration(repoCfg.QueryTimeoutSeconds) * time.Second,
+			StreamLogs:    repoCfg.StreamBazelLogs,
+		})
+		if err != nil {
+			return targethasher.Result{}, nil, classifyBazelClientError(err)
+		}
+		bazelClient = client
+	}
+
+	var itgProvider itg.Provider
+	if useITG {
+		itgProvider = b.newITGProvider(logger, ws.Path(), gitModule, bazelClient, repoCfg)
+	}
+	if itgProvider != nil {
+		if result, ok := b.tryITG(ctx, logger, e, itgProvider, build); ok {
+			return result, itgProvider, nil
+		}
+	}
+
+	runner := b.graphRunner
+	if runner == nil {
+		switch build.Strategy {
+		case entity.ComputationStrategyShell:
+			runner = graphrunner.NewShellGraphRunner(graphrunner.ShellGraphRunnerParams{})
+		case entity.ComputationStrategyUnset, entity.ComputationStrategyNative:
+			runner = graphrunner.NewNativeGraphRunner(graphrunner.NativeGraphRunnerParams{
+				BazelClient:        bazelClient,
+				GitClient:          gitModule,
+				Config:             repoCfg,
+				ExtraExcludedFiles: req.ExcludeFilesRegex,
+				Scope:              b.scope.Tagged(map[string]string{metrics.TagRepo: repoCfg.RepositoryID}),
+			})
+		default:
+			return targethasher.Result{}, nil, tangoerrors.NewUser(fmt.Errorf("unknown computation strategy: %d", build.Strategy))
+		}
+	}
+	computeStart := time.Now()
+	result, err := runner.Compute(ctx, ws)
+	recordStep(e, "compute_duration", computeStart, metrics.SlowDurationBuckets)
+	if err != nil {
+		return targethasher.Result{}, nil, fmt.Errorf("compute target graph: %w", err)
+	}
+	return result, itgProvider, nil
+}
+
+// newITGProvider returns an ITG provider for the workspace, or nil when it
+// cannot be built. ITG is an optimization, so that is never a request failure.
+func (b *nativeOrchestrator) newITGProvider(
+	logger *zap.Logger,
+	workspacePath string,
+	gitModule git.Interface,
+	bazelClient bazel.Bazel,
+	repoCfg config.RepositoryConfig,
+) itg.Provider {
+	provider, err := itg.New(itg.Params{
+		Git:              gitModule,
+		Bazel:            bazelClient,
+		Cache:            cache.NewStorageCache(b.storage),
+		CacheNamespace:   repoCfg.RepositoryID,
+		WorkspacePath:    workspacePath,
+		RepositoryConfig: repoCfg,
+	})
+	if err != nil {
+		logger.Warn("GetTargetGraph: Failed to create ITG provider, using full query", zap.Error(err))
+		return nil
+	}
+	return provider
+}
+
+// tryITG attempts the incremental path and records its outcome. It reports
+// false when the incremental path does not apply to this request, which is an
+// expected outcome (for example a cold cache), not an error.
+func (b *nativeOrchestrator) tryITG(
+	ctx context.Context,
+	logger *zap.Logger,
+	e *metrics.Emitter,
+	provider itg.Provider,
+	build entity.BuildDescription,
+) (targethasher.Result, bool) {
+	e.Counter(_opGetTargetGraph, _metricITGApplicable).Inc(1)
+	start := time.Now()
+	result, err := provider.GetResult(ctx, itg.GetResultRequest{BaseSha: build.BaseSha, Remote: build.Remote})
+	elapsed := time.Since(start)
+
+	outcome := metrics.ResultSuccess
+	if err != nil {
+		outcome = _resultFallback
+	}
+	e.Tagged(map[string]string{metrics.TagResult: outcome}).
+		DurationHistogram(_opGetTargetGraph, _metricITGComputeDuration, metrics.SlowDurationBuckets).
+		RecordDuration(elapsed)
+	if err != nil {
+		return targethasher.Result{}, false
+	}
+
+	logger.Info("GetTargetGraph: Served by incremental target graph",
+		zap.Int("target_count", len(result.Targets)),
+		zap.Duration("duration", elapsed),
+	)
+	return result, true
+}
+
+// seedITGCache stores result as the ITG base graph for the build's base SHA in
+// the background, best-effort. The write outlives the request, so it uses the
+// application context. result must not be mutated after this call.
+func (b *nativeOrchestrator) seedITGCache(logger *zap.Logger, provider itg.Provider, build entity.BuildDescription, result targethasher.Result) {
+	go func() {
+		err := provider.SeedCache(b.appCtx, itg.SeedCacheRequest{
+			BaseSha: build.BaseSha,
+			Remote:  build.Remote,
+			Result:  result,
+		})
+		if err != nil {
+			logger.Warn("GetTargetGraph: Failed to seed ITG cache", zap.String("base_sha", build.BaseSha), zap.Error(err))
+		}
+	}()
 }
 
 // readCachedGraph opens the cached TGB graph for a treehash. A TGB blob that
