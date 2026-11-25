@@ -250,6 +250,49 @@ message GetChangedTargetGraphResponse {
     }
 }
 
+// JobState is the lifecycle state of an asynchronous job.
+enum JobState {
+    JOB_STATE_INVALID = 0;
+    JOB_STATE_RUNNING = 1;
+    JOB_STATE_COMPLETED = 2;
+    JOB_STATE_FAILED = 3;
+}
+
+// JobStatus is the status of an asynchronous job.
+message JobStatus {
+    JobState state = 1;
+    // Set only when state is JOB_STATE_FAILED.
+    TangoError error = 2;
+}
+
+// SubmitJobResponse is the token of the job and its status after the submit.
+message SubmitJobResponse {
+    // token identifies the job in PollJobRequest.
+    string token = 1;
+    JobStatus status = 2;
+}
+
+// PollJobRequest identifies a job by the token that the submit returned.
+message PollJobRequest {
+    string token = 1;
+    // output_config filters the result. It does not change the job.
+    OutputConfig output_config = 2;
+}
+
+// PollTargetGraphJobResponse is the JobStatus and, when COMPLETED, the whole target graph in one message.
+message PollTargetGraphJobResponse {
+    OptimizedTargets targets = 1;
+    Metadata metadata = 2;
+    JobStatus status = 3;
+}
+
+// PollChangedTargetsJobResponse is the JobStatus and, when COMPLETED, all changed targets in one message.
+message PollChangedTargetsJobResponse {
+    ChangedTargets changed_targets = 1;
+    Metadata metadata = 2;
+    JobStatus status = 3;
+}
+
 // Tango is the service for analyzing build target graphs and services. It is an abstraction over the underlying build system like Bazel,
 // enabling quick understanding of the dependencies between software building blocks and changes across source code revisions.
 service Tango {
@@ -262,4 +305,16 @@ service Tango {
     // NOT YET IMPLEMENTED — returns Unimplemented.
     // Return a full target graph across two revisions with change indicator for each target. It differs from GetChangedTargets in that a full target graph can be constructed for either base or target revision.
     rpc GetChangedTargetGraph(GetChangedTargetGraphRequest) returns (stream GetChangedTargetGraphResponse) {}
+
+    // Start a GetTargetGraph job unless one is already active.
+    rpc SubmitTargetGraphJob(GetTargetGraphRequest) returns (SubmitJobResponse) {}
+
+    // Return the job status and, after COMPLETED, the target graph.
+    rpc PollTargetGraphJob(PollJobRequest) returns (PollTargetGraphJobResponse) {}
+
+    // Start a GetChangedTargets job unless one is already active.
+    rpc SubmitChangedTargetsJob(GetChangedTargetsRequest) returns (SubmitJobResponse) {}
+
+    // Return the job status and, after COMPLETED, the changed targets.
+    rpc PollChangedTargetsJob(PollJobRequest) returns (PollChangedTargetsJobResponse) {}
 }
