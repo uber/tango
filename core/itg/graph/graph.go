@@ -112,6 +112,8 @@ type OptimizedGraph struct {
 	AttrNameIDToString  map[int]string `json:"attrNameIDToString"`
 	AttrValueToID       map[string]int `json:"attrValueToID"`
 	AttrValueIDToString map[int]string `json:"attrValueIDToString"`
+
+	AllTargetsFileHashes map[string]string `json:"allTargetsFileHashes,omitempty"`
 }
 
 // Copy makes a deep copy of OptimizedTarget.
@@ -177,19 +179,20 @@ func (g *OptimizedGraph) Copy() *OptimizedGraph {
 	}
 
 	return &OptimizedGraph{
-		OptimizedTargets:    optimizedTargetsCopy,
-		ExternalRuleTargets: externalRuleTargetsCopy,
-		NextTargetID:        g.NextTargetID,
-		TargetNameToID:      maps.Clone(g.TargetNameToID),
-		TargetIDToString:    maps.Clone(g.TargetIDToString),
-		RuleTypeToID:        maps.Clone(g.RuleTypeToID),
-		RuleTypeIDToString:  maps.Clone(g.RuleTypeIDToString),
-		TagToID:             maps.Clone(g.TagToID),
-		TagIDToString:       maps.Clone(g.TagIDToString),
-		AttrNameToID:        maps.Clone(g.AttrNameToID),
-		AttrNameIDToString:  maps.Clone(g.AttrNameIDToString),
-		AttrValueToID:       maps.Clone(g.AttrValueToID),
-		AttrValueIDToString: maps.Clone(g.AttrValueIDToString),
+		OptimizedTargets:     optimizedTargetsCopy,
+		ExternalRuleTargets:  externalRuleTargetsCopy,
+		NextTargetID:         g.NextTargetID,
+		TargetNameToID:       maps.Clone(g.TargetNameToID),
+		TargetIDToString:     maps.Clone(g.TargetIDToString),
+		RuleTypeToID:         maps.Clone(g.RuleTypeToID),
+		RuleTypeIDToString:   maps.Clone(g.RuleTypeIDToString),
+		TagToID:              maps.Clone(g.TagToID),
+		TagIDToString:        maps.Clone(g.TagIDToString),
+		AttrNameToID:         maps.Clone(g.AttrNameToID),
+		AttrNameIDToString:   maps.Clone(g.AttrNameIDToString),
+		AttrValueToID:        maps.Clone(g.AttrValueToID),
+		AttrValueIDToString:  maps.Clone(g.AttrValueIDToString),
+		AllTargetsFileHashes: maps.Clone(g.AllTargetsFileHashes),
 	}
 }
 

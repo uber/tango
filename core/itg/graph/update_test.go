@@ -17,6 +17,7 @@ package graph
 import (
 	"context"
 	"crypto/sha1"
+	"regexp"
 	"testing"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
@@ -57,7 +58,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			},
 		}
 
-		require.NoError(t, computeAvailableHashes(ctx, hasher, targets))
+		require.NoError(t, computeAvailableHashes(ctx, hasher, targets, nil))
 		assert.Equal(t, expected, targets[name].Hash)
 		assert.Equal(t, ctx, hasher.ctx)
 	})
@@ -69,7 +70,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			name: {Name: name, RuleType: targethasher.PackageGroup},
 		}
 
-		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, nil))
 
 		h := sha1.New()
 		h.Write([]byte(name))
@@ -83,7 +84,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			name: {Name: name, RuleType: targethasher.ExternalRuleType},
 		}
 
-		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, nil))
 		assert.Nil(t, targets[name].Hash, "external rule targets should not get a hash here")
 	})
 
@@ -94,7 +95,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			name: {Name: name, RuleType: targethasher.GeneratedFileType},
 		}
 
-		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, nil))
 		assert.Nil(t, targets[name].Hash, "generated file hash is resolved later")
 	})
 
@@ -111,7 +112,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			},
 		}
 
-		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, nil))
 		assert.NotNil(t, targets[name].HashWithoutDeps, "rule should have HashWithoutDeps after hashing")
 		assert.Nil(t, targets[name].Hash, "full hash is not computed here — deps are needed")
 	})
@@ -150,8 +151,8 @@ func TestComputeAvailableHashes(t *testing.T) {
 			},
 		}
 
-		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, forward))
-		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, reversed))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, forward, nil))
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, reversed, nil))
 
 		assert.Equal(t, forward[name].HashWithoutDeps, reversed[name].HashWithoutDeps,
 			"tags=[a,b] and tags=[b,a] should hash identically")
@@ -164,7 +165,7 @@ func TestComputeAvailableHashes(t *testing.T) {
 			"//pkg:f": {Name: "//pkg:f", RuleType: targethasher.SourceFileType, SourceFile: &buildpb.SourceFile{}},
 		}
 
-		err := computeAvailableHashes(context.Background(), hasher, targets)
+		err := computeAvailableHashes(context.Background(), hasher, targets, nil)
 		assert.Error(t, err)
 	})
 }
@@ -184,7 +185,7 @@ func TestComputeHashes(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		_, err := g.computeHashes(ctx, aID)
+		_, err := g.computeHashes(ctx, aID, nil)
 		assert.ErrorIs(t, err, context.Canceled)
 	})
 
@@ -196,7 +197,7 @@ func TestComputeHashes(t *testing.T) {
 		})
 		aID := g.TargetNameToID["//pkg:a"]
 
-		got, err := g.computeHashes(context.Background(), aID)
+		got, err := g.computeHashes(context.Background(), aID, nil)
 		require.NoError(t, err)
 		assert.Equal(t, hash, got)
 	})
@@ -205,7 +206,7 @@ func TestComputeHashes(t *testing.T) {
 		t.Parallel()
 		g := OptimizeGraph(nil)
 
-		_, err := g.computeHashes(context.Background(), 9999)
+		_, err := g.computeHashes(context.Background(), 9999, nil)
 		assert.Error(t, err)
 	})
 
@@ -217,7 +218,7 @@ func TestComputeHashes(t *testing.T) {
 		})
 		id := g.TargetNameToID["//external:repo"]
 
-		got, err := g.computeHashes(context.Background(), id)
+		got, err := g.computeHashes(context.Background(), id, nil)
 		require.NoError(t, err)
 		assert.Equal(t, hash, got)
 	})
@@ -229,7 +230,7 @@ func TestComputeHashes(t *testing.T) {
 		})
 		id := g.TargetNameToID["//pkg:f.go"]
 
-		_, err := g.computeHashes(context.Background(), id)
+		_, err := g.computeHashes(context.Background(), id, nil)
 		assert.Error(t, err, "source file should already have its hash set")
 	})
 
@@ -247,7 +248,7 @@ func TestComputeHashes(t *testing.T) {
 		g.OptimizedTargets[ruleID].Hash = depHash
 		g.OptimizedTargets[genID].Hash = nil // force recompute
 
-		got, err := g.computeHashes(context.Background(), genID)
+		got, err := g.computeHashes(context.Background(), genID, nil)
 		require.NoError(t, err)
 		assert.Equal(t, depHash, got, "generated file should inherit its dep's hash")
 	})
@@ -264,7 +265,7 @@ func TestComputeHashes(t *testing.T) {
 		// lib has no final hash yet (only HashWithoutDeps)
 		g.OptimizedTargets[libID].Hash = nil
 
-		got, err := g.computeHashes(context.Background(), libID)
+		got, err := g.computeHashes(context.Background(), libID, nil)
 		require.NoError(t, err)
 
 		// Expected: sha1(hwod || depHash)  (single dep, already sorted)
@@ -412,7 +413,7 @@ func TestComputeInvalidatedHashesCycleOrderInvariance(t *testing.T) {
 					invalidated.Insert(graph.TargetNameToID[name])
 				}
 
-				err := graph.computeInvalidatedHashes(ctx, invalidated)
+				err := graph.computeInvalidatedHashes(ctx, invalidated, nil)
 				require.NoError(rt, err)
 				for name, expected := range expectedHashes {
 					actual := graph.OptimizedTargets[graph.TargetNameToID[name]].Hash
@@ -421,4 +422,31 @@ func TestComputeInvalidatedHashesCycleOrderInvariance(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestExcludedTargetsGetEmptyHash(t *testing.T) {
+	t.Parallel()
+	excluded := []*regexp.Regexp{regexp.MustCompile(`^//gen:`)}
+
+	t.Run("computeAvailableHashes", func(t *testing.T) {
+		t.Parallel()
+		targets := map[string]*targethasher.Target{
+			"//gen:pkg": {Name: "//gen:pkg", RuleType: targethasher.PackageGroup},
+			"//ok:pkg":  {Name: "//ok:pkg", RuleType: targethasher.PackageGroup},
+		}
+		require.NoError(t, computeAvailableHashes(context.Background(), &fakeSourceHasher{}, targets, excluded))
+		assert.Empty(t, targets["//gen:pkg"].Hash)
+		assert.NotNil(t, targets["//gen:pkg"].Hash)
+		assert.NotEmpty(t, targets["//ok:pkg"].Hash)
+	})
+
+	t.Run("computeHashes", func(t *testing.T) {
+		t.Parallel()
+		g := OptimizeGraph(map[string]*targethasher.Target{
+			"//gen:lib": {Name: "//gen:lib", RuleType: "go_library", HashWithoutDeps: []byte("x")},
+		})
+		got, err := g.computeHashes(context.Background(), g.TargetNameToID["//gen:lib"], excluded)
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
 }
