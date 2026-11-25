@@ -122,3 +122,17 @@ wait:
 		logger.Warn("Failed to write final job status", zap.Stringer("state", final.State), zap.Error(err))
 	}
 }
+
+func jobStatusError(status entity.JobStatus) error {
+	err := errors.New(status.ErrorMessage)
+	switch status.ErrorCode {
+	case tangoerrors.ErrorUser:
+		return tangoerrors.NewUser(err)
+	case tangoerrors.ErrorInfraRetryable:
+		return tangoerrors.NewInfraRetryable(err)
+	case tangoerrors.ErrorCancelled:
+		return tangoerrors.NewCancelled(err)
+	default:
+		return tangoerrors.NewInfra(err)
+	}
+}

@@ -69,6 +69,8 @@ type Controller interface {
 	GetChangedTargets(ctx context.Context, req entity.GetChangedTargetsRequest, repo config.RepositoryConfig) ([]entity.GetChangedTargetsResponse, error)
 	SubmitTargetGraphJob(ctx context.Context, req entity.GetTargetGraphRequest, repo config.RepositoryConfig) (string, entity.JobStatus, error)
 	PollTargetGraphJob(ctx context.Context, token string) (entity.JobStatus, storage.GraphReader, error)
+	SubmitChangedTargetsJob(ctx context.Context, req entity.GetChangedTargetsRequest, repo config.RepositoryConfig) (string, entity.JobStatus, error)
+	PollChangedTargetsJob(ctx context.Context, token string) (entity.JobStatus, []entity.GetChangedTargetsResponse, error)
 }
 
 // NewController creates a new controller. appCtx is cancelled on process

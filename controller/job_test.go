@@ -51,6 +51,10 @@ func targetGraphJobKey(request entity.GetTargetGraphRequest) string {
 	return cachekey.GetTargetGraphJobPath(cachekey.GetTargetGraphJobToken(request))
 }
 
+func changedTargetsJobKey(request entity.GetChangedTargetsRequest) string {
+	return cachekey.GetChangedTargetsJobPath(cachekey.GetChangedTargetsJobToken(request.First, request.Second, request.ExcludeFilesRegex, request.BypassCache))
+}
+
 func newJobTestController(t *testing.T, appCtx context.Context, st storage.Storage, orch orchestrator.Orchestrator) *controller {
 	t.Helper()
 	return NewController(appCtx, Params{
@@ -106,6 +110,21 @@ func TestSubmitJob_ActiveJobReturnsExistingStatus(t *testing.T) {
 		token, status, err := c.SubmitTargetGraphJob(ctx, targetGraphJobEntityRequest(), jobTestRepository())
 		require.NoError(t, err)
 		assert.Equal(t, cachekey.GetTargetGraphJobToken(targetGraphJobEntityRequest()), token)
+		assert.Equal(t, entity.JobStateRunning, status.State)
+	})
+
+	t.Run("changed targets", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		st := storage.NewMemoryStorage()
+		request := changedTargetsRequest()
+		running := entity.JobStatus{State: entity.JobStateRunning, LastUpdated: time.Now()}
+
+		c := newJobTestController(t, context.Background(), st, orchestratormock.NewMockOrchestrator(ctrl))
+		require.NoError(t, c.jobStorage.Put(t.Context(), changedTargetsJobKey(request), running))
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_, status, submitErr := c.SubmitChangedTargetsJob(ctx, request, jobTestRepository())
+		require.NoError(t, submitErr)
 		assert.Equal(t, entity.JobStateRunning, status.State)
 	})
 }
@@ -179,6 +198,80 @@ func TestSubmitTargetGraphJob_ComputesAndPollCompletes(t *testing.T) {
 	assert.NotEmpty(t, drainGraphReader(t, graphReader))
 }
 
+func TestSubmitChangedTargetsJob_WaitsForGraphJobs(t *testing.T) {
+	t.Run("completes", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		st := storage.NewMemoryStorage()
+		orch := orchestratormock.NewMockOrchestrator(ctrl)
+		expectGraphCompute(t, orch, st, map[string][]entity.GetTargetGraphResponse{
+			"sha1": tgbTestGraphChunks(tgbHash2Old),
+			"sha2": tgbTestGraphChunks(tgbHash2New),
+		}, nil)
+
+		c := newJobTestController(t, context.Background(), st, orch)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		request := changedTargetsRequest()
+		token, _, err := c.SubmitChangedTargetsJob(ctx, request, jobTestRepository())
+		require.NoError(t, err)
+
+		waitForJobState(t, c, cachekey.GetChangedTargetsJobPath(token), entity.JobStateCompleted)
+		waitForJobState(t, c, targetGraphJobKey(entity.GetTargetGraphRequest{Build: request.First}), entity.JobStateCompleted)
+		waitForJobState(t, c, targetGraphJobKey(entity.GetTargetGraphRequest{Build: request.Second}), entity.JobStateCompleted)
+
+		status, chunks, err := c.PollChangedTargetsJob(t.Context(), token)
+		require.NoError(t, err)
+		assert.Equal(t, entity.JobStateCompleted, status.State)
+		assert.NotEmpty(t, chunks)
+	})
+
+	t.Run("reuses a completed graph job", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		st := storage.NewMemoryStorage()
+		orch := orchestratormock.NewMockOrchestrator(ctrl)
+		expectGraphCompute(t, orch, st, map[string][]entity.GetTargetGraphResponse{
+			"sha1": tgbTestGraphChunks(tgbHash2Old),
+			"sha2": tgbTestGraphChunks(tgbHash2New),
+		}, nil)
+
+		c := newJobTestController(t, context.Background(), st, orch)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		request := changedTargetsRequest()
+		firstKey := targetGraphJobKey(entity.GetTargetGraphRequest{Build: request.First})
+		_, _, err := c.SubmitTargetGraphJob(ctx, entity.GetTargetGraphRequest{Build: request.First}, jobTestRepository())
+		require.NoError(t, err)
+		before := waitForJobState(t, c, firstKey, entity.JobStateCompleted)
+
+		token, _, err := c.SubmitChangedTargetsJob(ctx, request, jobTestRepository())
+		require.NoError(t, err)
+		waitForJobState(t, c, cachekey.GetChangedTargetsJobPath(token), entity.JobStateCompleted)
+
+		after := waitForJobState(t, c, firstKey, entity.JobStateCompleted)
+		assert.True(t, before.LastUpdated.Equal(after.LastUpdated), "the completed graph job must not run again")
+	})
+
+	t.Run("graph job failure fails the job", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		st := storage.NewMemoryStorage()
+		orch := orchestratormock.NewMockOrchestrator(ctrl)
+		expectGraphCompute(t, orch, st,
+			map[string][]entity.GetTargetGraphResponse{"sha1": tgbTestGraphChunks(tgbHash2Old)},
+			map[string]error{"sha2": tangoerrors.NewUser(errors.New("bad revision"))})
+
+		c := newJobTestController(t, context.Background(), st, orch)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		request := changedTargetsRequest()
+		token, _, err := c.SubmitChangedTargetsJob(ctx, request, jobTestRepository())
+		require.NoError(t, err)
+
+		got := waitForJobState(t, c, cachekey.GetChangedTargetsJobPath(token), entity.JobStateFailed)
+		assert.Equal(t, tangoerrors.ErrorUser, got.ErrorCode)
+		waitForJobState(t, c, targetGraphJobKey(entity.GetTargetGraphRequest{Build: request.First}), entity.JobStateCompleted)
+	})
+}
+
 func TestSubmitTargetGraphJob_ComputeFailureMarksFailed(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	st := storage.NewMemoryStorage()
@@ -213,6 +306,13 @@ func TestPollJob_NotFound(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		c := newJobTestController(t, context.Background(), storage.NewMemoryStorage(), orchestratormock.NewMockOrchestrator(ctrl))
 		_, _, err := c.PollTargetGraphJob(t.Context(), "missing")
+		require.Error(t, err)
+	})
+
+	t.Run("changed targets", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		c := newJobTestController(t, context.Background(), storage.NewMemoryStorage(), orchestratormock.NewMockOrchestrator(ctrl))
+		_, _, err := c.PollChangedTargetsJob(t.Context(), "missing")
 		require.Error(t, err)
 	})
 }
