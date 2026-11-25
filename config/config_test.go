@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,6 +42,8 @@ func TestParseBytes_Defaults(t *testing.T) {
 
 	assert.Equal(t, StorageTypeMemory, cfg.Storage.Type, "storage type should default to memory")
 	assert.Equal(t, DefaultMaxMessageBytes, cfg.Service.MaxMessageBytes, "max_message_bytes should default")
+	assert.Equal(t, DefaultJobHeartbeatInterval, cfg.Service.JobHeartbeatInterval, "job_heartbeat_interval should default")
+	assert.Equal(t, DefaultJobTimeout, cfg.Service.JobTimeout, "job_timeout should default")
 	assert.Equal(t, DefaultQueryTimeoutSeconds, cfg.Repository[0].QueryTimeoutSeconds, "query_timeout_seconds should default to 600")
 	require.NotNil(t, cfg.Repository[0].BzlmodEnabled)
 	assert.True(t, *cfg.Repository[0].BzlmodEnabled, "bzlmod_enabled should default to true")
@@ -62,6 +65,8 @@ service:
   max_worker_pool_size: 4
   workspaces_root_path: "/custom/clone"
   max_message_bytes: 1000000
+  job_heartbeat_interval: 2s
+  job_timeout: 30m
 `
 	cfg, err := ParseBytes([]byte(yamlStr))
 	require.NoError(t, err)
@@ -75,6 +80,8 @@ service:
 	assert.True(t, cfg.Repository[0].StreamBazelLogs)
 	assert.Equal(t, "/custom/clone", cfg.Service.WorkspacesRootPath)
 	assert.Equal(t, 1000000, cfg.Service.MaxMessageBytes)
+	assert.Equal(t, 2*time.Second, cfg.Service.JobHeartbeatInterval)
+	assert.Equal(t, 30*time.Minute, cfg.Service.JobTimeout)
 }
 
 func TestParseBytes_StorageValidation(t *testing.T) {
