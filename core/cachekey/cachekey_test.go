@@ -75,4 +75,8 @@ func TestGetTGBGraphByTreeHash(t *testing.T) {
 		GetTGBGraphByTreeHash(repositoryID, treehash, strategy, []string{"a", "b"}),
 		GetTGBGraphByTreeHash(repositoryID, treehash, strategy, []string{"b", "a"}),
 	)
+
+	assert.True(t, IsTGBGraphPath(got))
+	assert.True(t, IsTGBGraphPath(withRegex))
+	assert.False(t, IsTGBGraphPath(filepath.Join(repositoryID, "graphs", treehash, strategy.String())))
 }

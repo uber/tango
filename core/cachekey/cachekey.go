@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/internal/url"
@@ -40,6 +41,12 @@ func GetTGBGraphByTreeHash(repositoryID, treehash string, strategy entity.Comput
 		path += "_requests-options-" + hash
 	}
 	return path
+}
+
+// IsTGBGraphPath reports whether key is a GetTGBGraphByTreeHash key.
+func IsTGBGraphPath(key string) bool {
+	base, _, _ := strings.Cut(filepath.Base(key), "_requests-options-")
+	return strings.HasSuffix(base, "-tgb")
 }
 
 // GetTreehashCachePath returns the cache path for the treehash mapping.
@@ -74,14 +81,18 @@ func hashExcludeFilesRegex(excludeFilesRegex []string) string {
 	if len(excludeFilesRegex) == 0 {
 		return ""
 	}
+	h := md5.New()
+	writeExcludeFilesRegex(h, excludeFilesRegex)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func writeExcludeFilesRegex(h hash.Hash, excludeFilesRegex []string) {
 	sorted := make([]string, len(excludeFilesRegex))
 	copy(sorted, excludeFilesRegex)
 	sort.Strings(sorted)
-	h := md5.New()
 	for _, r := range sorted {
 		writeFramedString(h, r)
 	}
-	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func writeFramedString(h hash.Hash, value string) {
