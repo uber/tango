@@ -61,7 +61,7 @@ func (f *fakeCache) Put(_ context.Context, g *graph.OptimizedGraph, key cache.Ke
 }
 
 type harness struct {
-	provider Provider
+	provider *provider
 	git      *gitmock.MockInterface
 	bazel    *bazelmock.MockBazel
 	cache    *fakeCache
@@ -95,7 +95,9 @@ func newHarness(t *testing.T, cfg config.RepositoryConfig) *harness {
 		RepositoryConfig: cfg,
 	})
 	require.NoError(t, err)
-	h.provider = p
+	impl, ok := p.(*provider)
+	require.True(t, ok)
+	h.provider = impl
 
 	h.git.EXPECT().RevParse(gomock.Any(), "basesha^{commit}").Return("basesha", nil).AnyTimes()
 	h.git.EXPECT().GetCommitTimeSecond(gomock.Any(), "basesha").Return(int64(1000), nil).AnyTimes()
@@ -103,7 +105,7 @@ func newHarness(t *testing.T, cfg config.RepositoryConfig) *harness {
 }
 
 func (h *harness) getGraph() (*graph.OptimizedGraph, error) {
-	return h.provider.GetGraph(context.Background(), GetGraphRequest{BaseSha: "basesha", Remote: "remote"})
+	return h.provider.getGraph(context.Background(), GetResultRequest{BaseSha: "basesha", Remote: "remote"})
 }
 
 func (h *harness) expectDiff(entries ...git.DiffEntry) {
@@ -234,7 +236,7 @@ func TestGetGraph_FetchesMissingBaseSha(t *testing.T) {
 		WorkspacePath: t.TempDir(),
 	})
 	require.NoError(t, err)
-	_, err = p.GetGraph(context.Background(), GetGraphRequest{BaseSha: "basesha", Remote: "remote"})
+	_, err = p.GetResult(context.Background(), GetResultRequest{BaseSha: "basesha", Remote: "remote"})
 	require.Error(t, err)
 }
 
@@ -389,7 +391,7 @@ func TestPackagesToQuery_SkipsDeletedPackages(t *testing.T) {
 	assert.Equal(t, []string{"//a:*", "//b:*"}, got)
 }
 
-func TestOptimizedGraphToResult(t *testing.T) {
+func TestToResult(t *testing.T) {
 	name, val, typ := "importpath", "example.com/foo", buildpb.Attribute_STRING
 	g := graph.OptimizeGraph(map[string]*targethasher.Target{
 		"//pkg:b": {Name: "//pkg:b", RuleType: "go_library", HashWithoutDeps: []byte("b"), Hash: []byte("b")},
@@ -404,7 +406,7 @@ func TestOptimizedGraphToResult(t *testing.T) {
 	})
 	g.AllTargetsFileHashes = map[string]string{"BUILD.bazel": "deadbeef"}
 
-	result := OptimizedGraphToResult(g)
+	result := toResult(g)
 
 	assert.Equal(t, []string{"//pkg:a", "//pkg:b"}, result.TargetNames)
 	assert.Equal(t, g.AllTargetsFileHashes, result.AllTargetsFileHashes)
@@ -432,4 +434,17 @@ func sorted(s []string) []string {
 	out := append([]string{}, s...)
 	sort.Strings(out)
 	return out
+}
+
+func TestGetResult(t *testing.T) {
+	h := newHarness(t, config.RepositoryConfig{})
+	h.cache.getGraph = graph.OptimizeGraph(map[string]*targethasher.Target{
+		"//a:a": {Name: "//a:a", RuleType: "go_library", HashWithoutDeps: []byte("a"), Hash: []byte("a")},
+	})
+	h.expectDiff()
+	h.git.EXPECT().FileHashes(gomock.Any(), "HEAD").Return(nil, nil)
+
+	got, err := h.provider.GetResult(context.Background(), GetResultRequest{BaseSha: "basesha", Remote: "remote"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"//a:a"}, got.TargetNames)
 }

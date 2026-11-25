@@ -72,19 +72,19 @@ var _baseQueryArgs = []string{"--order_output=no", "--proto:locations", "--nopro
 
 // Provider computes target graphs incrementally.
 type Provider interface {
-	// GetGraph returns the graph of the checked-out workspace, built by
+	// GetResult returns the target graph of the checked-out workspace, built by
 	// applying the changes since the nearest cached graph at or before
-	// req.BaseSha. It returns an error, never a partial graph, when the change
+	// req.BaseSha. It returns an error, never a partial result, when the change
 	// cannot be applied incrementally, so callers can fall back to a full query.
-	GetGraph(ctx context.Context, req GetGraphRequest) (*graph.OptimizedGraph, error)
+	GetResult(ctx context.Context, req GetResultRequest) (targethasher.Result, error)
 
 	// SeedCache stores a full-query result so later runs have a base to build
 	// on. Without it the cache stays cold and GetGraph never succeeds.
 	SeedCache(ctx context.Context, req SeedCacheRequest) error
 }
 
-// GetGraphRequest contains the parameters for GetGraph.
-type GetGraphRequest struct {
+// GetResultRequest contains the parameters for GetResult.
+type GetResultRequest struct {
 	// BaseSha is a commit on the default branch used to locate the nearest
 	// cached graph.
 	BaseSha string
@@ -179,31 +179,16 @@ func New(p Params) (Provider, error) {
 	}, nil
 }
 
-// OptimizedGraphToResult converts g to a targethasher.Result so it can go
-// through the same mapper.ResultToGraphChunks and storage pipeline as a
-// full-query result.
-func OptimizedGraphToResult(g *graph.OptimizedGraph) targethasher.Result {
-	names := make([]string, 0, len(g.OptimizedTargets))
-	targets := make(map[string]*targethasher.Target, len(g.OptimizedTargets))
-	for id := range g.OptimizedTargets {
-		t := g.OptimizedTargetToTarget(id)
-		for _, attr := range t.Attributes {
-			tp := buildpb.Attribute_STRING
-			attr.Type = &tp
-		}
-		targets[t.Name] = &t
-		names = append(names, t.Name)
+// GetResult incrementally computes the target graph of the workspace.
+func (p *provider) GetResult(ctx context.Context, req GetResultRequest) (targethasher.Result, error) {
+	g, err := p.getGraph(ctx, req)
+	if err != nil {
+		return targethasher.Result{}, err
 	}
-	sortNamesByLabel(names)
-	return targethasher.Result{
-		Targets:              targets,
-		TargetNames:          names,
-		AllTargetsFileHashes: g.AllTargetsFileHashes,
-	}
+	return toResult(g), nil
 }
 
-// GetGraph incrementally computes the full target graph of the workspace.
-func (p *provider) GetGraph(ctx context.Context, req GetGraphRequest) (*graph.OptimizedGraph, error) {
+func (p *provider) getGraph(ctx context.Context, req GetResultRequest) (*graph.OptimizedGraph, error) {
 	baseCommitSecond, err := p.commitTimeSecond(ctx, req.Remote, req.BaseSha)
 	if err != nil {
 		return nil, err
@@ -234,25 +219,11 @@ func (p *provider) GetGraph(ctx context.Context, req GetGraphRequest) (*graph.Op
 	}
 
 	// Load the cached graph concurrently with the bazel query: it is the most
-	// expensive step and is independent of the query.
+	// expensive step and is independent of the query. Cancelled on return so an
+	// early failure does not leave the download running.
 	cacheCtx, cancelCache := context.WithCancel(ctx)
-	defer cancelCache() // stops the load if we return before consuming it
-	type cached struct {
-		graph *graph.OptimizedGraph
-		err   error
-	}
-	cacheCh := make(chan cached, 1)
-	go func() {
-		g, err := p.cache.Get(cacheCtx, cacheKey)
-		cacheCh <- cached{graph: g, err: err}
-	}()
-	awaitCache := func() (*graph.OptimizedGraph, error) {
-		c := <-cacheCh
-		if c.err != nil {
-			return nil, fmt.Errorf("loading cached graph: %w", c.err)
-		}
-		return c.graph, nil
-	}
+	defer cancelCache()
+	awaitCache := p.loadCache(cacheCtx, cacheKey)
 
 	// Resolve git blob hashes the same way the full-query path does; otherwise
 	// the same source file hashes differently depending on the path taken.
@@ -311,6 +282,27 @@ func (p *provider) GetGraph(ctx context.Context, req GetGraphRequest) (*graph.Op
 	}
 	p.populateAllTargetsFileHashes(g, knownHashes)
 	return g, nil
+}
+
+// loadCache starts loading the graph for key in the background and returns a
+// function that waits for it.
+func (p *provider) loadCache(ctx context.Context, key cache.Key) func() (*graph.OptimizedGraph, error) {
+	type loaded struct {
+		graph *graph.OptimizedGraph
+		err   error
+	}
+	ch := make(chan loaded, 1)
+	go func() {
+		g, err := p.cache.Get(ctx, key)
+		ch <- loaded{graph: g, err: err}
+	}()
+	return func() (*graph.OptimizedGraph, error) {
+		l := <-ch
+		if l.err != nil {
+			return nil, fmt.Errorf("loading cached graph: %w", l.err)
+		}
+		return l.graph, nil
+	}
 }
 
 // SeedCache stores req.Result as the base graph for req.BaseSha. The cache
@@ -500,4 +492,27 @@ func sortNamesByLabel(names []string) {
 		}
 		return ni < nj
 	})
+}
+
+// toResult converts g to a targethasher.Result so it can go
+// through the same mapper.ResultToGraphChunks and storage pipeline as a
+// full-query result.
+func toResult(g *graph.OptimizedGraph) targethasher.Result {
+	names := make([]string, 0, len(g.OptimizedTargets))
+	targets := make(map[string]*targethasher.Target, len(g.OptimizedTargets))
+	for id := range g.OptimizedTargets {
+		t := g.OptimizedTargetToTarget(id)
+		for _, attr := range t.Attributes {
+			tp := buildpb.Attribute_STRING
+			attr.Type = &tp
+		}
+		targets[t.Name] = &t
+		names = append(names, t.Name)
+	}
+	sortNamesByLabel(names)
+	return targethasher.Result{
+		Targets:              targets,
+		TargetNames:          names,
+		AllTargetsFileHashes: g.AllTargetsFileHashes,
+	}
 }
