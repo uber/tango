@@ -31,6 +31,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
 	"github.com/uber/tango/controller"
 	"github.com/uber/tango/core/git"
@@ -83,7 +84,7 @@ func graphFormat(t testing.TB) string {
 	return requiredEnv(t, "TANGO_GRAPH_FORMAT")
 }
 
-func writeConfig(t testing.TB, dir, remote, clonePath string) string {
+func writeConfig(t testing.TB, dir, remote, clonePath string, itgEnabled bool) string {
 	t.Helper()
 
 	tmpl, err := template.ParseFiles(configTemplateFile)
@@ -99,10 +100,12 @@ func writeConfig(t testing.TB, dir, remote, clonePath string) string {
 		ClonePath    string
 		BazelCommand string
 		GraphFormat  string
+		ITGEnabled   bool
 	}{
 		Remote:      remote,
 		ClonePath:   clonePath,
 		GraphFormat: graphFormat(t),
+		ITGEnabled:  itgEnabled,
 	})
 	require.NoError(t, err, "failed to render config template")
 
@@ -116,11 +119,26 @@ func startServer(t testing.TB, remote string) string {
 
 func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 	t.Helper()
+	addr, _ := startServerWithOptions(t, remote, zl, serverOptions{})
+	return addr
+}
+
+type serverOptions struct {
+	// ITGEnabled turns on the incremental target graph for the repository.
+	ITGEnabled bool
+	// Scope receives the orchestrator's metrics. Defaults to a no-op scope.
+	Scope tally.Scope
+}
+
+// startServerWithOptions starts a server and also returns its storage so tests
+// can observe background cache writes.
+func startServerWithOptions(t testing.TB, remote string, zl *zap.Logger, opts serverOptions) (string, storage.Storage) {
+	t.Helper()
 
 	configDir := t.TempDir()
 	clonePath := t.TempDir()
 
-	configPath := writeConfig(t, configDir, remote, clonePath)
+	configPath := writeConfig(t, configDir, remote, clonePath, opts.ITGEnabled)
 
 	appCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -145,6 +163,7 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 		Logger:      zl,
 		GitFactory:  func(dir string) git.Interface { return git.New(dir, zl) },
 		Config:      cfg,
+		Scope:       opts.Scope,
 	})
 	require.NoError(t, err, "failed to create orchestrator")
 
@@ -170,7 +189,7 @@ func startServerWithLogger(t testing.TB, remote string, zl *zap.Logger) string {
 	require.NoError(t, dispatcher.Start(), "failed to start dispatcher")
 	t.Cleanup(func() { assert.NoError(t, dispatcher.Stop()) })
 
-	return listener.Addr().String()
+	return listener.Addr().String(), store
 }
 
 func newClient(t testing.TB, addr string) pb.TangoYARPCClient {

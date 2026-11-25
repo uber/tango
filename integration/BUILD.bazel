@@ -9,6 +9,7 @@ go_test(
         "benchmark_test.go",
         "bzlmod_test.go",
         "integration_test.go",
+        "itg_test.go",
     ],
     data = glob(["testdata/**"]),
     tags = [
@@ -26,6 +27,7 @@ go_test(
         "//tangopb",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
+        "@com_github_uber_go_tally//:tally",
         "@org_uber_go_yarpc//:yarpc",
         "@org_uber_go_yarpc//api/transport",
         "@org_uber_go_yarpc//transport/grpc",
