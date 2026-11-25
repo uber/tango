@@ -72,3 +72,35 @@ func (mr *MockControllerMockRecorder) GetTargetGraph(ctx, req, repo any) *gomock
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTargetGraph", reflect.TypeOf((*MockController)(nil).GetTargetGraph), ctx, req, repo)
 }
+
+// PollTargetGraphJob mocks base method.
+func (m *MockController) PollTargetGraphJob(ctx context.Context, token string) (entity.JobStatus, storage.GraphReader, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollTargetGraphJob", ctx, token)
+	ret0, _ := ret[0].(entity.JobStatus)
+	ret1, _ := ret[1].(storage.GraphReader)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// PollTargetGraphJob indicates an expected call of PollTargetGraphJob.
+func (mr *MockControllerMockRecorder) PollTargetGraphJob(ctx, token any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollTargetGraphJob", reflect.TypeOf((*MockController)(nil).PollTargetGraphJob), ctx, token)
+}
+
+// SubmitTargetGraphJob mocks base method.
+func (m *MockController) SubmitTargetGraphJob(ctx context.Context, req entity.GetTargetGraphRequest, repo config.RepositoryConfig) (string, entity.JobStatus, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SubmitTargetGraphJob", ctx, req, repo)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(entity.JobStatus)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// SubmitTargetGraphJob indicates an expected call of SubmitTargetGraphJob.
+func (mr *MockControllerMockRecorder) SubmitTargetGraphJob(ctx, req, repo any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SubmitTargetGraphJob", reflect.TypeOf((*MockController)(nil).SubmitTargetGraphJob), ctx, req, repo)
+}

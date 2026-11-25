@@ -17,9 +17,11 @@ package controller
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/uber-go/tally"
 	"github.com/uber/tango/config"
+	"github.com/uber/tango/core/jobstorage"
 	"github.com/uber/tango/core/storage"
 	"github.com/uber/tango/entity"
 	"github.com/uber/tango/observability/metrics"
@@ -31,12 +33,15 @@ import (
 // Params are the parameters for the controller.
 type Params struct {
 	fx.In
-	Logger          *zap.Logger
-	Storage         storage.Storage
-	Orchestrator    orchestrator.Orchestrator
-	Scope           tally.Scope                `optional:"true"`
-	MaxMessageBytes int                        `optional:"true"`
-	GraphConfig     config.GraphConfigProvider `optional:"true"`
+	Logger               *zap.Logger
+	Storage              storage.Storage
+	Orchestrator         orchestrator.Orchestrator
+	Scope                tally.Scope                `optional:"true"`
+	MaxMessageBytes      int                        `optional:"true"`
+	GraphConfig          config.GraphConfigProvider `optional:"true"`
+	JobStorage           jobstorage.JobStorage      `name:"jobStorage" optional:"true"`
+	JobHeartbeatInterval time.Duration              `name:"jobHeartbeatInterval" optional:"true"`
+	JobTimeout           time.Duration              `name:"jobTimeout" optional:"true"`
 }
 
 type controller struct {
@@ -51,6 +56,10 @@ type controller struct {
 	// Used by linkRequestCtx and any fire-and-forget goroutines so they
 	// abort instead of leaking past server teardown.
 	appCtx context.Context
+
+	jobStorage           jobstorage.JobStorage
+	jobHeartbeatInterval time.Duration
+	jobTimeout           time.Duration
 }
 
 // Controller is the business-logic surface the handler depends on. repo is the
@@ -58,6 +67,8 @@ type controller struct {
 type Controller interface {
 	GetTargetGraph(ctx context.Context, req entity.GetTargetGraphRequest, repo config.RepositoryConfig) (storage.GraphReader, error)
 	GetChangedTargets(ctx context.Context, req entity.GetChangedTargetsRequest, repo config.RepositoryConfig) ([]entity.GetChangedTargetsResponse, error)
+	SubmitTargetGraphJob(ctx context.Context, req entity.GetTargetGraphRequest, repo config.RepositoryConfig) (string, entity.JobStatus, error)
+	PollTargetGraphJob(ctx context.Context, token string) (entity.JobStatus, storage.GraphReader, error)
 }
 
 // NewController creates a new controller. appCtx is cancelled on process
@@ -68,14 +79,29 @@ func NewController(appCtx context.Context, p Params) Controller {
 	if maxMessageBytes <= 0 {
 		maxMessageBytes = config.DefaultMaxMessageBytes
 	}
+	jobHeartbeatInterval := p.JobHeartbeatInterval
+	if jobHeartbeatInterval <= 0 {
+		jobHeartbeatInterval = config.DefaultJobHeartbeatInterval
+	}
+	jobTimeout := p.JobTimeout
+	if jobTimeout <= 0 {
+		jobTimeout = config.DefaultJobTimeout
+	}
+	jobStorage := p.JobStorage
+	if jobStorage == nil {
+		jobStorage = jobstorage.NewMemoryStorage()
+	}
 	return &controller{
-		logger:          p.Logger,
-		storage:         p.Storage,
-		orchestrator:    p.Orchestrator,
-		emitter:         emitter,
-		maxMessageBytes: maxMessageBytes,
-		graphConfig:     p.GraphConfig,
-		appCtx:          appCtx,
+		logger:               p.Logger,
+		storage:              p.Storage,
+		orchestrator:         p.Orchestrator,
+		emitter:              emitter,
+		maxMessageBytes:      maxMessageBytes,
+		graphConfig:          p.GraphConfig,
+		appCtx:               appCtx,
+		jobStorage:           jobStorage,
+		jobHeartbeatInterval: jobHeartbeatInterval,
+		jobTimeout:           jobTimeout,
 	}
 }
 
