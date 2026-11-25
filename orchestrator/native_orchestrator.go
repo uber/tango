@@ -238,9 +238,9 @@ func (b *nativeOrchestrator) GetTargetGraph(ctx context.Context, req entity.GetT
 
 // computeResult computes the target graph of the prepared workspace. When the
 // repository enables ITG and the request has no per-request exclusions, it
-// first tries the incremental path and falls back to the graph runner on any
-// failure. It also returns the ITG provider, or nil when ITG does not apply,
-// so the caller can seed the ITG cache.
+// first tries the incremental path and falls back to the graph runner when that
+// does not apply. It also returns the ITG provider, or nil when ITG is not in
+// use, so the caller can seed the ITG cache.
 func (b *nativeOrchestrator) computeResult(
 	ctx context.Context,
 	logger *zap.Logger,
@@ -273,44 +273,11 @@ func (b *nativeOrchestrator) computeResult(
 
 	var itgProvider itg.Provider
 	if useITG {
-		provider, err := itg.New(itg.Params{
-			Git:              gitModule,
-			Bazel:            bazelClient,
-			Cache:            cache.NewStorageCache(b.storage),
-			CacheNamespace:   repoCfg.RepositoryID,
-			WorkspacePath:    ws.Path(),
-			RepositoryConfig: repoCfg,
-		})
-		if err != nil {
-			// ITG is an optimization: never fail the request because of it.
-			logger.Warn("GetTargetGraph: Failed to create ITG provider, using full query", zap.Error(err))
-		} else {
-			itgProvider = provider
-		}
+		itgProvider = b.newITGProvider(logger, ws.Path(), gitModule, bazelClient, repoCfg)
 	}
-
 	if itgProvider != nil {
-		e.Counter(_opGetTargetGraph, _metricITGApplicable).Inc(1)
-		itgStart := time.Now()
-		g, err := itgProvider.GetGraph(ctx, itg.GetGraphRequest{BaseSha: build.BaseSha, Remote: build.Remote})
-		if ctx.Err() != nil {
-			return targethasher.Result{}, nil, ctx.Err()
-		}
-		// An error here only means the incremental path does not apply to this
-		// request; the duration is recorded either way, tagged by outcome.
-		outcome := metrics.ResultSuccess
-		if err != nil {
-			outcome = _resultFallback
-		}
-		e.Tagged(map[string]string{metrics.TagResult: outcome}).
-			DurationHistogram(_opGetTargetGraph, _metricITGComputeDuration, metrics.SlowDurationBuckets).
-			RecordDuration(time.Since(itgStart))
-		if err == nil {
-			logger.Info("GetTargetGraph: Served by incremental target graph",
-				zap.Int("target_count", len(g.OptimizedTargets)),
-				zap.Duration("duration", time.Since(itgStart)),
-			)
-			return itg.OptimizedGraphToResult(g), itgProvider, nil
+		if result, ok := b.tryITG(ctx, logger, e, itgProvider, build); ok {
+			return result, itgProvider, nil
 		}
 	}
 
@@ -338,6 +305,63 @@ func (b *nativeOrchestrator) computeResult(
 		return targethasher.Result{}, nil, fmt.Errorf("compute target graph: %w", err)
 	}
 	return result, itgProvider, nil
+}
+
+// newITGProvider returns an ITG provider for the workspace, or nil when it
+// cannot be built. ITG is an optimization, so that is never a request failure.
+func (b *nativeOrchestrator) newITGProvider(
+	logger *zap.Logger,
+	workspacePath string,
+	gitModule git.Interface,
+	bazelClient bazel.Bazel,
+	repoCfg config.RepositoryConfig,
+) itg.Provider {
+	provider, err := itg.New(itg.Params{
+		Git:              gitModule,
+		Bazel:            bazelClient,
+		Cache:            cache.NewStorageCache(b.storage),
+		CacheNamespace:   repoCfg.RepositoryID,
+		WorkspacePath:    workspacePath,
+		RepositoryConfig: repoCfg,
+	})
+	if err != nil {
+		logger.Warn("GetTargetGraph: Failed to create ITG provider, using full query", zap.Error(err))
+		return nil
+	}
+	return provider
+}
+
+// tryITG attempts the incremental path and records its outcome. It reports
+// false when the incremental path does not apply to this request, which is an
+// expected outcome (for example a cold cache), not an error.
+func (b *nativeOrchestrator) tryITG(
+	ctx context.Context,
+	logger *zap.Logger,
+	e *metrics.Emitter,
+	provider itg.Provider,
+	build entity.BuildDescription,
+) (targethasher.Result, bool) {
+	e.Counter(_opGetTargetGraph, _metricITGApplicable).Inc(1)
+	start := time.Now()
+	result, err := provider.GetResult(ctx, itg.GetResultRequest{BaseSha: build.BaseSha, Remote: build.Remote})
+	elapsed := time.Since(start)
+
+	outcome := metrics.ResultSuccess
+	if err != nil {
+		outcome = _resultFallback
+	}
+	e.Tagged(map[string]string{metrics.TagResult: outcome}).
+		DurationHistogram(_opGetTargetGraph, _metricITGComputeDuration, metrics.SlowDurationBuckets).
+		RecordDuration(elapsed)
+	if err != nil {
+		return targethasher.Result{}, false
+	}
+
+	logger.Info("GetTargetGraph: Served by incremental target graph",
+		zap.Int("target_count", len(result.Targets)),
+		zap.Duration("duration", elapsed),
+	)
+	return result, true
 }
 
 // seedITGCache stores result as the ITG base graph for the build's base SHA in
