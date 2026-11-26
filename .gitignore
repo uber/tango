@@ -1,6 +1,5 @@
 *.gitmodules
 /bazel-*
-MODULE.bazel.lock
 /pkg/**
 .vscode/
 .idea/
