@@ -15,6 +15,7 @@
 package targethasher
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"regexp"
@@ -361,6 +362,59 @@ func Test_RemoveAttrs(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, external.External)
 	assert.Equal(t, []byte{0x6c, 0xeb, 0xec, 0x11, 0x74, 0x82, 0xae, 0x48, 0x6c, 0xff, 0x4f, 0x3c, 0xb1, 0xd2, 0xcf, 0x79, 0xf0, 0xe0, 0xee, 0xfc}, external.HashWithoutDeps)
+}
+
+func TestToTargetIgnoresNpmAuthWhenContentPinned(t *testing.T) {
+	npmImport := func(pin *buildpb.Attribute, auth string) *buildpb.Target {
+		attrs := []*buildpb.Attribute{
+			{Name: StringPtr("package"), StringValue: StringPtr("ansi-align")},
+			{Name: StringPtr("npm_auth"), StringValue: StringPtr(auth)},
+			{Name: StringPtr("npm_auth_basic"), StringValue: StringPtr(auth)},
+			{Name: StringPtr("npm_auth_username"), StringValue: StringPtr(auth)},
+			{Name: StringPtr("npm_auth_password"), StringValue: StringPtr(auth)},
+		}
+		if pin != nil {
+			attrs = append(attrs, pin)
+		}
+		return &buildpb.Target{
+			Type: buildpb.Target_RULE.Enum(),
+			Rule: &buildpb.Rule{
+				Name:      StringPtr("//external:npm__ansi-align__3.0.1"),
+				RuleClass: StringPtr("npm_import_rule"),
+				Attribute: attrs,
+			},
+		}
+	}
+
+	tests := []struct {
+		name      string
+		pin       *buildpb.Attribute
+		wantEqual bool
+	}{
+		{
+			name:      "integrity",
+			pin:       &buildpb.Attribute{Name: StringPtr("integrity"), StringValue: StringPtr("sha512-abc")},
+			wantEqual: true,
+		},
+		{
+			name:      "sha256",
+			pin:       &buildpb.Attribute{Name: StringPtr("sha256"), StringValue: StringPtr("abc")},
+			wantEqual: true,
+		},
+		{
+			name:      "unpinned",
+			wantEqual: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, err := toTarget(npmImport(tt.pin, "token-a"))
+			require.NoError(t, err)
+			b, err := toTarget(npmImport(tt.pin, "token-b"))
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantEqual, bytes.Equal(a.HashWithoutDeps, b.HashWithoutDeps))
+		})
+	}
 }
 
 func validateResultIsStable(t *testing.T, baseResult, result Result) {
