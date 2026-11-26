@@ -3,6 +3,9 @@ package mapper
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
+	"slices"
+	"strconv"
 
 	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/uber/tango/core/targethasher"
@@ -69,8 +72,11 @@ func ResultToTargetGraph(ctx context.Context, result targethasher.Result) ([]ent
 		if len(t.Attributes) > 0 {
 			attrs := make(map[int32]int32, len(t.Attributes))
 			for _, attr := range t.Attributes {
-				if attr.GetType() == buildpb.Attribute_STRING && attr.Name != nil && attr.StringValue != nil {
-					attrs[attrNameMapper.ID(*attr.Name)] = attrStrValMapper.ID(*attr.StringValue)
+				if attr.Name == nil {
+					continue
+				}
+				if val, ok := attributeValue(attr); ok {
+					attrs[attrNameMapper.ID(*attr.Name)] = attrStrValMapper.ID(val)
 				}
 			}
 			if len(attrs) > 0 {
@@ -142,4 +148,51 @@ func ResultToGraphChunks(ctx context.Context, result targethasher.Result, maxByt
 	}
 
 	return chunks, nil
+}
+
+// attributeValue returns the canonical string form of a Bazel attribute's
+// value for STRING, BOOLEAN, INTEGER, and STRING_LIST typed attributes.
+// Other collection/dict/label types are not yet supported and are rejected
+// rather than stringified, since a naive string join is not safe for them
+// (ambiguous delimiters, unstable ordering).
+//
+// STRING_LIST values are sorted before encoding: Bazel query does not
+// guarantee list ordering is stable across runs when nothing semantically
+// changed, so treating order as significant would produce spurious "changed"
+// results. This matches core/targethasher/sourcehasher.go's encodeAttribute,
+// which sorts string_list_value for the same reason. The sorted list is
+// JSON-encoded (not delimiter-joined) so that elements containing arbitrary
+// characters can't collide with a different list's encoding.
+func attributeValue(attr *buildpb.Attribute) (string, bool) {
+	switch attr.GetType() {
+	case buildpb.Attribute_STRING:
+		if attr.StringValue == nil {
+			return "", false
+		}
+		return *attr.StringValue, true
+	case buildpb.Attribute_BOOLEAN:
+		if attr.BooleanValue == nil {
+			return "", false
+		}
+		return strconv.FormatBool(*attr.BooleanValue), true
+	case buildpb.Attribute_INTEGER:
+		if attr.IntValue == nil {
+			return "", false
+		}
+		return strconv.FormatInt(int64(*attr.IntValue), 10), true
+	case buildpb.Attribute_STRING_LIST:
+		vals := attr.GetStringListValue()
+		if len(vals) == 0 {
+			return "", false
+		}
+		sorted := slices.Clone(vals)
+		slices.Sort(sorted)
+		encoded, err := json.Marshal(sorted)
+		if err != nil {
+			return "", false
+		}
+		return string(encoded), true
+	default:
+		return "", false
+	}
 }

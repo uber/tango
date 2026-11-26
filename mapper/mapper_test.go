@@ -4,11 +4,19 @@ import (
 	"context"
 	"testing"
 
+	buildpb "github.com/bazelbuild/buildtools/build_proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/uber/tango/core/targethasher"
+	"github.com/uber/tango/entity"
 )
+
+func attrPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool     { return &b }
+func int32Ptr(i int32) *int32  { return &i }
+
+func discPtr(d buildpb.Attribute_Discriminator) *buildpb.Attribute_Discriminator { return &d }
 
 func TestResultToTargetGraph_EmptyResult(t *testing.T) {
 	t.Parallel()
@@ -113,4 +121,94 @@ func TestResultToGraphChunks(t *testing.T) {
 		}
 		assert.Equal(t, hashes, got)
 	})
+}
+
+func TestResultToTargetGraph_ScalarAttributes(t *testing.T) {
+	t.Parallel()
+
+	result := targethasher.Result{
+		TargetNames: []string{"//a:a"},
+		Targets: map[string]*targethasher.Target{
+			"//a:a": {
+				Attributes: []*buildpb.Attribute{
+					{Name: attrPtr("srcs"), Type: discPtr(buildpb.Attribute_STRING), StringValue: attrPtr("main.go")},
+					{Name: attrPtr("testonly"), Type: discPtr(buildpb.Attribute_BOOLEAN), BooleanValue: boolPtr(true)},
+					{Name: attrPtr("size"), Type: discPtr(buildpb.Attribute_INTEGER), IntValue: int32Ptr(42)},
+					{Name: attrPtr("tags"), Type: discPtr(buildpb.Attribute_STRING_LIST), StringListValue: []string{"b", "a"}},
+					// Unsupported type: dropped, not stringified (even though it
+					// happens to reuse the StringListValue field, its type is LABEL_LIST).
+					{Name: attrPtr("deps"), Type: discPtr(buildpb.Attribute_LABEL_LIST), StringListValue: []string{"//x:x"}},
+				},
+			},
+		},
+	}
+
+	targets, meta, err := ResultToTargetGraph(t.Context(), result)
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+
+	attrs := targets[0].Attributes
+	assert.Len(t, attrs, 4, "unsupported LABEL_LIST attribute should be dropped")
+
+	got := make(map[string]string, len(attrs))
+	for nameID, valID := range attrs {
+		got[meta.AttributeNameMapping[nameID]] = meta.AttributeStringValueMapping[valID]
+	}
+	assert.Equal(t, map[string]string{
+		"srcs":     "main.go",
+		"testonly": "true",
+		"size":     "42",
+		"tags":     `["a","b"]`,
+	}, got)
+}
+
+func TestResultToTargetGraph_StringListAttributeOrderInsensitive(t *testing.T) {
+	t.Parallel()
+
+	// Bazel query does not guarantee stable list ordering across runs when
+	// nothing semantically changed, so two snapshots differing only in
+	// order must intern to the same value (no spurious "changed" attribute).
+	before := targethasher.Result{
+		TargetNames: []string{"//a:a"},
+		Targets: map[string]*targethasher.Target{
+			"//a:a": {
+				Attributes: []*buildpb.Attribute{
+					{Name: attrPtr("tags"), Type: discPtr(buildpb.Attribute_STRING_LIST), StringListValue: []string{"a", "b", "c"}},
+				},
+			},
+		},
+	}
+	after := targethasher.Result{
+		TargetNames: []string{"//a:a"},
+		Targets: map[string]*targethasher.Target{
+			"//a:a": {
+				Attributes: []*buildpb.Attribute{
+					{Name: attrPtr("tags"), Type: discPtr(buildpb.Attribute_STRING_LIST), StringListValue: []string{"c", "a", "b"}},
+				},
+			},
+		},
+	}
+
+	beforeTargets, beforeMeta, err := ResultToTargetGraph(t.Context(), before)
+	require.NoError(t, err)
+	afterTargets, afterMeta, err := ResultToTargetGraph(t.Context(), after)
+	require.NoError(t, err)
+
+	beforeAttrs := attributeValuesByName(beforeTargets[0].Attributes, beforeMeta)
+	afterAttrs := attributeValuesByName(afterTargets[0].Attributes, afterMeta)
+	require.Contains(t, beforeAttrs, "tags")
+	require.Contains(t, afterAttrs, "tags")
+
+	beforeVal := beforeMeta.AttributeStringValueMapping[beforeAttrs["tags"]]
+	afterVal := afterMeta.AttributeStringValueMapping[afterAttrs["tags"]]
+	assert.Equal(t, beforeVal, afterVal)
+}
+
+// attributeValuesByName maps attribute name to its interned value ID.
+func attributeValuesByName(attrs map[int32]int32, meta *entity.Metadata) map[string]int32 {
+	byName := make(map[string]int32, len(attrs))
+	for nameID, valID := range attrs {
+		byName[meta.AttributeNameMapping[nameID]] = valID
+	}
+	return byName
 }
