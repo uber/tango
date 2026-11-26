@@ -82,7 +82,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/bazel-disk-cache
-          key: bazel-disk-integration-${{ hashFiles('MODULE.bazel', 'go.mod', '.bazelrc') }}
+          key: bazel-disk-integration-${{ hashFiles('.bazelrc', '.bazelversion', 'go.mod', 'MODULE.bazel', 'MODULE.bazel.lock') }}
           restore-keys: |
             bazel-disk-integration-
 

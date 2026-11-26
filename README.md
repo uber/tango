@@ -4,7 +4,7 @@ Tango OSS (Target Analyzer in Go) provides APIs for fetching and comparing targe
 ## Quick Start
 
 ### Prerequisites
-- Bazel 8.4.1 (automatically managed via `tools/bazel`)
+- Bazel 8.9.0 (automatically managed via `tools/bazel`)
 - protoc (for proto generation only)
 - direnv (optional, for loading `.envrc`)
 
